@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>PicoBot Web Controller</title>
+  <style>
+    :root {
+      --bg: #121212;
+      --fg: #e0e0e0;
+      --muted: #2d2d2d;
+      --muted2: #333;
+      --accent: #1976D2;
+      --ok: #2e7d32;
+      --err: #c62828;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--fg);
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    #status {
+      position: sticky;
+      top: 0;
+      align-self: stretch;
+      margin: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-weight: bold;
+      text-align: left;
+    }
+
+    .connected {
+      background-color: var(--ok);
+      color: #fff;
+    }
+
+    .disconnected {
+      background-color: var(--err);
+      color: #fff;
+    }
+
+    #macro-bar {
+      margin: 2px 10px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid #555;
+      background: var(--muted);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    #tab-bar {
+      margin: 2px 10px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .tab {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid #555;
+      background: var(--muted);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      background: var(--accent);
+    }
+
+    #layout {
+      display: flex;
+      gap: 16px;
+      padding: 16px;
+      width: 100%;
+      max-width: 980px;
+      box-sizing: border-box;
+    }
+
+    #left-zone {
+      display: none;
+    }
+
+    #right-zone {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(80px, 1fr));
+      gap: 15px;
+      justify-items: center;
+      align-items: center;
+      padding: 10px 0;
+    }
+
+    /* Virtual thumbstick */
+    #stick-zone {
+      position: relative;
+      width: 210px;
+      height: 210px;
+      touch-action: none;
+    }
+
+    #stick-base {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 180px;
+      height: 180px;
+      margin-left: -90px;
+      margin-top: -90px;
+      border-radius: 50%;
+      background: var(--muted2);
+      border: 2px solid #555;
+      box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.6);
+    }
+
+    #stick-handle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 90px;
+      height: 90px;
+      margin-left: -45px;
+      margin-top: -45px;
+      border-radius: 50%;
+      background: #4a4a4a;
+      border: 2px solid #666;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+      transform: translate3d(0, 0, 0);
+      transition: transform 0.02s linear;
+    }
+
+    .control-button {
+      width: 80px;
+      height: 80px;
+      border: 2px solid #555;
+      border-radius: 12px;
+      background-color: var(--muted2);
+      color: #fff;
+      font-size: 24px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background-color 0.08s ease, transform 0.08s ease;
+    }
+
+    .control-button:active,
+    .control-button.active {
+      background-color: #5e5e5e;
+      transform: scale(0.98);
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      padding: 0 20px 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    /* Bottom controls */
+    #bottom-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 16px;
+      margin-top: 16px;
+      width: 100%;
+      max-width: 980px;
+      box-sizing: border-box;
+    }
+
+    #bottom-left {
+      display: flex;
+      align-items: center;
+    }
+
+    #buffs-left {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    /* D-pad layout for keyboard mode (Xbox-like cross) */
+    #dpad {
+      position: relative;
+      width: 220px;
+      height: 220px;
+    }
+
+    #dpad-hub {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 70px;
+      height: 70px;
+      margin-left: -35px;
+      margin-top: -35px;
+      border-radius: 50%;
+      background: #3b3b3b;
+      border: 2px solid #555;
+      box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.6);
+    }
+
+    #dpad .dpad-btn.control-button {
+      width: 84px;
+      height: 84px;
+      border-radius: 18px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    }
+
+    #dpad-up {
+      position: absolute;
+      left: 50%;
+      top: 10px;
+      transform: translateX(-50%);
+    }
+
+    #dpad-down {
+      position: absolute;
+      left: 50%;
+      bottom: 10px;
+      transform: translateX(-50%);
+    }
+
+    #dpad-left {
+      position: absolute;
+      top: 50%;
+      left: 10px;
+      transform: translateY(-50%);
+    }
+
+    #dpad-right {
+      position: absolute;
+      top: 50%;
+      right: 10px;
+      transform: translateY(-50%);
+    }
+
+    #bottom-right {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    #mode-toggle {
+      align-self: flex-end;
+    }
+
+    #bottom-right .button-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(90px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    #bottom-bar .control-button {
+      height: 64px;
+      min-width: 90px;
+    }
+
+    #bottom-bar .space {
+      min-width: 90px;
+      width: auto;
+    }
+
+    /* Full QWERTY keyboard layout in bottom bar */
+    #qwerty-grid {
+      display: none;
+      width: 100%;
+      padding: 8px 6px;
+      box-sizing: border-box;
+    }
+
+    #qwerty-grid .kb-row {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin: 4px 0;
+    }
+
+    #qwerty-grid .control-button {
+      min-width: 56px;
+      height: 56px;
+      font-size: 18px;
+    }
+
+    #qwerty-grid .wide {
+      min-width: 90px;
+      grid-column: span 2;
+    }
+
+    #qwerty-grid .spacebar {
+      min-width: 220px;
+    }
+
+    /* Responsive tweaks for small phones */
+    @media (max-width: 600px) {
+      .control-button {
+        width: 64px;
+        height: 64px;
+        font-size: 20px;
+      }
+
+      #left-zone {
+        flex: 0 0 230px;
+      }
+
+      #dpad {
+        width: 180px;
+        height: 180px;
+      }
+
+      #dpad .dpad-btn.control-button {
+        width: 68px;
+        height: 68px;
+        border-radius: 14px;
+      }
+
+      #dpad-up {
+        top: 8px;
+      }
+
+      #dpad-down {
+        bottom: 8px;
+      }
+
+      #dpad-left {
+        left: 8px;
+      }
+
+      #dpad-right {
+        right: 8px;
+      }
+
+      #stick-zone {
+        width: 180px;
+        height: 180px;
+      }
+
+      #stick-base {
+        width: 160px;
+        height: 160px;
+        margin-left: -80px;
+        margin-top: -80px;
+      }
+
+      #stick-handle {
+        width: 76px;
+        height: 76px;
+        margin-left: -38px;
+        margin-top: -38px;
+      }
+
+      #right-zone {
+        grid-template-columns: repeat(3, minmax(64px, 1fr));
+        gap: 10px;
+      }
+
+      #bottom-bar .control-button {
+        height: 56px;
+        min-width: 80px;
+      }
+
+      #bottom-right {
+        gap: 8px;
+      }
+
+      #qwerty-grid {
+        padding: 4px 2px;
+      }
+
+      #qwerty-grid .kb-row {
+        gap: 2px;
+        margin: 2px 0;
+      }
+
+      #qwerty-grid .control-button {
+        min-width: 30px;
+        height: 36px;
+        font-size: 12px;
+      }
+
+      #qwerty-grid .wide {
+        min-width: 45px;
+      }
+
+      #qwerty-grid .spacebar {
+        min-width: 90px;
+      }
+    }
+
+    #full-kb {
+      display: none;
+      margin: 10px 0 20px;
+      padding: 10px;
+      border: 1px dashed #555;
+      border-radius: 8px;
+      width: calc(100% - 40px);
+      max-width: 980px;
+    }
+
+    #full-kb h3 {
+      margin: 8px 0 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="status" class="disconnected">Connecting...</div>
+
+  <div id="macro-bar">
+    <button id="macro-start" class="pill">Start Macro</button>
+    <button id="macro-stop" class="pill">Stop Macro</button>
+  </div>
+
+  <div id="tab-bar">
+    <button id="tab-simple-kb" class="tab active">Simple KB</button>
+    <button id="tab-full-kb" class="tab">Full KB</button>
+    <button id="tab-mouse" class="tab">Mouse</button>
+    <button id="tab-buffs" class="tab">Buffs</button>
+  </div>
+
+  <div id="bottom-bar">
+    <div id="bottom-left">
+      <div id="dpad">
+        <div id="dpad-hub"></div>
+        <div class="dpad-btn control-button" id="dpad-up" data-type="key" data-key="up">↑</div>
+        <div class="dpad-btn control-button" id="dpad-left" data-type="key" data-key="left">←</div>
+        <div class="dpad-btn control-button" id="dpad-down" data-type="key" data-key="down">↓</div>
+        <div class="dpad-btn control-button" id="dpad-right" data-type="key" data-key="right">→</div>
+      </div>
+      <div id="stick-zone" style="display:none">
+        <div id="stick-base"></div>
+        <div id="stick-handle"></div>
+      </div>
+      <div id="buffs-left" style="display:none">
+        <div class="control-button" data-type="key" data-key="1">1</div>
+        <div class="control-button" data-type="key" data-key="2">2</div>
+        <div class="control-button" data-type="key" data-key="3">3</div>
+        <div class="control-button" data-type="key" data-key="4">4</div>
+        <div class="control-button" data-type="key" data-key="5">5</div>
+        <div class="control-button" data-type="key" data-key="6">6</div>
+      </div>
+    </div>
+    <div id="bottom-right">
+      <div class="button-grid" id="kb-grid">
+        <div class="control-button" data-type="key" data-key="esc">ESC</div>
+        <div class="control-button" data-type="key" data-key="1">1</div>
+        <div class="control-button" data-type="key" data-key="e">E</div>
+        <div class="control-button" data-type="key" data-key="i">I</div>
+        <div class="control-button" data-type="key" data-key="alt">ALT</div>
+        <div class="control-button" data-type="key" data-key="space">SPACE</div>
+      </div>
+      <div class="button-grid" id="mouse-grid" style="display:none">
+        <div class="control-button" data-type="mouse" data-key="left">LMB</div>
+        <div class="control-button" data-type="mouse" data-key="right">RMB</div>
+      </div>
+      <div class="button-grid" id="buff-grid" style="display:none">
+        <div class="control-button" data-type="key" data-key="-">-</div>
+        <div class="control-button" data-type="key" data-key="=">=</div>
+        <div class="control-button" data-type="key" data-key="[">[</div>
+        <div class="control-button" data-type="key" data-key="]">]</div>
+        <div class="control-button wide" data-type="key" data-key="enter">ENTER</div>
+        <div class="control-button" data-type="key" data-key="\">\\</div>
+      </div>
+    </div>
+    <!-- Full QWERTY keyboard, spans full width when active -->
+    <div id="qwerty-grid">
+      <div class="kb-row" id="row-0">
+        <div class="control-button" data-type="key" data-key="1">1</div>
+        <div class="control-button" data-type="key" data-key="2">2</div>
+        <div class="control-button" data-type="key" data-key="3">3</div>
+        <div class="control-button" data-type="key" data-key="4">4</div>
+        <div class="control-button" data-type="key" data-key="5">5</div>
+        <div class="control-button" data-type="key" data-key="6">6</div>
+        <div class="control-button" data-type="key" data-key="7">7</div>
+        <div class="control-button" data-type="key" data-key="8">8</div>
+        <div class="control-button" data-type="key" data-key="9">9</div>
+        <div class="control-button" data-type="key" data-key="0">0</div>
+      </div>
+      <div class="kb-row" id="row-1">
+        <div class="control-button" data-type="key" data-key="q">Q</div>
+        <div class="control-button" data-type="key" data-key="w">W</div>
+        <div class="control-button" data-type="key" data-key="e">E</div>
+        <div class="control-button" data-type="key" data-key="r">R</div>
+        <div class="control-button" data-type="key" data-key="t">T</div>
+        <div class="control-button" data-type="key" data-key="y">Y</div>
+        <div class="control-button" data-type="key" data-key="u">U</div>
+        <div class="control-button" data-type="key" data-key="i">I</div>
+        <div class="control-button" data-type="key" data-key="o">O</div>
+        <div class="control-button" data-type="key" data-key="p">P</div>
+      </div>
+      <div class="kb-row" id="row-2">
+        <div class="control-button" data-type="key" data-key="esc">ESC</div>
+        <div class="control-button" data-type="key" data-key="a">A</div>
+        <div class="control-button" data-type="key" data-key="s">S</div>
+        <div class="control-button" data-type="key" data-key="d">D</div>
+        <div class="control-button" data-type="key" data-key="f">F</div>
+        <div class="control-button" data-type="key" data-key="g">G</div>
+        <div class="control-button" data-type="key" data-key="h">H</div>
+        <div class="control-button" data-type="key" data-key="j">J</div>
+        <div class="control-button" data-type="key" data-key="k">K</div>
+        <div class="control-button" data-type="key" data-key="l">L</div>
+        <div class="control-button wide" data-type="key" data-key="backspace">⌫</div>
+      </div>
+      <div class="kb-row" id="row-3">
+        <div class="control-button" data-type="key" data-key="tab">TAB</div>
+        <div class="control-button" data-type="key" data-key="z">Z</div>
+        <div class="control-button" data-type="key" data-key="x">X</div>
+        <div class="control-button" data-type="key" data-key="c">C</div>
+        <div class="control-button" data-type="key" data-key="v">V</div>
+        <div class="control-button" data-type="key" data-key="b">B</div>
+        <div class="control-button" data-type="key" data-key="n">N</div>
+        <div class="control-button" data-type="key" data-key="m">M</div>
+        <div class="control-button wide" data-type="key" data-key="enter">ENTER</div>
+      </div>
+      <div class="kb-row" id="row-4">
+        <div class="control-button wide" data-type="key" data-key="shift">SHIFT</div>
+        <div class="control-button" data-type="key" data-key="ctrl">CTRL</div>
+        <div class="control-button" data-type="key" data-key="alt">ALT</div>
+        <div class="control-button spacebar control-button" data-type="key" data-key="space">SPACE</div>
+        <div class="control-button wide" data-type="key" data-key="shift">SHIFT</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const WS_PORT = REPLACE_WS_PORT; // server replaces this token
+    const WS_URL = `ws://${location.hostname}:${WS_PORT}`;
+
+    const statusDiv = document.getElementById('status');
+    let socket = null;
+
+    function setStatus(kind, text) {
+      statusDiv.className = kind; statusDiv.textContent = text;
+    }
+
+    function connect() {
+      try {
+        socket = new WebSocket(WS_URL);
+        socket.onopen = () => setStatus('connected', 'Connected');
+        socket.onclose = () => { setStatus('disconnected', 'Disconnected'); setTimeout(connect, 2000); };
+        socket.onerror = () => { setStatus('disconnected', 'Error'); try { socket.close(); } catch (e) { } };
+      } catch (e) { setStatus('disconnected', 'Connect error'); }
+    }
+
+    function send(msg) {
+      if (socket && socket.readyState === 1) { socket.send(msg); }
+    }
+
+    // Macro controls
+    document.getElementById('macro-start').onclick = () => send('macro|start');
+    document.getElementById('macro-stop').onclick = () => send('macro|stop');
+
+    // Input helpers
+    function down(type, key) {
+      if (type === 'mouse') send(`mouse|down|${key}`); else send(`key|down|${key}`);
+    }
+    function up(type, key) {
+      if (type === 'mouse') send(`mouse|up|${key}`); else send(`key|up|${key}`);
+    }
+
+    const active = new Set();
+    let mouseMode = false; // false = keyboard (D-pad), true = mouse (thumbstick)
+    function bindControl(el) {
+      const type = (el.dataset.type || 'key');
+      const key = el.dataset.key;
+      const id = `${type}:${key}`;
+      const press = (e) => { e.preventDefault(); if (!active.has(id)) { active.add(id); el.classList.add('active'); down(type, key); if (key === 'shift') updateKeyboardDisplay(); } };
+      const release = (e) => { e.preventDefault(); if (active.has(id)) { active.delete(id); el.classList.remove('active'); up(type, key); if (key === 'shift') updateKeyboardDisplay(); } };
+      el.addEventListener('mousedown', press);
+      el.addEventListener('touchstart', press, { passive: false });
+      el.addEventListener('mouseup', release);
+      el.addEventListener('mouseleave', release);
+      el.addEventListener('touchend', release);
+      el.addEventListener('touchcancel', release);
+      el.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
+    function updateKeyboardDisplay() {
+      const isShift = active.has('key:shift');
+      const keyButtons = document.querySelectorAll('#qwerty-grid .control-button[data-type="key"]');
+      keyButtons.forEach(btn => {
+        const key = btn.dataset.key;
+        if (/^[a-z]$/.test(key)) {
+          btn.textContent = isShift ? key.toUpperCase() : key.toLowerCase();
+        } else if (/^[0-9]$/.test(key)) {
+          const symbols = { '1': '!', '2': '@', '3': '#', '4': '$', '5': '%', '6': '^', '7': '&', '8': '*', '9': '(', '0': ')' };
+          btn.textContent = isShift ? symbols[key] : key;
+        }
+      });
+    }
+
+    // Release all keys on page blur
+    window.addEventListener('blur', () => {
+      for (const id of Array.from(active)) {
+        const [type, key] = id.split(':');
+        up(type, key);
+        active.delete(id);
+      }
+      document.querySelectorAll('.control-button.active').forEach(b => b.classList.remove('active'));
+      updateKeyboardDisplay();
+    });
+
+    // Thumbstick helpers
+    function holdKey(key) {
+      const id = `key:${key}`;
+      if (!active.has(id)) { active.add(id); down('key', key); }
+    }
+    function unholdKey(key) {
+      const id = `key:${key}`;
+      if (active.has(id)) { active.delete(id); up('key', key); }
+    }
+
+    (function initThumbstick() {
+      const zone = document.getElementById('stick-zone');
+      if (!zone) return;
+      const base = document.getElementById('stick-base');
+      const handle = document.getElementById('stick-handle');
+      let tracking = false;
+      let pid = null;
+      const stickHeld = new Set(); // currently held arrow keys from stick
+      let lastMoveSent = 0;
+
+      function setHandle(dx, dy) {
+        handle.style.transform = `translate(${dx}px, ${dy}px)`;
+      }
+
+      function releaseAll() {
+        if (stickHeld.size) {
+          for (const k of Array.from(stickHeld)) {
+            unholdKey(k);
+            stickHeld.delete(k);
+          }
+        }
+        setHandle(0, 0);
+      }
+
+      function updateFromPoint(clientX, clientY) {
+        const rect = base.getBoundingClientRect();
+        const hrect = handle.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        let dx = clientX - cx;
+        let dy = clientY - cy;
+        // Clamp within base radius minus handle radius
+        const maxDist = (rect.width / 2) - (hrect.width / 2) - 2;
+        const dist = Math.hypot(dx, dy);
+        if (dist > maxDist && dist > 0) {
+          const s = maxDist / dist;
+          dx *= s; dy *= s;
+        }
+        setHandle(dx, dy);
+
+        if (!mouseMode) {
+          // Keyboard mode: map to arrow key holds
+          const dead = Math.max(8, rect.width * 0.04);
+          const next = new Set();
+          if (dx < -dead) next.add('left');
+          if (dx > dead) next.add('right');
+          if (dy < -dead) next.add('up');
+          if (dy > dead) next.add('down');
+          for (const k of next) { if (!stickHeld.has(k)) { holdKey(k); stickHeld.add(k); } }
+          for (const k of Array.from(stickHeld)) { if (!next.has(k)) { unholdKey(k); stickHeld.delete(k); } }
+        } else {
+          // Mouse mode: send relative movement proportional to displacement
+          const now = performance.now();
+          if (now - lastMoveSent > 12) { // ~83 Hz max
+            const scale = 0.25; // sensitivity
+            const mx = Math.round(dx * scale);
+            const my = Math.round(dy * scale);
+            if (mx !== 0 || my !== 0) send(`hid|move|${mx}|${my}`);
+            lastMoveSent = now;
+          }
+        }
+      }
+
+      function onPointerDown(e) {
+        try { zone.setPointerCapture(e.pointerId); } catch (_) { }
+        tracking = true; pid = e.pointerId;
+        updateFromPoint(e.clientX, e.clientY);
+        e.preventDefault();
+      }
+      function onPointerMove(e) {
+        if (!tracking || e.pointerId !== pid) return;
+        updateFromPoint(e.clientX, e.clientY);
+        e.preventDefault();
+      }
+      function onPointerUp(e) {
+        if (e.pointerId !== pid) return;
+        tracking = false; pid = null;
+        try { zone.releasePointerCapture(e.pointerId); } catch (_) { }
+        releaseAll();
+        e.preventDefault();
+      }
+
+      zone.addEventListener('pointerdown', onPointerDown, { passive: false });
+      zone.addEventListener('pointermove', onPointerMove, { passive: false });
+      zone.addEventListener('pointerup', onPointerUp, { passive: false });
+      zone.addEventListener('pointercancel', onPointerUp, { passive: false });
+      zone.addEventListener('contextmenu', (e) => e.preventDefault());
+    })();
+
+    // Tabs for layout modes
+    (function initTabs() {
+      function setMode(mode) {
+        // Remove active from all tabs
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(`tab-${mode}`).classList.add('active');
+
+        // Set displays
+        const dpad = document.getElementById('dpad');
+        const stick = document.getElementById('stick-zone');
+        const buffsLeft = document.getElementById('buffs-left');
+        const kbGrid = document.getElementById('kb-grid');
+        const mouseGrid = document.getElementById('mouse-grid');
+        const buffGrid = document.getElementById('buff-grid');
+        const qwerty = document.getElementById('qwerty-grid');
+
+        if (mode === 'simple-kb') {
+          dpad.style.display = 'grid';
+          stick.style.display = 'none';
+          buffsLeft.style.display = 'none';
+          kbGrid.style.display = 'grid';
+          mouseGrid.style.display = 'none';
+          buffGrid.style.display = 'none';
+          qwerty.style.display = 'none';
+          mouseMode = false;
+        } else if (mode === 'full-kb') {
+          dpad.style.display = 'none';
+          stick.style.display = 'none';
+          buffsLeft.style.display = 'none';
+          kbGrid.style.display = 'none';
+          mouseGrid.style.display = 'none';
+          buffGrid.style.display = 'none';
+          qwerty.style.display = 'block';
+          mouseMode = false;
+        } else if (mode === 'mouse') {
+          dpad.style.display = 'none';
+          stick.style.display = 'block';
+          buffsLeft.style.display = 'none';
+          kbGrid.style.display = 'none';
+          mouseGrid.style.display = 'grid';
+          buffGrid.style.display = 'none';
+          qwerty.style.display = 'none';
+          mouseMode = true;
+        } else if (mode === 'buffs') {
+          dpad.style.display = 'none';
+          stick.style.display = 'none';
+          buffsLeft.style.display = 'grid';
+          kbGrid.style.display = 'none';
+          mouseGrid.style.display = 'none';
+          buffGrid.style.display = 'grid';
+          buffGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';
+          qwerty.style.display = 'none';
+          mouseMode = false;
+        }
+
+        // Release any held keys when switching
+        for (const id of Array.from(active)) {
+          const [type, key] = id.split(':');
+          up(type, key);
+          active.delete(id);
+        }
+        // Reset thumbstick handle position
+        try { document.getElementById('stick-handle').style.transform = 'translate(0px, 0px)'; } catch (_) { }
+        updateKeyboardDisplay();
+      }
+
+      document.getElementById('tab-simple-kb').addEventListener('click', () => setMode('simple-kb'));
+      document.getElementById('tab-full-kb').addEventListener('click', () => setMode('full-kb'));
+      document.getElementById('tab-mouse').addEventListener('click', () => setMode('mouse'));
+      document.getElementById('tab-buffs').addEventListener('click', () => setMode('buffs'));
+
+      // Initialize to simple-kb
+      setMode('simple-kb');
+    })();
+    // Initialize
+    connect();
+    document.querySelectorAll('.control-button[data-key]').forEach(bindControl);
+    updateKeyboardDisplay();
+  </script>
+</body>
+
+</html>
