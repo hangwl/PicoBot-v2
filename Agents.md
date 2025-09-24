@@ -47,3 +47,8 @@ This plan replaces the monolithic `picobot.py` with well-scoped modules, elimina
 - Refactored `RemoteControlServer` to delegate serial I/O to the manager and remove duplicate ACK bookkeeping.
 - Introduced `AsyncWebsocketBridge` to own the asyncio loop lifecycle and keep Tk interactions on the main thread.
 - Added `tests/test_serial_manager.py`; `python -m unittest tests.test_serial_manager` passes.
+
+### Step 3 - Macro playback consolidation mini plan (completed)
+- Extracted the legacy `MacroController` into `picobot/playback/macro_controller.py` with reusable playlist and parsing helpers.
+- Trimmed duplicate playback helpers from the Tk GUI so it now delegates to the shared controller.
+- Added `tests/test_macro_controller.py` to cover macro parsing, playlist ordering, and the interruptible sleep helper.
