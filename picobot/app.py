@@ -9,7 +9,6 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 import pygetwindow as gw
-import requests
 import serial
 import serial.tools.list_ports
 import asyncio
@@ -22,38 +21,8 @@ except Exception:
     websockets = None
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-CONFIG_FILE = "config.json"
-
-
-class TelegramHandler:
-    """Handles sending messages via Telegram API."""
-
-    def __init__(self, bot_token, chat_id):
-        """Initializes the Telegram handler with bot token and chat ID.
-
-        Args:
-            bot_token (str): The Telegram bot token for authentication.
-            chat_id (str): The chat ID where messages will be sent.
-        """
-        self.bot_token = bot_token
-        self.chat_id = chat_id
-
-    def send_message(self, text):
-        """Sends a message to the configured Telegram chat.
-
-        Args:
-            text (str): The message text to send.
-        """
-        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        params = {"chat_id": self.chat_id, "text": text}
-        try:
-            response = requests.post(url, params=params)
-            if response.status_code == 200:
-                logging.info("Telegram message sent successfully.")
-            else:
-                logging.error(f"Failed to send message: {response.text}")
-        except Exception as e:
-            logging.error(f"Error sending Telegram message: {e}")
+from .messaging import TelegramHandler
+from .settings import CONFIG_FILE, configure_logging
 
 
 class RemoteControlServer:
@@ -2189,7 +2158,14 @@ class MacroControllerApp:
             self.save_config()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Launch the PicoBot GUI application."""
+
+    configure_logging()
     root = tk.Tk()
     app = MacroControllerApp(root)
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
