@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import os
+import queue
 import random
 import threading
 import time
@@ -11,340 +13,283 @@ from tkinter.scrolledtext import ScrolledText
 import pygetwindow as gw
 import serial
 import serial.tools.list_ports
-import asyncio
-import queue
-from collections import deque
 
 try:
     import websockets
 except Exception:
     websockets = None
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .messaging import TelegramHandler
 from .settings import CONFIG_FILE, configure_logging
+from .transport import (
+    SerialManager,
+    discover_data_port,
+    finalize_handshake,
+    wait_for_ack,
+)
+
+
+class AsyncWebsocketBridge:
+    """Owns the asyncio loop for the remote WebSocket interface."""
+
+    def __init__(
+        self,
+        host,
+        port,
+        *,
+        message_handler,
+        on_port_bound=None,
+        on_client_connected=None,
+        on_client_disconnected=None,
+        on_error=None,
+        max_attempts=10,
+    ) -> None:
+        self.host = host
+        self.base_port = int(port)
+        self.message_handler = message_handler
+        self.on_port_bound = on_port_bound
+        self.on_client_connected = on_client_connected
+        self.on_client_disconnected = on_client_disconnected
+        self.on_error = on_error
+        self.max_attempts = max_attempts
+        self._thread = None
+        self._stop_event = threading.Event()
+        self._loop = None
+        self._server = None
+        self.port = int(port)
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"AsyncWebsocketBridge[{self.base_port}]",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        loop = self._loop
+        if loop and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(lambda: None)
+            except Exception:
+                pass
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+        self._thread = None
+        self._loop = None
+        self._server = None
+
+    def _run(self) -> None:
+        if websockets is None:
+            if self.on_error:
+                self.on_error(RuntimeError("websockets package is not available"))
+            return
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._start_server())
+            if self._server is None:
+                return
+            loop.run_until_complete(self._wait_for_stop())
+        except Exception as exc:
+            if self.on_error:
+                self.on_error(exc)
+        finally:
+            try:
+                if self._server:
+                    self._server.close()
+                    loop.run_until_complete(self._server.wait_closed())
+            except Exception:
+                pass
+            try:
+                if loop.is_running():
+                    loop.stop()
+            except Exception:
+                pass
+            loop.close()
+            self._loop = None
+            self._server = None
+
+    async def _start_server(self) -> None:
+        last_error = None
+        for offset in range(self.max_attempts):
+            port = self.base_port + offset
+            try:
+                self._server = await websockets.serve(
+                    self._handle_client,
+                    self.host,
+                    port,
+                    ping_interval=20,
+                    ping_timeout=20,
+                )
+                self.port = port
+                if self.on_port_bound:
+                    self.on_port_bound(port)
+                return
+            except OSError as exc:
+                last_error = exc
+                continue
+            except Exception as exc:
+                last_error = exc
+                continue
+        if self.on_error:
+            self.on_error(last_error or RuntimeError("Failed to bind WebSocket server"))
+
+    async def _wait_for_stop(self) -> None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._stop_event.wait)
+
+    async def _handle_client(self, websocket):
+        if self.on_client_connected:
+            try:
+                self.on_client_connected(websocket)
+            except Exception:
+                pass
+        try:
+            async for message in websocket:
+                if not self.message_handler:
+                    continue
+                try:
+                    await self.message_handler(websocket, message)
+                except Exception as exc:
+                    logging.getLogger(__name__).debug(
+                        "WS handler error: %s", exc, exc_info=True
+                    )
+        except (asyncio.CancelledError, websockets.exceptions.ConnectionClosedOK):
+            pass
+        except websockets.exceptions.ConnectionClosedError:
+            pass
+        finally:
+            if self.on_client_disconnected:
+                try:
+                    self.on_client_disconnected(websocket)
+                except Exception:
+                    pass
 
 
 class RemoteControlServer:
-    """Runs a WebSocket server in a background thread and relays commands to Pico."""
+    """Runs a WebSocket server in background threads and relays commands to Pico."""
 
     def __init__(self, app, serial_port_name, ws_port):
         self.app = app
         self.serial_port_name = serial_port_name
         self.ws_port = ws_port
-        self.thread = None
-        self.stop_event = threading.Event()
-        self.loop = None
-        self.server = None
-        self.serial = None
-        self.lock = threading.Lock()
-        self.reader_thread = None
-        self.writer_thread = None
+        self.serial_manager = SerialManager(serial_port_name)
         self.cmd_queue = queue.Queue()
-        self.ack_waiters = deque()
-        self.ack_lock = threading.Lock()
-        self.pico_ready_event = threading.Event()
-        self.last_ready_time = 0.0
+        self.stop_event = threading.Event()
+        self.writer_thread = None
+        self.bridge = None
         self.clients = set()
+        self.clients_lock = threading.Lock()
 
     def start(self):
-        if self.thread and self.thread.is_alive():
+        if self.writer_thread and self.writer_thread.is_alive():
             return
-        self.stop_event.clear()
-        self.thread = threading.Thread(target=self._run, daemon=True)
-        self.thread.start()
-
-    def stop(self):
         try:
-            self.stop_event.set()
-            if self.loop:
-                self.loop.call_soon_threadsafe(self._stop_async)
-            if self.thread:
-                self.thread.join(timeout=2.0)
-        finally:
-            self.thread = None
-            try:
-                if self.serial:
-                    self.serial.close()
-            except Exception:
-                pass
-
-    def _stop_async(self):
-        try:
-            if self.server:
-                self.server.close()
-        except Exception:
-            pass
-        try:
-            if self.loop and self.loop.is_running():
-                self.loop.stop()
-        except Exception:
-            pass
-
-    def _run(self):
-        try:
-            # Open persistent serial to Pico
-            self.serial = serial.Serial(
-                self.serial_port_name, 115200, timeout=0.5, write_timeout=0.5
-            )
-            try:
-                self.serial.dtr = False
-                time.sleep(0.05)
-                self.serial.dtr = True
-                self.serial.rts = False
-            except Exception:
-                pass
-            try:
-                self.serial.write(b"hello|handshake\n")
-                self.serial.flush()
-            except Exception:
-                pass
+            self.serial_manager.open()
         except Exception as e:
             logging.error(
-                f"Remote server failed to open serial on {self.serial_port_name}: {e}"
+                "Remote server failed to open serial on %s: %s",
+                self.serial_port_name,
+                e,
             )
             self.app.root.after(
                 0, lambda: self.app.remote_status_var.set("Remote: Serial error")
             )
             return
-
-        # Start a serial reader thread to surface Pico messages (ACK, READY, debug) to the GUI log
-        def _serial_reader():
-            while not self.stop_event.is_set():
-                try:
-                    line = (
-                        self.serial.readline().decode("utf-8", errors="ignore").strip()
-                    )
-                    if not line:
-                        continue
-                    if line == "ACK":
-                        with self.ack_lock:
-                            if self.ack_waiters:
-                                ev = self.ack_waiters.popleft()
-                                try:
-                                    ev.set()
-                                except Exception:
-                                    pass
-                        self.app.log_remote("RX: ACK")
-                        continue
-                    if line == "PICO_READY":
-                        self.last_ready_time = time.time()
-                        self.pico_ready_event.set()
-                        self.app.log_remote("RX: PICO_READY")
-                        continue
-                    self.app.log_remote(f"RX: {line}")
-                except Exception:
-                    break
-
-        self.reader_thread = threading.Thread(target=_serial_reader, daemon=True)
-        self.reader_thread.start()
-
-        # serialize writes and coordinate ACKs
-        def _writer():
-            while not self.stop_event.is_set():
-                try:
-                    cmd, need_ack, ev, timeout_s = self.cmd_queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                try:
-                    if need_ack and ev is not None:
-                        with self.ack_lock:
-                            self.ack_waiters.append(ev)
-                    with self.lock:
-                        self.serial.write(cmd.encode("utf-8"))
-                        self.serial.flush()
-                    self.app.log_remote(f"TX: {cmd.strip()}")
-                except Exception as e:
-                    self.app.log_remote(f"ERR: serial write {e}")
-                    # rollback waiter if appended
-                    if need_ack and ev is not None:
-                        with self.ack_lock:
-                            try:
-                                if self.ack_waiters and self.ack_waiters[-1] is ev:
-                                    self.ack_waiters.pop()
-                            except Exception:
-                                pass
-                    continue
-                if need_ack and ev is not None:
-                    ev.wait(timeout_s or 1.5)
-
-        self.writer_thread = threading.Thread(target=_writer, daemon=True)
+        self.serial_manager.register_line_callback(self._on_serial_line)
+        self.stop_event.clear()
+        self.cmd_queue = queue.Queue()
+        self.writer_thread = threading.Thread(target=self._writer_loop, daemon=True)
         self.writer_thread.start()
+        self.bridge = AsyncWebsocketBridge(
+            host="0.0.0.0",
+            port=self.ws_port,
+            message_handler=self._handle_ws_message,
+            on_port_bound=self._on_ws_port_bound,
+            on_client_connected=self._on_ws_client_connected,
+            on_client_disconnected=self._on_ws_client_disconnected,
+            on_error=self._on_ws_error,
+        )
+        self.bridge.start()
 
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+    def stop(self):
+        self.stop_event.set()
+        if self.bridge:
+            self.bridge.stop()
+        self.bridge = None
+        if self.writer_thread and self.writer_thread.is_alive():
+            self.writer_thread.join(timeout=1.5)
+        self.writer_thread = None
+        self.serial_manager.unregister_line_callback(self._on_serial_line)
+        self.serial_manager.close()
+        with self.clients_lock:
+            self.clients.clear()
 
-        async def ws_handler(websocket):
+    def _writer_loop(self):
+        while not self.stop_event.is_set():
             try:
-                self.clients.add(websocket)
-            except Exception:
-                pass
-            self.app.root.after(
-                0,
-                lambda: self.app.remote_status_var.set(
-                    f"Remote: Connected (ws://0.0.0.0:{self.ws_port})"
-                ),
-            )
+                cmd, wait_ack, response_queue, timeout_s = self.cmd_queue.get(
+                    timeout=0.1
+                )
+            except queue.Empty:
+                continue
+            result = False
             try:
-                peer = getattr(websocket, "remote_address", None)
-                self.app.log_remote(f"WS: client connected {peer}")
-            except Exception:
-                pass
-            try:
-                async for message in websocket:
-                    msg = (message or "").strip()
-                    if not msg:
-                        continue
-                    if msg.startswith("macro|"):
-                        action = msg.split("|", 1)[1] if "|" in msg else ""
-                        if action == "start":
-                            self.app.root.after(0, self.app.start_macro)
-                        elif action == "stop":
-                            self.app.root.after(0, self.app.stop_macro)
-                        else:
-                            self.app.log_remote(f"WS: unknown macro action '{action}'")
-                        continue
-                    # Accept: 'hid|key|down|w', 'key|down|w', or legacy 'down|w'
-                    self.enqueue_hid_payload(msg)
-            except (
-                asyncio.CancelledError,
-                ConnectionResetError,
-                OSError,
-                websockets.exceptions.ConnectionClosedOK,
-                websockets.exceptions.ConnectionClosedError,
-            ) as e:
-                try:
-                    self.app.log_remote(f"WS: client disconnected ({type(e).__name__})")
-                except Exception:
-                    pass
+                self.app.log_remote(f"TX: {cmd.strip()}")
+                result = self.serial_manager.send_payload(
+                    cmd,
+                    wait_ack=wait_ack,
+                    timeout=timeout_s or 1.5,
+                )
+            except Exception as exc:
+                self.app.log_remote(f"ERR: serial write {exc}")
             finally:
-                try:
-                    self.clients.discard(websocket)
-                except Exception:
-                    pass
-                try:
-                    self.app.log_remote("WS: client disconnected")
-                except Exception:
-                    pass
-                self.app.root.after(
-                    0,
-                    lambda: self.app.remote_status_var.set(
-                        f"Remote: Listening (ws://0.0.0.0:{self.ws_port})"
-                    ),
-                )
-
-        async def async_main():
-            base = int(self.ws_port)
-            chosen = None
-            last_err = None
-            for i in range(0, 10):
-                p = base + i
-                try:
-                    self.server = await websockets.serve(
-                        ws_handler, "0.0.0.0", p, ping_interval=20, ping_timeout=20
-                    )
-                    chosen = p
-                    break
-                except OSError as e:
-                    last_err = e
-                    continue
-                except Exception as e:
-                    last_err = e
-                    continue
-            if chosen is None:
-                logging.error(f"Failed to start WebSocket server: {last_err}")
-                self.app.root.after(
-                    0, lambda: self.app.remote_status_var.set("Remote: WS start error")
-                )
-                return
-            self.ws_port = chosen
-            # Reflect chosen port back to UI and status
-            self.app.root.after(0, lambda: self.app.ws_port_var.set(str(chosen)))
-            self.app.root.after(
-                0,
-                lambda: self.app.remote_status_var.set(
-                    f"Remote: Listening (ws://0.0.0.0:{chosen})"
-                ),
-            )
-
-        try:
-            self.loop.run_until_complete(async_main())
-            # Run the loop until stopped
-            self.loop.run_forever()
-        finally:
-            try:
-                if self.server:
-                    # Ensure server is closed cleanly
-                    self.server.close()
+                if response_queue is not None:
                     try:
-                        self.loop.run_until_complete(self.server.wait_closed())
-                    except Exception:
+                        response_queue.put_nowait(result)
+                    except queue.Full:
                         pass
-            except Exception:
-                pass
-            try:
-                if self.loop.is_running():
-                    self.loop.stop()
-            except Exception:
-                pass
-            try:
-                self.loop.close()
-            except Exception:
-                pass
-            # Stop reader thread
-            try:
-                if self.reader_thread and self.reader_thread.is_alive():
-                    self.stop_event.set()
-                    self.reader_thread.join(timeout=1.0)
-            except Exception:
-                pass
-            # Stop writer thread
-            try:
-                if self.writer_thread and self.writer_thread.is_alive():
-                    self.stop_event.set()
-                    self.writer_thread.join(timeout=1.0)
-            except Exception:
-                pass
-            try:
-                if self.serial:
-                    self.serial.close()
-            except Exception:
-                pass
+
+    def _on_serial_line(self, line: str) -> None:
+        if line == "ACK":
+            self.app.log_remote("RX: ACK")
+        elif line == "PICO_READY":
+            self.app.log_remote("RX: PICO_READY")
+        else:
+            self.app.log_remote(f"RX: {line}")
 
     def enqueue_hid_payload(
         self, payload: str, wait_ack: bool = False, timeout: float = 1.5
     ) -> bool:
-        """Queue a command payload.
-
-        Supports formats expected by Pico firmware in CIRCUITPY/code.py:
-        - New HID format: 'hid|key|down|w' or 'hid|mouse|down|left' or 'hid|scroll|dx|dy'
-        - Shorthand host formats:
-            'key|down|w'  -> expands to 'hid|key|down|w'
-            'mouse|down|left' -> expands to 'hid|mouse|down|left'
-            Legacy keyboard: 'down|w' or 'up|w' (sent as-is, no 'hid|' prefix)
-        """
         p = (payload or "").strip()
         if not p:
             return False
         if p.startswith("hid|"):
-            cmd = p + "\n"
+            cmd = p
         else:
             parts = p.split("|")
             if len(parts) >= 3 and parts[0] in ("key", "mouse", "scroll"):
-                cmd = f"hid|{p}\n"
+                cmd = f"hid|{p}"
             elif len(parts) == 2 and parts[0] in ("down", "up"):
-                # Legacy keyboard format
-                cmd = p + "\n"
+                cmd = p
             else:
-                # Fallback: send as-is
-                cmd = p + "\n"
+                cmd = p
         if wait_ack:
-            ev = threading.Event()
-            self.cmd_queue.put((cmd, True, ev, timeout))
-            return ev.wait(timeout)
-        else:
-            self.cmd_queue.put((cmd, False, None, None))
-            return True
+            response_queue = queue.Queue(maxsize=1)
+            self.cmd_queue.put((cmd, True, response_queue, timeout))
+            try:
+                return response_queue.get(timeout=timeout)
+            except queue.Empty:
+                return False
+        self.cmd_queue.put((cmd, False, None, timeout))
+        return True
 
     def send_hid(
         self, event_type: str, key: str, wait_ack: bool = True, timeout: float = 1.5
@@ -353,11 +298,73 @@ class RemoteControlServer:
         return self.enqueue_hid_payload(payload, wait_ack=wait_ack, timeout=timeout)
 
     def wait_for_ready(self, timeout: float = 12.0) -> bool:
-        """Wait for PICO_READY that the Pico firmware emits periodically or after handshake."""
-        # If we've seen READY very recently, treat as ready
-        if (time.time() - self.last_ready_time) < 1.0:
-            return True
-        return self.pico_ready_event.wait(timeout)
+        return self.serial_manager.wait_for_ready(timeout)
+
+    async def _handle_ws_message(self, websocket, message: str) -> None:
+        msg = (message or "").strip()
+        if not msg:
+            return
+        if msg.startswith("macro|"):
+            action = msg.split("|", 1)[1] if "|" in msg else ""
+            if action == "start":
+                self.app.root.after(0, self.app.start_macro)
+            elif action == "stop":
+                self.app.root.after(0, self.app.stop_macro)
+            else:
+                self.app.log_remote(f"WS: unknown macro action '{action}'")
+            return
+        self.enqueue_hid_payload(msg)
+
+    def _on_ws_port_bound(self, port: int) -> None:
+        self.ws_port = port
+        try:
+            self.app.root.after(0, lambda: self.app.ws_port_var.set(str(port)))
+            self.app.root.after(
+                0,
+                lambda: self.app.remote_status_var.set(
+                    f"Remote: Listening (ws://0.0.0.0:{port})"
+                ),
+            )
+        except Exception:
+            pass
+
+    def _on_ws_client_connected(self, websocket) -> None:
+        with self.clients_lock:
+            self.clients.add(websocket)
+        peer = getattr(websocket, "remote_address", None)
+        try:
+            self.app.log_remote(f"WS: client connected {peer}")
+        except Exception:
+            pass
+        self.app.root.after(
+            0,
+            lambda: self.app.remote_status_var.set(
+                f"Remote: Connected (ws://0.0.0.0:{self.ws_port})"
+            ),
+        )
+
+    def _on_ws_client_disconnected(self, websocket) -> None:
+        with self.clients_lock:
+            self.clients.discard(websocket)
+        try:
+            self.app.log_remote("WS: client disconnected")
+        except Exception:
+            pass
+        self.app.root.after(
+            0,
+            lambda: self.app.remote_status_var.set(
+                f"Remote: Listening (ws://0.0.0.0:{self.ws_port})"
+            ),
+        )
+
+    def _on_ws_error(self, error: Exception) -> None:
+        logging.error("WebSocket bridge error: %s", error)
+        try:
+            self.app.root.after(
+                0, lambda: self.app.remote_status_var.set("Remote: WS start error")
+            )
+        except Exception:
+            pass
 
 
 class EmbeddedHTTPServer:
@@ -539,134 +546,23 @@ class MacroController:
                 pass
 
     def find_data_port(self, exclude_port=None):
-        """Scan COM ports to find the Pico DATA CDC port by eliciting PICO_READY.
+        """Scan available ports and let the transport layer identify the Pico DATA port.
 
         Args:
-            exclude_port (str, optional): A port to exclude from scanning.
+            exclude_port (str | None): Optional port name to skip during probing.
 
         Returns:
-            str or None: The port string if found, else None.
+            str | None: Detected Pico DATA port, or None if discovery failed.
         """
-        candidates = list(serial.tools.list_ports.comports())
-        for info in candidates:
-            p = info.device
-            if exclude_port and p == exclude_port:
-                continue
-            try:
-                ser = serial.Serial(p, 115200, timeout=0.5, write_timeout=0.5)
-                try:
-                    ser.dtr = False
-                    time.sleep(0.05)
-                    ser.dtr = True
-                    ser.rts = False
-                except Exception:
-                    pass
-                time.sleep(0.1)
-
-                got_ready = False
-                found_console = False
-
-                t0 = time.time()
-                while time.time() - t0 < 1.0:
-                    line = ser.readline().decode("utf-8", errors="ignore").strip()
-                    if not line:
-                        continue
-                    lower = line.lower()
-                    if (
-                        ("circuitpython" in lower)
-                        or ("repl" in lower)
-                        or lower.startswith(">>>")
-                    ):
-                        found_console = True
-                        break
-                    if line == "PICO_READY":
-                        got_ready = True
-                        break
-
-                if not got_ready and not found_console:
-                    try:
-                        ser.write(b"hello|handshake\n")
-                        ser.flush()
-                    except Exception:
-                        pass
-                    t1 = time.time()
-                    while time.time() - t1 < 1.5:
-                        line = ser.readline().decode("utf-8", errors="ignore").strip()
-                        if line == "PICO_READY":
-                            got_ready = True
-                            break
-                        if line:
-                            lower = line.lower()
-                            if (
-                                ("circuitpython" in lower)
-                                or ("repl" in lower)
-                                or lower.startswith(">>>")
-                            ):
-                                found_console = True
-                                break
-
-                ser.close()
-                if got_ready and not found_console:
-                    return p
-            except Exception:
-                continue
-        return None
+        return discover_data_port(exclude_port=exclude_port)
 
     def _finalize_handshake(self, ser):
-        """Finalizes the handshake with the Pico device after receiving PICO_READY.
-
-        After seeing PICO_READY, explicitly sends HELLO so the Pico stops periodic READY.
-        Then waits briefly for its PICO_READY response and clears any leftover input.
-
-        Args:
-            ser (serial.Serial): The serial connection to the Pico device.
-        """
-        try:
-            ser.write(b"hello|handshake\n")
-            ser.flush()
-        except Exception:
-            pass
-        end = time.time() + 0.8
-        while time.time() < end:
-            try:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                break
-            if not line:
-                continue
-            if line == "PICO_READY":
-                break
-        try:
-            ser.reset_input_buffer()
-        except Exception:
-            pass
+        """Finalize the handshake using the shared serial transport helper."""
+        finalize_handshake(ser)
 
     def _wait_for_ack(self, ser, timeout=1.5):
-        """Waits for an ACK response from the Pico device.
-
-        Waits for an ACK line, ignoring blank lines and stray PICO_READY messages.
-
-        Args:
-            ser (serial.Serial): The serial connection to the Pico device.
-            timeout (float): The maximum time to wait for an ACK in seconds.
-
-        Returns:
-            bool: True if ACK received, False otherwise.
-        """
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                return False
-            if not line:
-                continue
-            if line == "ACK":
-                return True
-            if line == "PICO_READY":
-                # Ignore and keep waiting for the ACK corresponding to our command
-                continue
-        return False
+        """Use the transport helper to wait for an ACK from the Pico."""
+        return wait_for_ack(ser, timeout=timeout)
 
     def interruptible_sleep(self, duration):
         """Sleeps for a specified duration but can be interrupted if macro stops playing.
@@ -1649,132 +1545,16 @@ class MacroControllerApp:
         return True
 
     def _finalize_handshake(self, ser):
-        """Finalizes the handshake with the Pico device after receiving PICO_READY.
-
-        After seeing PICO_READY, explicitly sends HELLO so the Pico stops periodic READY.
-        Then waits briefly for its PICO_READY response and clears any leftover input.
-
-        Args:
-            ser (serial.Serial): The serial connection to the Pico device.
-        """
-        try:
-            ser.write(b"hello|handshake\n")
-            ser.flush()
-        except Exception:
-            pass
-        end = time.time() + 0.8
-        while time.time() < end:
-            try:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                break
-            if not line:
-                continue
-            if line == "PICO_READY":
-                break
-        # Clear any stray bytes (e.g., a periodic PICO_READY that raced in)
-        try:
-            ser.reset_input_buffer()
-        except Exception:
-            pass
+        """Finalize Pico handshake using the shared helper."""
+        finalize_handshake(ser)
 
     def _wait_for_ack(self, ser, timeout=1.5):
-        """Waits for an ACK response from the Pico device.
-
-        Waits for an ACK line, ignoring blank lines and stray PICO_READY messages.
-
-        Args:
-            ser (serial.Serial): The serial connection to the Pico device.
-            timeout (float): The maximum time to wait for an ACK in seconds.
-
-        Returns:
-            bool: True if ACK received, False otherwise.
-        """
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                return False
-            if not line:
-                continue
-            if line == "ACK":
-                return True
-            if line == "PICO_READY":
-                # Ignore and keep waiting for the ACK corresponding to our command
-                continue
-            # Unexpected noise; ignore and continue until timeout
-        return False
+        """Reuse the common ACK wait helper for GUI-originated commands."""
+        return wait_for_ack(ser, timeout=timeout)
 
     def find_data_port(self, exclude_port=None):
-        """Scan COM ports to find the Pico DATA CDC port by eliciting PICO_READY.
-        Returns the port string if found, else None.
-        """
-        candidates = list(serial.tools.list_ports.comports())
-        for info in candidates:
-            p = info.device
-            if exclude_port and p == exclude_port:
-                continue
-            try:
-                ser = serial.Serial(p, 115200, timeout=0.5, write_timeout=0.5)
-                try:
-                    ser.dtr = False
-                    time.sleep(0.05)
-                    ser.dtr = True
-                    ser.rts = False
-                except Exception:
-                    pass
-                time.sleep(0.1)
-
-                got_ready = False
-                found_console = False
-
-                # Read a couple of lines, see if console banner appears or we already have PICO_READY
-                t0 = time.time()
-                while time.time() - t0 < 1.0:
-                    line = ser.readline().decode("utf-8", errors="ignore").strip()
-                    if not line:
-                        continue
-                    lower = line.lower()
-                    if (
-                        ("circuitpython" in lower)
-                        or ("repl" in lower)
-                        or lower.startswith(">>>")
-                    ):
-                        found_console = True
-                        break
-                    if line == "PICO_READY":
-                        got_ready = True
-                        break
-
-                if not got_ready and not found_console:
-                    try:
-                        ser.write(b"hello|handshake\n")
-                        ser.flush()
-                    except Exception:
-                        pass
-                    t1 = time.time()
-                    while time.time() - t1 < 1.5:
-                        line = ser.readline().decode("utf-8", errors="ignore").strip()
-                        if line == "PICO_READY":
-                            got_ready = True
-                            break
-                        if line:
-                            lower = line.lower()
-                            if (
-                                ("circuitpython" in lower)
-                                or ("repl" in lower)
-                                or lower.startswith(">>>")
-                            ):
-                                found_console = True
-                                break
-
-                ser.close()
-                if got_ready and not found_console:
-                    return p
-            except Exception:
-                continue
-        return None
+        """Use the shared transport discovery to identify the Pico DATA port."""
+        return discover_data_port(exclude_port=exclude_port)
 
     def play_macro_thread(self, port, window_title, macro_folder):
         """Plays macro files in a continuous loop, sending commands to the Pico device.
@@ -2163,7 +1943,7 @@ def main() -> None:
 
     configure_logging()
     root = tk.Tk()
-    app = MacroControllerApp(root)
+    MacroControllerApp(root)
     root.mainloop()
 
 

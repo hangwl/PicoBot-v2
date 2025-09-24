@@ -34,3 +34,16 @@
    - After extraction, run an integration pass that starts the GUI but swaps in mocked serial transports to ensure event wiring works without hardware attached.
 
 This plan replaces the monolithic `picobot.py` with well-scoped modules, eliminates duplicate logic, and makes the core macro/transport functionality reusable in both GUI and remote control contexts while clarifying threading and configuration lifecycles.
+
+## Status Updates
+
+### Step 1 – Package groundwork (completed)
+- Introduced the `picobot` package with placeholder subpackages for `playback`, `transport`, and `ui` (`picobot/playback/__init__.py`, `picobot/transport/__init__.py`, `picobot/ui/__init__.py`) to stage future extractions.
+- Relocated the monolithic GUI module to `picobot/app.py` while exposing CLI entry points via `picobot/__init__.py` and `picobot/__main__.py`.
+- Extracted `TelegramHandler` into `picobot/messaging.py` and centralized config/logging defaults in `picobot/settings.py` for reuse beyond the GUI.
+
+### Step 2 - Transport isolation mini plan (completed)
+- Added `picobot/transport/serial_manager.py` with shared discovery/handshake helpers and a reusable `SerialManager`.
+- Refactored `RemoteControlServer` to delegate serial I/O to the manager and remove duplicate ACK bookkeeping.
+- Introduced `AsyncWebsocketBridge` to own the asyncio loop lifecycle and keep Tk interactions on the main thread.
+- Added `tests/test_serial_manager.py`; `python -m unittest tests.test_serial_manager` passes.
