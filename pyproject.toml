@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picobot-v2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "keyboard>=0.13.5",
+    "pygetwindow>=0.0.9",
+    "pyserial>=3.5",
+    "requests>=2.32.5",
+    "websockets>=15.0.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]

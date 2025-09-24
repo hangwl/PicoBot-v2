@@ -52,3 +52,24 @@ This plan replaces the monolithic `picobot.py` with well-scoped modules, elimina
 - Extracted the legacy `MacroController` into `picobot/playback/macro_controller.py` with reusable playlist and parsing helpers.
 - Trimmed duplicate playback helpers from the Tk GUI so it now delegates to the shared controller.
 - Added `tests/test_macro_controller.py` to cover macro parsing, playlist ordering, and the interruptible sleep helper.
+
+### Step 4 - UI disentanglement mini plan (completed)
+- Extracted port/window refresh logic into `PortService.build_selection` and `WindowService.build_selection`, returning plain data structures for the views.
+- Introduced dedicated view classes (e.g., `PortSelectorView`, `RemoteView`) that build widgets and bind callbacks supplied by the controller layer.
+- Created `CountdownService` in `picobot/countdown.py` to encapsulate timer state and Telegram notifications.
+- Wired the GUI to the new services via `AppContext`, so backend state no longer depends on Tk variables.
+
+### Step 5 - Configuration & Factory wiring (completed)
+- Extracted config load/save helpers into `picobot/config.py`, exposing an `AppConfig` dataclass for GUI binding.
+- Added an application factory via `create_application` in `picobot/app.py` to wire Telegram, transport, macro controller, countdown, and remote server dependencies.
+- Updated the GUI to consume injected config/context so future CLI or headless modes can reuse services without Tk bindings.
+- Added regression tests in `tests/test_config.py` covering config defaults, coercion, and persistence.
+
+## Operational Notes
+
+### PowerShell Notes
+- Use `($text = Get-Content path -Raw).Replace('old','new')` for literal substitutions so PowerShell avoids regex side effects.
+- Do not run `$ pwsh -NoLogo -Command 'python -m unittest discover -s tests'`; it hangs the terminal / loops.
+
+### Targeted Test Commands
+- Prefer `python -m unittest tests.test_macro_controller.MacroControllerPlaybackTests.test_build_playlist_prioritises_start_files -v` for focused playlist debugging or when the general suite format stalls.
