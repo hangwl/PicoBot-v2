@@ -158,7 +158,7 @@ class AsyncWebsocketBridge:
         while not self._stop_event.is_set():
             await asyncio.sleep(0.1)
 
-    async def _handle_client(self, websocket, path) -> None:  # pragma: no cover - async runtime
+    async def _handle_client(self, websocket, path: str | None = None) -> None:  # pragma: no cover - async runtime
         try:
             if self.on_client_connected:
                 try:

@@ -58,6 +58,10 @@ class RemoteView:
     ) -> None:
         from tkinter.scrolledtext import ScrolledText
 
+        self.on_start = on_start
+        self.on_stop = on_stop
+        self.is_running = False
+
         self.frame = tk.LabelFrame(
             master, text="5. Remote Control (WebSocket)", padx=10, pady=10
         )
@@ -73,25 +77,29 @@ class RemoteView:
         self.http_entry = tk.Entry(self.frame, textvariable=http_port_var, width=8)
         self.http_entry.grid(row=0, column=3, sticky="w")
 
-        self.start_button = tk.Button(
-            self.frame, text="Start Remote", command=on_start, bg="#1976D2", fg="white"
+        self.toggle_button = tk.Button(
+            self.frame, text="Start Remote", command=self._toggle, bg="#1976D2", fg="white"
         )
-        self.start_button.grid(row=0, column=4, padx=(10, 0))
-
-        self.stop_button = tk.Button(
-            self.frame, text="Stop Remote", command=on_stop, state=tk.DISABLED
-        )
-        self.stop_button.grid(row=0, column=5, padx=(5, 0))
+        self.toggle_button.grid(row=0, column=4, padx=(10, 0))
 
         self.status_label = tk.Label(self.frame, textvariable=status_var, anchor="w")
         self.status_label.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(8, 0))
 
-        self.log = ScrolledText(self.frame, height=10, wrap="word", state=tk.DISABLED)
+        self.log = ScrolledText(self.frame, height=5, wrap="word", state=tk.DISABLED)
         self.log.grid(row=2, column=0, columnspan=6, sticky="nsew", pady=(8, 0))
 
         self.frame.grid_columnconfigure(5, weight=1)
         self.frame.grid_rowconfigure(2, weight=1)
 
-    def set_buttons_state(self, *, start_state: str, stop_state: str) -> None:
-        self.start_button.config(state=start_state)
-        self.stop_button.config(state=stop_state)
+    def _toggle(self):
+        if self.is_running:
+            self.on_stop()
+        else:
+            self.on_start()
+
+    def set_running(self, is_running: bool) -> None:
+        self.is_running = is_running
+        if is_running:
+            self.toggle_button.config(text="Stop Remote", bg="red", fg="white")
+        else:
+            self.toggle_button.config(text="Start Remote", bg="#1976D2", fg="white")

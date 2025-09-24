@@ -242,10 +242,10 @@ class MacroControllerApp:
 
         preset_frame = tk.Frame(self.telegram_frame)
         preset_frame.grid(row=2, column=2, sticky="e", padx=(0, 0), pady=(6, 0))
-        for seconds in (30, 60, 120):
+        for seconds in (600, 900):
             tk.Button(
                 preset_frame,
-                text=f"{seconds}s",
+                text=f"{seconds//60}m",
                 command=lambda s=seconds: self.set_countdown_preset(s),
             ).pack(side=tk.LEFT, padx=(0, 5))
 
@@ -265,8 +265,6 @@ class MacroControllerApp:
         self.remote_frame = self.remote_view.frame
         self.ws_port_entry = self.remote_view.ws_entry
         self.http_port_entry = self.remote_view.http_entry
-        self.remote_start_btn = self.remote_view.start_button
-        self.remote_stop_btn = self.remote_view.stop_button
         self.remote_status_label = self.remote_view.status_label
         self.remote_log = self.remote_view.log
         self.ws_port_entry.bind("<FocusOut>", self.save_config)
@@ -329,18 +327,14 @@ class MacroControllerApp:
         )
         self.remote_server = RemoteControlServer(port_name, ws_port, callbacks)
         self.remote_status_var.set("Remote: Starting...")
-        self.remote_view.set_buttons_state(
-            start_state=tk.DISABLED, stop_state=tk.NORMAL
-        )
         self.remote_server.start()
         if not self.remote_server.serial_manager.is_open:
-            self.remote_view.set_buttons_state(
-                start_state=tk.NORMAL, stop_state=tk.DISABLED
-            )
+            self.remote_view.set_running(False)
             self.remote_status_var.set("Remote: Serial error")
             self.remote_server = None
             return
         self._start_http_server()
+        self.remote_view.set_running(True)
 
     def stop_remote(self) -> None:
         if self.remote_server:
@@ -348,10 +342,7 @@ class MacroControllerApp:
             self.remote_server = None
         self._stop_http_server()
         self.remote_status_var.set("Remote: Stopped")
-        if hasattr(self, "remote_view"):
-            self.remote_view.set_buttons_state(
-                start_state=tk.NORMAL, stop_state=tk.DISABLED
-            )
+        self.remote_view.set_running(False)
 
     def create_options_ui(self):
         """Creates the UI elements for application options."""
@@ -605,6 +596,9 @@ class MacroControllerApp:
 
         if selection.auto_selected and selection.selected:
             logging.info("Auto-selected Pico DATA port %s", selection.selected)
+
+        if selection.selected and not self.remote_server:
+            self.start_remote()
 
     def refresh_windows(self):
         """Refresh the list of available windows using the window service."""
