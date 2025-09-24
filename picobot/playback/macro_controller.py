@@ -4,15 +4,13 @@ from __future__ import annotations
 import logging
 import os
 import random
-import threading
 import time
 from typing import Callable, List, Optional
 
-import pygetwindow as gw
 import serial
-import serial.tools.list_ports
 
-from ..transport import discover_data_port, finalize_handshake, wait_for_ack
+from ..services.system import PortSelection, PortService, WindowSelection, WindowService
+from ..transport import finalize_handshake, wait_for_ack
 
 MacroEvent = dict[str, object]
 PlaylistBuilder = Callable[[str], List[str]]
@@ -75,81 +73,34 @@ class MacroController:
         *,
         playlist_builder: PlaylistBuilder = build_playlist,
         parser: MacroParser = parse_macro_file,
+        port_service: Optional[PortService] = None,
+        window_service: Optional[WindowService] = None,
     ) -> None:
         self.app = app
         self._playlist_builder = playlist_builder
         self._parser = parser
+        self._port_service = port_service or PortService()
+        self._window_service = window_service or WindowService()
 
     # -- UI coordination helpers -------------------------------------------------
-    def refresh_ports(self) -> None:
-        ports = [port.device for port in serial.tools.list_ports.comports()]
-        self.app.port_menu["values"] = ports
-        try:
-            self.app.port_menu.set("")
-        except Exception:
-            pass
-        self.app.selected_port.set("")
-        self.auto_select_pico_port_async(force=False)
+    def build_port_selection(
+        self,
+        current: Optional[str],
+        *,
+        force_auto: bool = False,
+    ) -> PortSelection:
+        """Return the port snapshot the UI should render."""
 
-    def refresh_windows(self) -> None:
-        window_list = [title for title in gw.getAllTitles() if title]
-        self.app.window_menu["values"] = window_list if window_list else [
-            "No windows found"
-        ]
-        saved_window = self.app.selected_window.get()
-        if saved_window and saved_window in window_list:
-            self.app.window_menu.set(saved_window)
-        elif window_list:
-            self.app.window_menu.set(window_list[0])
-        else:
-            self.app.window_menu.set("No windows found")
+        return self._port_service.build_selection(current, force_auto=force_auto)
 
-    def auto_select_pico_port_async(self, force: bool) -> None:
-        def worker() -> None:
-            port = self.quick_guess_pico_data_port()
-            if not port:
-                port = self.find_data_port()
-            if port:
-                self.app.root.after(
-                    0, lambda p=port: self._set_selected_port_if_appropriate(p, force)
-                )
-            else:
-                logging.warning(
-                    "No Pico DATA port detected. Connect and click Refresh."
-                )
+    def build_window_selection(self, current: Optional[str]) -> WindowSelection:
+        """Return the window snapshot the UI should render."""
 
-        threading.Thread(target=worker, daemon=True).start()
-
-    def quick_guess_pico_data_port(self) -> Optional[str]:
-        try:
-            for info in serial.tools.list_ports.comports():
-                loc = getattr(info, "location", "") or ""
-                if loc.endswith("x.2"):
-                    return info.device
-        except Exception:
-            pass
-        return None
-
-    def _set_selected_port_if_appropriate(self, port: str, force: bool) -> None:
-        try:
-            values = list(self.app.port_menu["values"])
-        except Exception:
-            values = []
-        if port not in values:
-            values.append(port)
-            self.app.port_menu["values"] = values
-        current = self.app.selected_port.get()
-        if force or (not current) or ("No COM" in current) or (current not in values):
-            self.app.selected_port.set(port)
-            logging.info("Auto-selected Pico DATA port %s", port)
-            try:
-                self.app.root.after(0, self.app.maybe_autostart_remote)
-            except Exception:
-                pass
+        return self._window_service.build_selection(current)
 
     # -- Transport helpers -------------------------------------------------------
     def find_data_port(self, exclude_port: Optional[str] = None) -> Optional[str]:
-        return discover_data_port(exclude_port=exclude_port)
+        return self._port_service.discover_data_port(exclude_port=exclude_port)
 
     def _finalize_handshake(self, ser: serial.Serial) -> None:
         finalize_handshake(ser)
@@ -178,16 +129,8 @@ class MacroController:
         self.app.status_text.set("Status: Playing...")
         self.app.keys_currently_down.clear()
 
-        try:
-            target_windows = gw.getWindowsWithTitle(window_title)
-            if not target_windows:
-                logging.error("Target window '%s' not found.", window_title)
-                self.app.is_playing = False
-                self.app.root.after(0, self.app.on_macro_thread_exit)
-                return
-            target_windows[0].activate()
-        except Exception as exc:
-            logging.error("Error activating window: %s", exc)
+        if not self._window_service.activate(window_title):
+            logging.error("Target window '%s' not found or could not be activated.", window_title)
             self.app.is_playing = False
             self.app.root.after(0, self.app.on_macro_thread_exit)
             return
@@ -344,19 +287,12 @@ class MacroController:
                     for index, event in enumerate(events):
                         if not self.app.is_playing:
                             break
-                        try:
-                            active_window_title = gw.getActiveWindowTitle()
-                            if active_window_title != window_title:
-                                logging.error(
-                                    "Window focus lost. Expected '%s', got '%s'. Stopping macro.",
-                                    window_title,
-                                    active_window_title,
-                                )
-                                self.app.is_playing = False
-                                break
-                        except Exception as exc:
+                        active_window_title = self._window_service.get_active_title()
+                        if active_window_title != window_title:
                             logging.error(
-                                "Could not get active window title: %s. Stopping macro.", exc
+                                "Window focus lost. Expected '%s', got '%s'. Stopping macro.",
+                                window_title,
+                                active_window_title,
                             )
                             self.app.is_playing = False
                             break
@@ -431,3 +367,5 @@ class MacroController:
                             pass
         logging.info("Macro thread is finishing.")
         self.app.root.after(0, self.app.on_macro_thread_exit)
+
+
