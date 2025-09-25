@@ -315,7 +315,6 @@ class MacroControllerApp:
                 "Remote Control",
                 "Select a Pico DATA port before starting remote control.",
             )
-            return
         ws_port = self._coerce_positive_int(self.ws_port_var.get(), AppConfig().ws_port)
         self.ws_port_var.set(str(ws_port))
         callbacks = RemoteCallbacks(
@@ -325,6 +324,8 @@ class MacroControllerApp:
             set_ws_port=self._handle_ws_port_rebind,
             start_macro=self.start_macro,
             stop_macro=self.stop_macro,
+            is_macro_playing=lambda: bool(self.is_playing),
+            broadcast=lambda msg: None,
         )
         self.remote_server = RemoteControlServer(port_name, ws_port, callbacks)
         self.remote_status_var.set("Remote: Starting...")
@@ -334,6 +335,8 @@ class MacroControllerApp:
             self.remote_status_var.set("Remote: Serial error")
             self.remote_server = None
             return
+        # Update broadcast callback now that server is created
+        callbacks.broadcast = self.remote_server.broadcast
         self._start_http_server()
         self.remote_view.set_running(True)
 
@@ -535,6 +538,10 @@ class MacroControllerApp:
             if countdown_enabled:
                 self.start_countdown_internal()
 
+            # Notify remote clients
+            if self.remote_server:
+                self.remote_server.broadcast("macro|playing")
+
     def stop_macro(self):
         """Programmatically stop the macro loop and cancel the countdown."""
         if self.is_playing:
@@ -543,15 +550,24 @@ class MacroControllerApp:
                 self.status_text.set("Status: Stopping...")
             except Exception:
                 pass
-        if self.countdown_service.is_running:
-            self.countdown_service.stop()
-            self.countdown_status_var.set("Countdown: Idle")
+        # Notify remote clients
+        if self.remote_server:
+            self.remote_server.broadcast("macro|stopped")
 
     def on_macro_thread_exit(self):
         """Safely updates GUI elements from the main thread after the macro thread has finished."""
         self.is_playing = False  # Ensure state is final
         self.status_text.set("Status: Stopped. Ready to start.")
         self.start_button.config(state=tk.NORMAL)
+        if self.countdown_service.is_running:
+            self.countdown_service.stop()
+            self.countdown_status_var.set("Countdown: Idle")
+        # Notify remote clients in case stop_macro wasn't invoked explicitly
+        if self.remote_server:
+            try:
+                self.remote_server.broadcast("macro|stopped")
+            except Exception:
+                pass
         print("GUI updated. Macro has fully stopped.")
 
     def refresh_ports(self):

@@ -108,11 +108,24 @@ class MacroController:
         return wait_for_ack(ser, timeout=timeout)
 
     # -- Playback helpers --------------------------------------------------------
-    def interruptible_sleep(self, duration: float) -> bool:
+    def interruptible_sleep(self, duration: float, window_title: str) -> bool:
         end_time = time.time() + duration
+        check_interval = 0.1  # check window focus every 100ms
+        next_check = time.time() + check_interval
         while time.time() < end_time:
             if not self.app.is_playing:
                 return False
+            if time.time() >= next_check:
+                active = self._window_service.get_active_title()
+                if active != window_title:
+                    logging.warning(
+                        "Window focus lost during sleep. Expected '%s', got '%s'. Stopping macro.",
+                        window_title,
+                        active,
+                    )
+                    self.app.is_playing = False
+                    return False
+                next_check += check_interval
             time.sleep(0.01)
         return True
 
@@ -304,7 +317,7 @@ class MacroController:
                             break
                         if index > 0:
                             delay = event["time"] - events[index - 1]["time"]
-                            if not self.interruptible_sleep(delay):
+                            if not self.interruptible_sleep(delay, window_title):
                                 break
                         if use_remote:
                             ok = remote.send_hid(

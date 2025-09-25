@@ -73,6 +73,16 @@
       cursor: pointer;
     }
 
+    /* Macro toggle visual states */
+    #macro-toggle.state-start {
+      background: var(--ok);
+      border-color: #1b5e20;
+    }
+    #macro-toggle.state-stop {
+      background: var(--err);
+      border-color: #8e0000;
+    }
+
     #tab-bar {
       margin: 2px 10px 0;
       display: flex;
@@ -437,9 +447,13 @@
 <body>
   <div id="status" class="disconnected">Connecting...</div>
 
-  <div id="macro-bar">
+  <!-- <div id="macro-bar">
     <button id="macro-start" class="pill">Start Macro</button>
     <button id="macro-stop" class="pill">Stop Macro</button>
+  </div> -->
+
+  <div id="macro-bar">
+    <button id="macro-toggle" class="pill">Start Macro</button>
   </div>
 
   <div id="tab-bar">
@@ -566,8 +580,19 @@
     function connect() {
       try {
         socket = new WebSocket(WS_URL);
-        socket.onopen = () => setStatus('connected', 'Connected');
-        socket.onclose = () => { setStatus('disconnected', 'Disconnected'); setTimeout(connect, 2000); };
+        socket.onopen = () => { setStatus('connected', 'Connected'); try { socket.send('macro|query'); } catch (_) {} };
+        socket.onmessage = (event) => {
+          try {
+            const data = (event && event.data ? String(event.data) : '').trim();
+            if (!data) return;
+            if (data === 'macro|playing') {
+              setMacroState(true);
+            } else if (data === 'macro|stopped') {
+              setMacroState(false);
+            }
+          } catch (_) { /* ignore */ }
+        };
+        socket.onclose = () => { setStatus('disconnected', 'Disconnected'); setMacroState(false); setTimeout(connect, 2000); };
         socket.onerror = () => { setStatus('disconnected', 'Error'); try { socket.close(); } catch (e) { } };
       } catch (e) { setStatus('disconnected', 'Connect error'); }
     }
@@ -576,9 +601,33 @@
       if (socket && socket.readyState === 1) { socket.send(msg); }
     }
 
-    // Macro controls
-    document.getElementById('macro-start').onclick = () => send('macro|start');
-    document.getElementById('macro-stop').onclick = () => send('macro|stop');
+    // Macro toggle controls
+    let macroRunning = false;
+    const macroBtn = document.getElementById('macro-toggle');
+    function setMacroState(running) {
+      macroRunning = !!running;
+      if (!macroBtn) return;
+      if (macroRunning) {
+        macroBtn.textContent = 'Stop Macro';
+        macroBtn.classList.add('active', 'state-stop');
+        macroBtn.classList.remove('state-start');
+      } else {
+        macroBtn.textContent = 'Start Macro';
+        macroBtn.classList.remove('active', 'state-stop');
+        macroBtn.classList.add('state-start');
+      }
+    }
+    if (macroBtn) {
+      macroBtn.addEventListener('click', () => {
+        if (!macroRunning) {
+          send('macro|start');
+          setMacroState(true);
+        } else {
+          send('macro|stop');
+          setMacroState(false);
+        }
+      });
+    }
 
     // Input helpers
     function down(type, key) {

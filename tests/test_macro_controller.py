@@ -112,8 +112,11 @@ class MacroControllerPlaybackTests(unittest.TestCase):
                 "picobot.playback.macro_controller.time.sleep",
                 side_effect=fake_sleep,
             ),
+            mock.patch.object(
+                self.window_service, "get_active_title", return_value="Test Window"
+            ),
         ):
-            result = self.controller.interruptible_sleep(0.05)
+            result = self.controller.interruptible_sleep(0.05, "Test Window")
         self.assertFalse(result)
 
     def test_build_port_selection_delegates_to_service(self) -> None:

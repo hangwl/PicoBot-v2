@@ -33,6 +33,8 @@ class RemoteCallbacks:
     set_ws_port: Callable[[int], None]
     start_macro: Callable[[], None]
     stop_macro: Callable[[], None]
+    is_macro_playing: Callable[[], bool]
+    broadcast: Callable[[str], None]
 
 
 class AsyncWebsocketBridge:
@@ -154,7 +156,6 @@ class AsyncWebsocketBridge:
                 self.on_error(last_error)
             except Exception:
                 pass
-
     async def _wait_for_stop(self) -> None:
         while not self._stop_event.is_set():
             await asyncio.sleep(0.1)
@@ -321,6 +322,34 @@ class RemoteControlServer:
         self.cmd_queue.put((cmd, False, None, timeout))
         return True
 
+    def wait_for_ready(self, timeout: float = 12.0) -> bool:
+        """Block until a recent PICO_READY has been seen.
+
+        Strategy: send a handshake probe immediately to prompt a READY, then
+        wait a short, capped interval (1–2s) for the response. If that fails
+        and we still have time budget, try one more quick attempt.
+        """
+        try:
+            total_budget = max(0.5, timeout)
+            # Always poke the Pico first
+            try:
+                self.serial_manager.send_payload("hello|handshake", wait_ack=False, timeout=0.2)
+            except Exception:
+                pass
+            if self.serial_manager.wait_for_ready(timeout=min(2.0, total_budget)):
+                return True
+            # Optional second poke if budget allows
+            remaining = total_budget - min(2.0, total_budget)
+            if remaining > 0.4:
+                try:
+                    self.serial_manager.send_payload("hello|handshake", wait_ack=False, timeout=0.2)
+                except Exception:
+                    pass
+                return self.serial_manager.wait_for_ready(timeout=min(1.5, remaining))
+            return False
+        except Exception:
+            return False
+
     def send_hid(
         self,
         event_type: str,
@@ -331,11 +360,23 @@ class RemoteControlServer:
         payload = f"{event_type}|{key}"
         return self.enqueue_hid_payload(payload, wait_ack=wait_ack, timeout=timeout)
 
-    def wait_for_ready(self, timeout: float = 12.0) -> bool:
-        return self.serial_manager.wait_for_ready(timeout)
+    def broadcast(self, message: str) -> None:
+        """Send a message to all connected WebSocket clients."""
+        msg = (message or "").strip()
+        if not msg:
+            return
+        with self.clients_lock:
+            for client in list(self.clients):
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        client.send(msg), self.bridge._loop
+                    )
+                except Exception:
+                    # Client may have disconnected, will be cleaned up later
+                    pass
 
     # -- WebSocket callbacks -----------------------------------------------
-    async def _handle_ws_message(self, _websocket, message: str) -> None:
+    async def _handle_ws_message(self, websocket, message: str) -> None:
         msg = (message or "").strip()
         if not msg:
             return
@@ -345,6 +386,15 @@ class RemoteControlServer:
                 self._schedule(self.callbacks.start_macro)
             elif action == "stop":
                 self._schedule(self.callbacks.stop_macro)
+            elif action == "query":
+                try:
+                    playing = bool(self.callbacks.is_macro_playing())
+                except Exception:
+                    playing = False
+                try:
+                    await websocket.send("macro|playing" if playing else "macro|stopped")
+                except Exception:
+                    pass
             else:
                 self._log(f"WS: unknown macro action '{action}'")
             return
@@ -353,7 +403,6 @@ class RemoteControlServer:
     def _on_ws_port_bound(self, port: int) -> None:
         self.ws_port = port
         self._schedule(lambda: self.callbacks.set_ws_port(port))
-        self._set_status(f"Remote: Listening (ws://0.0.0.0:{port})")
 
     def _on_ws_client_connected(self, websocket) -> None:
         with self.clients_lock:
