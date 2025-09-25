@@ -1,6 +1,6 @@
 # PicoBot
 
-PicoBot is a desktop automation toolkit that pairs a Raspberry Pi Pico (or compatible firmware) with a Tkinter GUI, remote WebSocket bridge, and Telegram alerts to run repeatable macro playlists. 
+PicoBot is a tool for macroing/botting. It uses a compatible microcontroller to act as a HID device to relay physical keyboard/mouse inputs to a computer.
 
 Note that while I am using a Raspberry Pi Pico device, other microcontroller devices that support `Circuit Python` should still work. The `Adafruit HID` library is required to relay physical keyboard inputs.
 
