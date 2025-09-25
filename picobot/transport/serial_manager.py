@@ -1,4 +1,5 @@
 """Serial transport helpers and manager for PicoBot."""
+
 from __future__ import annotations
 
 import logging
@@ -75,7 +76,9 @@ def discover_data_port(
                     ser.write(HANDSHAKE_COMMAND)
                     ser.flush()
                 except Exception:
-                    _LOGGER.debug("Failed to emit handshake probe on %s", port, exc_info=True)
+                    _LOGGER.debug(
+                        "Failed to emit handshake probe on %s", port, exc_info=True
+                    )
                 deadline = time.time() + handshake_timeout
                 while time.time() < deadline:
                     try:
@@ -179,7 +182,7 @@ class SerialManager:
 
     def open(self) -> serial.Serial:
         if self.is_open:
-            return self._serial  # type: ignore[return-value]
+            return self._serial
         ser = serial.Serial(
             self.port,
             self.baudrate,
@@ -246,7 +249,9 @@ class SerialManager:
             return True
         return False
 
-    def send_payload(self, payload: str, *, wait_ack: bool = False, timeout: float = 1.5) -> bool:
+    def send_payload(
+        self, payload: str, *, wait_ack: bool = False, timeout: float = 1.5
+    ) -> bool:
         if not payload:
             return False
         if not self.is_open:

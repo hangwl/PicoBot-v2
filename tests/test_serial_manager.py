@@ -93,5 +93,5 @@ class SerialManagerHelpersTests(unittest.TestCase):
         self.assertTrue(args[0].endswith(b"\n"))
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     unittest.main()

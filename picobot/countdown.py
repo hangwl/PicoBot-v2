@@ -1,4 +1,5 @@
 """Countdown timer service used by the GUI."""
+
 from __future__ import annotations
 
 import threading
@@ -6,7 +7,6 @@ import time
 from typing import Callable, Optional
 
 from .messaging import TelegramHandler
-
 
 TickCallback = Callable[[int], None]
 StatusCallback = Callable[[str], None]
@@ -82,7 +82,9 @@ class CountdownService:
                     self._stop_event.clear()
                     self._is_running = False
 
-            thread = threading.Thread(target=worker, name="CountdownService", daemon=True)
+            thread = threading.Thread(
+                target=worker, name="CountdownService", daemon=True
+            )
             self._thread = thread
             thread.start()
 
@@ -94,7 +96,6 @@ class CountdownService:
                 self._is_running = False
                 return
             self._stop_event.set()
-        # The wait() method should be used to wait for the thread to finish.
 
     def wait(self, timeout: Optional[float] = None) -> None:
         thread = self._thread

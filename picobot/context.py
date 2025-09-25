@@ -1,4 +1,5 @@
 """Application context container for shared services."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,4 +1,5 @@
 """Embedded HTTP server for the PicoBot remote controller page."""
+
 from __future__ import annotations
 
 import logging
@@ -69,11 +70,11 @@ class EmbeddedHTTPServer:
         except Exception:
             return 8765
 
-    def _build_handler(self, ws_port: int):  # type: ignore[override]
+    def _build_handler(self, ws_port: int):
         server = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802
+            def do_GET(self):
                 try:
                     if getattr(self, "path", "/") != "/":
                         self.send_response(404)
@@ -89,7 +90,7 @@ class EmbeddedHTTPServer:
                 except Exception:
                     pass
 
-            def log_message(self, format, *args):  # noqa: A003
+            def log_message(self, format, *args):
                 return
 
         return Handler

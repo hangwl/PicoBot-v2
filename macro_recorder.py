@@ -1,5 +1,6 @@
-import keyboard
 import time
+
+import keyboard
 
 # --- Configuration ---
 LOG_FILE = f"macro_recording_{int(time.time())}.txt"
@@ -10,7 +11,7 @@ print("Press and hold 'Esc' for a moment to stop the logger.")
 # --- Main Program ---
 # Record all keyboard events until the 'Esc' key is pressed.
 # The list of events will include the 'esc' press itself.
-events = keyboard.record(until='esc')
+events = keyboard.record(until="esc")
 
 # --- NEW: Filter out the final 'esc' event ---
 # The 'record' function stops on the key down event for 'esc',

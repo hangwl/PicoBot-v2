@@ -1,4 +1,5 @@
 """Macro playback controller and helpers for PicoBot."""
+
 from __future__ import annotations
 
 import logging
@@ -34,7 +35,7 @@ def parse_macro_file(filename: str) -> Optional[List[MacroEvent]]:
                         "key": key,
                     }
                 )
-    except Exception as exc:  # pragma: no cover - guarded by tests
+    except Exception as exc:
         logging.warning("Could not parse macro file '%s': %s", filename, exc)
         return None
     return events
@@ -47,9 +48,7 @@ def build_playlist(macro_folder: str) -> List[str]:
             name for name in os.listdir(macro_folder) if name.endswith(".txt")
         ]
     except FileNotFoundError as exc:
-        raise FileNotFoundError(
-            "Macro folder not found"
-        ) from exc
+        raise FileNotFoundError("Macro folder not found") from exc
     except Exception as exc:
         raise RuntimeError(f"Error reading macro folder: {exc}") from exc
 
@@ -124,13 +123,17 @@ class MacroController:
         return self._playlist_builder(macro_folder)
 
     # -- Core playback loop ------------------------------------------------------
-    def play_macro_thread(self, port: str, window_title: str, macro_folder: str) -> None:
+    def play_macro_thread(
+        self, port: str, window_title: str, macro_folder: str
+    ) -> None:
         self.app.is_playing = True
         self.app.status_text.set("Status: Playing...")
         self.app.keys_currently_down.clear()
 
         if not self._window_service.activate(window_title):
-            logging.error("Target window '%s' not found or could not be activated.", window_title)
+            logging.error(
+                "Target window '%s' not found or could not be activated.", window_title
+            )
             self.app.is_playing = False
             self.app.root.after(0, self.app.on_macro_thread_exit)
             return
@@ -190,7 +193,9 @@ class MacroController:
                         while time.time() - start_time < 12:
                             line = ser.readline().decode("utf-8").strip()
                             if line == "PICO_READY":
-                                logging.info("PICO_READY signal received. Starting macro.")
+                                logging.info(
+                                    "PICO_READY signal received. Starting macro."
+                                )
                                 self._finalize_handshake(ser)
                                 ready_signal_received = True
                                 break
@@ -264,9 +269,8 @@ class MacroController:
                                                 )
                                                 self.app.is_playing = False
                                                 break
-                                        if (
-                                            (not hello_sent)
-                                            and (time.time() - start_time >= 1.0)
+                                        if (not hello_sent) and (
+                                            time.time() - start_time >= 1.0
                                         ):
                                             try:
                                                 ser.write(b"hello|handshake\n")
@@ -277,7 +281,9 @@ class MacroController:
                                 except Exception:
                                     ready_signal_received = False
                             if not ready_signal_received:
-                                logging.error("Timed out waiting for PICO_READY signal.")
+                                logging.error(
+                                    "Timed out waiting for PICO_READY signal."
+                                )
                                 self.app.is_playing = False
                                 try:
                                     ser.close()
@@ -337,7 +343,8 @@ class MacroController:
                                     )
                                     if ok:
                                         logging.info(
-                                            "Sent release for %s and received ACK (Remote).", key
+                                            "Sent release for %s and received ACK (Remote).",
+                                            key,
                                         )
                                     else:
                                         logging.warning(
@@ -354,7 +361,8 @@ class MacroController:
                                         )
                                     else:
                                         logging.warning(
-                                            "Timeout on final release ACK for key '%s'.", key
+                                            "Timeout on final release ACK for key '%s'.",
+                                            key,
                                         )
                             self.app.keys_currently_down.clear()
                     except Exception as exc:
@@ -367,5 +375,3 @@ class MacroController:
                             pass
         logging.info("Macro thread is finishing.")
         self.app.root.after(0, self.app.on_macro_thread_exit)
-
-

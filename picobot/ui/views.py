@@ -1,4 +1,5 @@
 """Reusable Tkinter view components."""
+
 from __future__ import annotations
 
 import tkinter as tk
@@ -27,9 +28,7 @@ class PortSelectorView:
         )
         self.combobox.pack(side=tk.LEFT, fill="x", expand=True)
 
-        self.refresh_button = tk.Button(
-            self.frame, text="Refresh", command=on_refresh
-        )
+        self.refresh_button = tk.Button(self.frame, text="Refresh", command=on_refresh)
         self.refresh_button.pack(side=tk.LEFT, padx=(10, 0))
 
         self.auto_button = tk.Button(
@@ -78,7 +77,11 @@ class RemoteView:
         self.http_entry.grid(row=0, column=3, sticky="w")
 
         self.toggle_button = tk.Button(
-            self.frame, text="Start Remote", command=self._toggle, bg="#1976D2", fg="white"
+            self.frame,
+            text="Start Remote",
+            command=self._toggle,
+            bg="#1976D2",
+            fg="white",
         )
         self.toggle_button.grid(row=0, column=4, padx=(10, 0))
 

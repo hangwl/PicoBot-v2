@@ -1,4 +1,5 @@
 """Remote control server implementation for PicoBot."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +11,8 @@ from typing import Callable, Optional
 
 try:
     import websockets
-except Exception:  # pragma: no cover - optional dependency
-    websockets = None  # type: ignore
+except Exception:
+    websockets = None
 
 from ..transport import SerialManager
 
@@ -104,7 +105,7 @@ class AsyncWebsocketBridge:
             if self._server is None:
                 return
             loop.run_until_complete(self._wait_for_stop())
-        except Exception as exc:  # pragma: no cover - background thread
+        except Exception as exc:
             if self.on_error:
                 try:
                     self.on_error(exc)
@@ -131,7 +132,7 @@ class AsyncWebsocketBridge:
         for offset in range(self.max_attempts):
             port = self.base_port + offset
             try:
-                self._server = await websockets.serve(  # type: ignore[attr-defined]
+                self._server = await websockets.serve(
                     self._handle_client,
                     self.host,
                     port,
@@ -158,7 +159,7 @@ class AsyncWebsocketBridge:
         while not self._stop_event.is_set():
             await asyncio.sleep(0.1)
 
-    async def _handle_client(self, websocket, path: str | None = None) -> None:  # pragma: no cover - async runtime
+    async def _handle_client(self, websocket, path: str | None = None) -> None:
         try:
             if self.on_client_connected:
                 try:
@@ -178,9 +179,12 @@ class AsyncWebsocketBridge:
                     logging.getLogger(__name__).debug(
                         "WS handler error: %s", exc, exc_info=True
                     )
-        except (asyncio.CancelledError, getattr(websockets, 'exceptions', object()).ConnectionClosedOK):
+        except (
+            asyncio.CancelledError,
+            getattr(websockets, "exceptions", object()).ConnectionClosedOK,
+        ):
             pass
-        except getattr(websockets, 'exceptions', object()).ConnectionClosedError:
+        except getattr(websockets, "exceptions", object()).ConnectionClosedError:
             pass
         finally:
             if self.on_client_disconnected:
@@ -259,7 +263,9 @@ class RemoteControlServer:
     def _writer_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
-                cmd, wait_ack, response_queue, timeout_s = self.cmd_queue.get(timeout=0.1)
+                cmd, wait_ack, response_queue, timeout_s = self.cmd_queue.get(
+                    timeout=0.1
+                )
             except queue.Empty:
                 continue
             result = False
@@ -389,6 +395,4 @@ class RemoteControlServer:
         try:
             func(*args)
         except Exception:
-            logging.getLogger(__name__).debug(
-                "Remote callback error", exc_info=True
-            )
+            logging.getLogger(__name__).debug("Remote callback error", exc_info=True)

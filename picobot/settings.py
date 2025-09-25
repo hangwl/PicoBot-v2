@@ -9,7 +9,9 @@ LOG_LEVEL = logging.INFO
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 
 
-def configure_logging(*, level: int = LOG_LEVEL, fmt: str = LOG_FORMAT, force: bool = False) -> None:
+def configure_logging(
+    *, level: int = LOG_LEVEL, fmt: str = LOG_FORMAT, force: bool = False
+) -> None:
     """Initialize the root logger used across PicoBot."""
 
     if force:

@@ -1,4 +1,5 @@
 """Service utilities for device and window discovery."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -78,7 +79,9 @@ class PortService:
                 selected = candidate
                 auto_selected = True
 
-        return PortSelection(ports=ports, selected=selected, auto_selected=auto_selected)
+        return PortSelection(
+            ports=ports, selected=selected, auto_selected=auto_selected
+        )
 
 
 class WindowService:

@@ -48,5 +48,5 @@ class CountdownServiceTests(unittest.TestCase):
         self.assertEqual(on_complete_calls, [False])
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     unittest.main()

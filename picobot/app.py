@@ -30,7 +30,7 @@ class MacroControllerApp:
         """Initialize the MacroControllerApp with the main window."""
         self.root = root
         self.root.title("Pico Continuous Macro Controller")
-        self.root.geometry("500x450")  # Increased height for new elements
+        self.root.geometry("500x450")
 
         self.config = config or load_app_config()
 
@@ -215,7 +215,9 @@ class MacroControllerApp:
         )
         self.telegram_frame.pack(padx=10, pady=10, fill="x")
 
-        tk.Label(self.telegram_frame, text="Bot Token:").grid(row=0, column=0, sticky="w")
+        tk.Label(self.telegram_frame, text="Bot Token:").grid(
+            row=0, column=0, sticky="w"
+        )
         self.bot_token_entry = tk.Entry(
             self.telegram_frame, textvariable=self.bot_token_var, width=32
         )
@@ -245,12 +247,11 @@ class MacroControllerApp:
         for seconds in (600, 900):
             tk.Button(
                 preset_frame,
-                text=f"{seconds//60}m",
+                text=f"{seconds // 60}m",
                 command=lambda s=seconds: self.set_countdown_preset(s),
             ).pack(side=tk.LEFT, padx=(0, 5))
 
         self.telegram_frame.grid_columnconfigure(1, weight=1)
-
 
     def create_remote_ui(self):
         """Creates the UI elements for Remote Control via WebSocket."""
@@ -651,4 +652,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -28,7 +28,7 @@ class TelegramHandler:
         params = {"chat_id": self.chat_id, "text": text}
         try:
             response = requests.post(url, params=params, timeout=10)
-        except Exception as exc:  # pragma: no cover - network errors aren't deterministic
+        except Exception as exc:
             logger.error("Error sending Telegram message: %s", exc)
             return None
 

@@ -36,7 +36,6 @@ class DummyWindowService:
         return SimpleNamespace(titles=[], selected=None)
 
 
-
 class MacroControllerPlaybackTests(unittest.TestCase):
     def setUp(self) -> None:
         self.port_service = DummyPortService()
@@ -78,7 +77,12 @@ class MacroControllerPlaybackTests(unittest.TestCase):
 
     def test_build_playlist_prioritises_start_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            for name in ["START_intro.txt", "macro_one.txt", "START_alpha.txt", "macro_two.txt"]:
+            for name in [
+                "START_intro.txt",
+                "macro_one.txt",
+                "START_alpha.txt",
+                "macro_two.txt",
+            ]:
                 (Path(tmpdir) / name).write_text("", encoding="utf-8")
             with mock.patch(
                 "picobot.playback.macro_controller.random.shuffle",
@@ -99,39 +103,42 @@ class MacroControllerPlaybackTests(unittest.TestCase):
         def fake_sleep(_seconds: float) -> None:
             self.app_stub.is_playing = False
 
-        with mock.patch(
-            "picobot.playback.macro_controller.time.time",
-            side_effect=fake_time,
-        ), mock.patch(
-            "picobot.playback.macro_controller.time.sleep",
-            side_effect=fake_sleep,
+        with (
+            mock.patch(
+                "picobot.playback.macro_controller.time.time",
+                side_effect=fake_time,
+            ),
+            mock.patch(
+                "picobot.playback.macro_controller.time.sleep",
+                side_effect=fake_sleep,
+            ),
         ):
             result = self.controller.interruptible_sleep(0.05)
         self.assertFalse(result)
 
     def test_build_port_selection_delegates_to_service(self) -> None:
-        expected = SimpleNamespace(ports=['COM3'], selected='COM3', auto_selected=True)
+        expected = SimpleNamespace(ports=["COM3"], selected="COM3", auto_selected=True)
 
         def fake_build_selection(current, *, force_auto=False):
-            self.assertEqual(current, 'COM3')
+            self.assertEqual(current, "COM3")
             self.assertTrue(force_auto)
             return expected
 
         self.port_service.build_selection = fake_build_selection  # type: ignore[attr-defined]
-        result = self.controller.build_port_selection('COM3', force_auto=True)
+        result = self.controller.build_port_selection("COM3", force_auto=True)
         self.assertIs(result, expected)
 
     def test_build_window_selection_delegates_to_service(self) -> None:
-        expected = SimpleNamespace(titles=['One', 'Two'], selected='Two')
+        expected = SimpleNamespace(titles=["One", "Two"], selected="Two")
 
         def fake_build_selection(current):
-            self.assertEqual(current, 'Two')
+            self.assertEqual(current, "Two")
             return expected
 
-        self.window_service.build_selection = fake_build_selection  # type: ignore[attr-defined]
-        result = self.controller.build_window_selection('Two')
+        self.window_service.build_selection = fake_build_selection
+        result = self.controller.build_window_selection("Two")
         self.assertIs(result, expected)
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     unittest.main()

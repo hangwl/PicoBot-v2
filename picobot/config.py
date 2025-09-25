@@ -1,9 +1,10 @@
 """Configuration helpers for PicoBot."""
+
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +67,9 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
     data["always_on_top"] = bool(raw.get("always_on_top", data["always_on_top"]))
     data["bot_token"] = str(raw.get("bot_token", data["bot_token"]))
     data["chat_id"] = str(raw.get("chat_id", data["chat_id"]))
-    data["countdown_seconds"] = max(1, _coerce_int(raw.get("countdown_seconds"), defaults.countdown_seconds))
+    data["countdown_seconds"] = max(
+        1, _coerce_int(raw.get("countdown_seconds"), defaults.countdown_seconds)
+    )
     data["ws_port"] = _coerce_int(raw.get("ws_port"), defaults.ws_port)
     data["http_port"] = _coerce_int(raw.get("http_port"), defaults.http_port)
 
