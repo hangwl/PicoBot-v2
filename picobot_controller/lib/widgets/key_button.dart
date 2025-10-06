@@ -9,7 +9,6 @@ class KeyButton extends StatefulWidget {
   final bool isEditMode;
   final VoidCallback? onPressed;
   final VoidCallback? onReleased;
-  final VoidCallback? onLongPress;
 
   const KeyButton({
     super.key,
@@ -19,7 +18,6 @@ class KeyButton extends StatefulWidget {
     this.isEditMode = false,
     this.onPressed,
     this.onReleased,
-    this.onLongPress,
   });
 
   @override
@@ -50,26 +48,17 @@ class _KeyButtonState extends State<KeyButton> {
               setState(() => _isPressed = false);
               widget.onReleased?.call();
             },
-      onLongPress: widget.onLongPress,
       child: Container(
         width: widget.width,
         height: widget.height,
         decoration: BoxDecoration(
           color: _isPressed
               ? Theme.of(context).colorScheme.primary
-              : widget.isEditMode
-                  ? Theme.of(context).colorScheme.secondaryContainer
-                  : Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: widget.isEditMode
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.outline,
-            width: 2,
-          ),
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
+              color: Colors.black.withAlpha(77),
               blurRadius: _isPressed ? 2 : 4,
               offset: Offset(0, _isPressed ? 1 : 2),
             ),

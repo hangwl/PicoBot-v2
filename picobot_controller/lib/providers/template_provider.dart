@@ -40,97 +40,16 @@ class TemplateProvider extends ChangeNotifier {
 
     _templates = await _storageService.loadTemplates();
 
-    // Create default template if none exist
+    // If templates are still empty after loading, it means it's the first launch
+    // and the storage service will have loaded the default from assets.
     if (_templates.isEmpty) {
-      await _createDefaultTemplate();
+      _templates = await _storageService.loadTemplates();
     }
 
     _isLoading = false;
     notifyListeners();
   }
 
-  /// Create a default template for first-time users
-  Future<void> _createDefaultTemplate() async {
-    final defaultTemplate = Template(
-      name: 'Default WASD',
-      layouts: {
-        'fullscreen': LayoutConfig(
-          minWidth: ScreenBreakpoints.fullscreenMinWidth,
-          keys: [
-            // WASD keys
-            KeyConfig(
-              label: 'W',
-              keyCode: 'w',
-              xPercent: 0.15,
-              yPercent: 0.30,
-              widthPercent: DefaultKeySizes.width,
-              heightPercent: DefaultKeySizes.height,
-            ),
-            KeyConfig(
-              label: 'A',
-              keyCode: 'a',
-              xPercent: 0.05,
-              yPercent: 0.45,
-              widthPercent: DefaultKeySizes.width,
-              heightPercent: DefaultKeySizes.height,
-            ),
-            KeyConfig(
-              label: 'S',
-              keyCode: 's',
-              xPercent: 0.15,
-              yPercent: 0.45,
-              widthPercent: DefaultKeySizes.width,
-              heightPercent: DefaultKeySizes.height,
-            ),
-            KeyConfig(
-              label: 'D',
-              keyCode: 'd',
-              xPercent: 0.25,
-              yPercent: 0.45,
-              widthPercent: DefaultKeySizes.width,
-              heightPercent: DefaultKeySizes.height,
-            ),
-            // Space bar
-            KeyConfig(
-              label: 'SPACE',
-              keyCode: 'space',
-              xPercent: 0.10,
-              yPercent: 0.65,
-              widthPercent: 0.25,
-              heightPercent: DefaultKeySizes.height,
-            ),
-            // Skills on right side
-            KeyConfig(
-              label: '1',
-              keyCode: '1',
-              xPercent: 0.70,
-              yPercent: 0.30,
-              widthPercent: DefaultKeySizes.width,
-              heightPercent: DefaultKeySizes.height,
-            ),
-            KeyConfig(
-              label: '2',
-              keyCode: '2',
-              xPercent: 0.70,
-              yPercent: 0.45,
-              widthPercent: DefaultKeySizes.width,
-              heightPercent: DefaultKeySizes.height,
-            ),
-            KeyConfig(
-              label: 'E',
-              keyCode: 'e',
-              xPercent: 0.70,
-              yPercent: 0.60,
-              widthPercent: DefaultKeySizes.width,
-              heightPercent: DefaultKeySizes.height,
-            ),
-          ],
-        ),
-      },
-    );
-
-    await saveTemplate(defaultTemplate);
-  }
 
   /// Load active template
   Future<void> loadActiveTemplate() async {
@@ -248,6 +167,17 @@ class TemplateProvider extends ChangeNotifier {
     await saveTemplate(updatedTemplate);
     _activeTemplate = updatedTemplate;
     _currentLayout = updatedLayout;
+    notifyListeners();
+  }
+
+  /// Reorder templates
+  Future<void> reorderTemplates(int oldIndex, int newIndex) async {
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
+    final template = _templates.removeAt(oldIndex);
+    _templates.insert(newIndex, template);
+    await _storageService.saveAllTemplates(_templates);
     notifyListeners();
   }
 

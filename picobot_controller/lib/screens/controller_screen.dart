@@ -31,19 +31,14 @@ class _ControllerScreenState extends State<ControllerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Consumer<TemplateProvider>(
-          builder: (context, templateProvider, child) {
-            return Text(templateProvider.activeTemplate?.name ?? 'Controller');
-          },
-        ),
-        actions: [
-          // Macro control button
-          Consumer<ConnectionProvider>(
-            builder: (context, connectionProvider, child) {
-              final isMacroPlaying = connectionProvider.isMacroPlaying;
-              
-              return IconButton(
+        title: Consumer<ConnectionProvider>(
+          builder: (context, connectionProvider, child) {
+            final isMacroPlaying = connectionProvider.isMacroPlaying;
+            return SizedBox(
+              width: 200,
+              child: ElevatedButton.icon(
                 icon: Icon(isMacroPlaying ? Icons.stop : Icons.play_arrow),
+                label: Text(isMacroPlaying ? 'STOP' : 'START'),
                 onPressed: connectionProvider.isConnected
                     ? () {
                         if (isMacroPlaying) {
@@ -53,7 +48,30 @@ class _ControllerScreenState extends State<ControllerScreen> {
                         }
                       }
                     : null,
-                tooltip: isMacroPlaying ? 'Stop Macro' : 'Start Macro',
+                style: ElevatedButton.styleFrom(
+                  foregroundColor: isMacroPlaying
+                      ? Theme.of(context).colorScheme.onError
+                      : Theme.of(context).colorScheme.onPrimary,
+                  backgroundColor: isMacroPlaying
+                      ? Theme.of(context).colorScheme.error
+                      : Colors.green,
+                ),
+              ),
+            );
+          },
+        ),
+        centerTitle: true,
+        actions: [
+          // Connection status indicator
+          Consumer<ConnectionProvider>(
+            builder: (context, connectionProvider, child) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: Icon(
+                  Icons.circle,
+                  color: connectionProvider.isConnected ? Colors.green : Colors.red,
+                  size: 16,
+                ),
               );
             },
           ),
@@ -75,14 +93,6 @@ class _ControllerScreenState extends State<ControllerScreen> {
                     style: TextStyle(fontSize: 18),
                   ),
                   const SizedBox(height: 8),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      templateProvider.setEditMode(true);
-                      Navigator.pop(context);
-                    },
-                    icon: const Icon(Icons.edit),
-                    label: const Text('Edit Template'),
-                  ),
                 ],
               ),
             );
@@ -133,13 +143,6 @@ class _ControllerScreenState extends State<ControllerScreen> {
             },
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          context.read<TemplateProvider>().setEditMode(true);
-          Navigator.pop(context);
-        },
-        child: const Icon(Icons.edit),
       ),
     );
   }

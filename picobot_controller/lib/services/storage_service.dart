@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import '../models/template.dart';
 
 /// Service for persisting templates and app settings
@@ -58,7 +59,7 @@ class StorageService {
       final jsonString = prefs.getString(_templatesKey);
 
       if (jsonString == null || jsonString.isEmpty) {
-        return [];
+        return [await _loadDefaultTemplateFromAsset()];
       }
 
       final jsonList = jsonDecode(jsonString) as List;
@@ -84,7 +85,14 @@ class StorageService {
   Future<bool> deleteTemplate(String id) async {
     try {
       final templates = await loadTemplates();
+      final initialLength = templates.length;
       templates.removeWhere((t) => t.id == id);
+      
+      // Check if any template was actually removed
+      if (templates.length == initialLength) {
+        debugPrint('Template with id $id not found');
+        return false;
+      }
 
       final prefs = await _getPrefs();
       final jsonList = templates.map((t) => t.toJson()).toList();
@@ -107,6 +115,19 @@ class StorageService {
   Future<bool> setActiveTemplateId(String id) async {
     final prefs = await _getPrefs();
     return await prefs.setString(_activeTemplateKey, id);
+  }
+
+  /// Save all templates (for reordering)
+  Future<bool> saveAllTemplates(List<Template> templates) async {
+    try {
+      final prefs = await _getPrefs();
+      final jsonList = templates.map((t) => t.toJson()).toList();
+      final jsonString = jsonEncode(jsonList);
+      return await prefs.setString(_templatesKey, jsonString);
+    } catch (e) {
+      debugPrint('Error saving all templates: $e');
+      return false;
+    }
   }
 
   /// Clear active template
@@ -154,6 +175,13 @@ class StorageService {
   }
 
   // ========== Utility ==========
+
+  /// Load the default template from assets
+  Future<Template> _loadDefaultTemplateFromAsset() async {
+    final jsonString = await rootBundle.loadString('assets/templates/default_template.json');
+    final jsonMap = jsonDecode(jsonString);
+    return Template.fromJson(jsonMap);
+  }
 
   /// Clear all data (for testing/reset)
   Future<bool> clearAll() async {

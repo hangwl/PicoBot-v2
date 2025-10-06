@@ -137,10 +137,15 @@ class ScreenBreakpoints {
   static const double fullscreenMinWidth = 600.0;
 }
 
+/// The minimum size (width and height) for a key in logical pixels.
+const double minKeySize = 64.0;
+
 /// Default key sizes as percentages
 class DefaultKeySizes {
-  static const double width = 0.15; // 15% of screen width
-  static const double height = 0.10; // 10% of screen height
+  // Default size is now based on minKeySize, but defined in pixels.
+  // The conversion to percentage will happen in the widget that adds the key.
+  static const double width = minKeySize;
+  static const double height = minKeySize;
   static const double minTouchTarget = 48.0; // Minimum touch target in dp
 }
 

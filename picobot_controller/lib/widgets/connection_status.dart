@@ -14,23 +14,13 @@ class ConnectionStatusWidget extends StatelessWidget {
         
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isConnected ? Icons.wifi : Icons.wifi_off,
-                color: isConnected ? Colors.green : Colors.red,
-                size: 20,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                isConnected ? 'Connected' : 'Disconnected',
-                style: TextStyle(
-                  color: isConnected ? Colors.green : Colors.red,
-                  fontSize: 12,
-                ),
-              ),
-            ],
+          child: Tooltip(
+            message: isConnected ? 'Connected' : 'Disconnected',
+            child: Icon(
+              Icons.circle,
+              color: isConnected ? Colors.green : Colors.red,
+              size: 16,
+            ),
           ),
         );
       },

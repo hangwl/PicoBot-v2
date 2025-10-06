@@ -1,10 +1,10 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/template_provider.dart';
 import '../models/key_config.dart';
 import '../utils/constants.dart';
 import '../widgets/draggable_key_widget.dart';
-import 'controller_screen.dart';
 
 /// Template editor screen for customizing key layouts
 class TemplateEditorScreen extends StatefulWidget {
@@ -16,14 +16,18 @@ class TemplateEditorScreen extends StatefulWidget {
 
 class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
   bool _showKeyMenu = false;
+  String? _selectedKeyId;
+  final GlobalKey _canvasKey = GlobalKey();
+
+  // State for draggable modal
+  double _dragOffset = 0.0;
+  bool _isDragging = false;
 
   @override
   void initState() {
     super.initState();
-    context.read<TemplateProvider>().setEditMode(true);
-    
-    // Update layout for current screen size
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<TemplateProvider>().setEditMode(true);
       _updateLayout();
     });
   }
@@ -31,6 +35,12 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
   void _updateLayout() {
     final width = MediaQuery.of(context).size.width;
     context.read<TemplateProvider>().updateLayoutForWidth(width);
+  }
+
+  void _setSelectedKey(String? keyId) {
+    setState(() {
+      _selectedKeyId = keyId;
+    });
   }
 
   @override
@@ -53,27 +63,16 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
             },
             tooltip: 'Add Keys',
           ),
-          // Lock/Use template
-          IconButton(
-            icon: const Icon(Icons.play_arrow),
-            onPressed: () {
-              context.read<TemplateProvider>().setEditMode(false);
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (_) => const ControllerScreen()),
-              );
-            },
-            tooltip: 'Use Template',
-          ),
+
         ],
       ),
       body: Stack(
         children: [
-          // Canvas area
+          // Canvas area for keys
           Consumer<TemplateProvider>(
             builder: (context, templateProvider, child) {
               final layout = templateProvider.currentLayout;
-              
+
               if (layout == null) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -83,35 +82,46 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
                   final screenWidth = constraints.maxWidth;
                   final screenHeight = constraints.maxHeight;
 
-                  return Stack(
-                    children: [
-                      // Grid background (optional)
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface,
+                  return SizedBox.expand(
+                    key: _canvasKey,
+                    child: Stack(
+                      children: [
+                        // Grid background
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surface,
+                          ),
                         ),
-                      ),
-                      // Keys
-                      ...layout.keys.map((keyConfig) {
-                        return DraggableKeyWidget(
-                          key: ValueKey(keyConfig.id),
-                          keyConfig: keyConfig,
-                          screenWidth: screenWidth,
-                          screenHeight: screenHeight,
-                          onPositionChanged: (newX, newY) {
-                            final updatedKey = keyConfig.copyWith(
-                              xPercent: newX / screenWidth,
-                              yPercent: newY / screenHeight,
-                            );
-                            templateProvider.updateKey(updatedKey);
-                          },
-                          onDelete: () {
-                            templateProvider.removeKey(keyConfig.id);
-                          },
-                        );
-                      }),
-                      // Empty state
-                      if (layout.keys.isEmpty)
+                        // Draggable keys
+                        ...layout.keys.map((keyConfig) {
+                          return DraggableKeyWidget(
+                            key: ValueKey(keyConfig.id),
+                            keyConfig: keyConfig,
+                            screenWidth: screenWidth,
+                            screenHeight: screenHeight,
+                            isSelected: keyConfig.id == _selectedKeyId,
+                            onSelected: (isSelected) {
+                              _setSelectedKey(isSelected ? keyConfig.id : null);
+                            },
+                            onPositionChanged: (newX, newY) {
+                              final updatedKey = keyConfig.copyWith(
+                                xPercent: newX / screenWidth,
+                                yPercent: newY / screenHeight,
+                              );
+                              templateProvider.updateKey(updatedKey);
+                            },
+                            onResize: (newWidth, newHeight) {
+                              final updatedKey = keyConfig.copyWith(
+                                widthPercent: newWidth / screenWidth,
+                                heightPercent: newHeight / screenHeight,
+                              );
+                              templateProvider.updateKey(updatedKey);
+                            },
+                            onDelete: () => templateProvider.removeKey(keyConfig.id),
+                          );
+                        }),
+                        // Empty state
+                        if (layout.keys.isEmpty) 
                         Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -132,7 +142,8 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
                             ],
                           ),
                         ),
-                    ],
+                      ],
+                    ),
                   );
                 },
               );
@@ -140,8 +151,24 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
           ),
           // Key menu overlay
           if (_showKeyMenu)
-            Positioned(
-              bottom: 0,
+            // Scrim to dismiss modal on tap
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _showKeyMenu = false;
+                  });
+                },
+                child: Container(
+                  color: Colors.black.withAlpha(128),
+                ),
+              ),
+            ),
+          if (_showKeyMenu)
+            AnimatedPositioned(
+              duration: _isDragging ? Duration.zero : const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              bottom: -_dragOffset,
               left: 0,
               right: 0,
               child: _buildKeyMenu(),
@@ -154,7 +181,7 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
   /// Build the key selection menu
   Widget _buildKeyMenu() {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.5,
+      height: MediaQuery.of(context).size.height * 0.8,
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
@@ -169,37 +196,64 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
       child: Column(
         children: [
           // Handle bar
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          // Title
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Add Keys',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragStart: (_) {
+              setState(() {
+                _isDragging = true;
+              });
+            },
+            onVerticalDragUpdate: (details) {
+              setState(() {
+                // Allow dragging up and down, but not above the initial position
+                _dragOffset = max(0, _dragOffset + details.delta.dy);
+              });
+            },
+            onVerticalDragEnd: (details) {
+              final modalHeight = MediaQuery.of(context).size.height * 0.8;
+              final animationDuration = const Duration(milliseconds: 200);
+
+              // Dismiss if dragged more than 30% of its height
+              if (_dragOffset > modalHeight * 0.3) {
+                // Animate off-screen
+                setState(() {
+                  _dragOffset = modalHeight;
+                  _isDragging = false;
+                });
+
+                // After animation, hide the menu
+                Future.delayed(animationDuration, () {
+                  if (mounted) {
                     setState(() {
                       _showKeyMenu = false;
+                      _dragOffset = 0;
                     });
-                  },
+                  }
+                });
+              } else {
+                // Animate back if not dismissed
+                setState(() {
+                  _isDragging = false;
+                  _dragOffset = 0;
+                });
+              }
+            },
+            child: Container(
+              width: double.infinity,
+              color: Colors.transparent, // Make the whole top area draggable
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
-          const Divider(),
           // Key categories
           Expanded(
             child: DefaultTabController(
@@ -208,6 +262,7 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
                 children: [
                   TabBar(
                     isScrollable: true,
+                    tabAlignment: TabAlignment.start,
                     tabs: AvailableKeys.getAllKeysGrouped().keys.map((category) {
                       return Tab(text: category);
                     }).toList(),
@@ -283,14 +338,17 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
     final offsetX = (numKeys % 3) * 0.2;
     final offsetY = (numKeys ~/ 3) * 0.15;
 
+    final screenWidth = _canvasKey.currentContext!.size!.width;
+    final screenHeight = _canvasKey.currentContext!.size!.height;
+
     final newKey = KeyConfig(
       label: label,
       keyCode: keyCode,
       type: type,
       xPercent: 0.3 + offsetX,
       yPercent: 0.3 + offsetY,
-      widthPercent: DefaultKeySizes.width,
-      heightPercent: DefaultKeySizes.height,
+      widthPercent: DefaultKeySizes.width / screenWidth,
+      heightPercent: DefaultKeySizes.height / screenHeight,
     );
 
     templateProvider.addKey(newKey);

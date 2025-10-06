@@ -1,12 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/key_config.dart';
+import '../providers/template_provider.dart';
+import 'dart:math';
+import '../utils/constants.dart';
+
+const double _handleSize = 24.0;
 
 /// A draggable key widget for the template editor
 class DraggableKeyWidget extends StatefulWidget {
   final KeyConfig keyConfig;
   final double screenWidth;
   final double screenHeight;
-  final Function(double x, double y) onPositionChanged;
+  final bool isSelected;
+  final Function(bool) onSelected;
+  final Function(double, double) onPositionChanged;
+  final Function(double, double) onResize;
   final VoidCallback onDelete;
 
   const DraggableKeyWidget({
@@ -14,7 +23,10 @@ class DraggableKeyWidget extends StatefulWidget {
     required this.keyConfig,
     required this.screenWidth,
     required this.screenHeight,
+    required this.isSelected,
+    required this.onSelected,
     required this.onPositionChanged,
+    required this.onResize,
     required this.onDelete,
   });
 
@@ -23,171 +35,213 @@ class DraggableKeyWidget extends StatefulWidget {
 }
 
 class _DraggableKeyWidgetState extends State<DraggableKeyWidget> {
-  late double _x;
-  late double _y;
-  bool _isDragging = false;
+  late double x;
+  late double y;
+  double _initialWidth = 0.0;
+  double _initialHeight = 0.0;
+  Offset _dragStartOffset = Offset.zero;
 
   @override
   void initState() {
     super.initState();
-    _x = widget.keyConfig.xPercent * widget.screenWidth;
-    _y = widget.keyConfig.yPercent * widget.screenHeight;
+    _updateLocalPosition();
   }
 
   @override
-  void didUpdateWidget(DraggableKeyWidget oldWidget) {
+  void didUpdateWidget(covariant DraggableKeyWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.screenWidth != widget.screenWidth ||
-        oldWidget.screenHeight != widget.screenHeight) {
-      _x = widget.keyConfig.xPercent * widget.screenWidth;
-      _y = widget.keyConfig.yPercent * widget.screenHeight;
+    if (widget.keyConfig != oldWidget.keyConfig ||
+        widget.screenWidth != oldWidget.screenWidth ||
+        widget.screenHeight != oldWidget.screenHeight) {
+      _updateLocalPosition();
     }
+  }
+
+  void _updateLocalPosition() {
+    setState(() {
+      x = widget.keyConfig.xPercent * widget.screenWidth;
+      y = widget.keyConfig.yPercent * widget.screenHeight;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final templateProvider = context.watch<TemplateProvider>();
+    final isEditMode = templateProvider.isEditMode;
     final width = widget.keyConfig.widthPercent * widget.screenWidth;
     final height = widget.keyConfig.heightPercent * widget.screenHeight;
 
-    return Positioned(
-      left: _x,
-      top: _y,
-      child: GestureDetector(
-        onPanStart: (_) {
-          setState(() {
-            _isDragging = true;
-          });
-        },
-        onPanUpdate: (details) {
-          setState(() {
-            _x += details.delta.dx;
-            _y += details.delta.dy;
+    if (!isEditMode) {
+      // Simplified view for when the controller is in use
+      return Positioned(
+        left: x,
+        top: y,
+        child: Material(
+          elevation: 4.0,
+          color: Theme.of(context).colorScheme.primary,
+          borderRadius: BorderRadius.circular(8),
+          child: InkWell(
+            onTap: () {
+              // Handle key press
+            },
+            child: SizedBox(
+              width: width,
+              height: height,
+              child: Center(
+                child: Text(
+                  widget.keyConfig.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
-            // Clamp to screen bounds
-            _x = _x.clamp(0, widget.screenWidth - width);
-            _y = _y.clamp(0, widget.screenHeight - height);
-          });
+    // Full-featured view for the template editor
+    final keyButton = Material(
+      elevation: 8.0,
+      color: widget.isSelected
+          ? Theme.of(context).colorScheme.primary
+          : Theme.of(context).colorScheme.surface,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: () {
+          widget.onSelected(!widget.isSelected);
         },
-        onPanEnd: (_) {
-          setState(() {
-            _isDragging = false;
-          });
-          widget.onPositionChanged(_x, _y);
-        },
-        onLongPress: () {
-          _showKeyOptions(context);
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 100),
+        child: Container(
           width: width,
           height: height,
           decoration: BoxDecoration(
-            color: _isDragging
-                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.8)
-                : Theme.of(context).colorScheme.secondaryContainer,
-            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: Theme.of(context).colorScheme.primary,
-              width: _isDragging ? 3 : 2,
+              color: widget.isSelected
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.primary,
+              width: 2.0, // Constant border width
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: _isDragging ? 0.4 : 0.2),
-                blurRadius: _isDragging ? 8 : 4,
-                offset: Offset(0, _isDragging ? 4 : 2),
-              ),
-            ],
+            borderRadius: BorderRadius.circular(8),
           ),
-          child: Stack(
-            children: [
-              // Key label
-              Center(
-                child: Text(
-                  widget.keyConfig.label,
-                  style: TextStyle(
-                    fontSize: width > 80 ? 18 : 14,
-                    fontWeight: FontWeight.bold,
-                    color: _isDragging
-                        ? Theme.of(context).colorScheme.onPrimary
-                        : Theme.of(context).colorScheme.onSecondaryContainer,
-                  ),
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.ellipsis,
-                ),
+          child: Center(
+            child: Text(
+              widget.keyConfig.label,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: widget.isSelected
+                    ? Colors.white
+                    : Theme.of(context).colorScheme.onSurface,
               ),
-              // Drag indicator
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Icon(
-                  Icons.drag_indicator,
-                  size: 16,
-                  color: _isDragging
-                      ? Theme.of(context).colorScheme.onPrimary
-                      : Theme.of(context).colorScheme.onSecondaryContainer.withValues(alpha: 0.5),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
-  }
 
-  /// Show options menu for the key
-  void _showKeyOptions(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    // Use a larger stack to ensure handles are tappable
+    return Positioned(
+      left: x - (_handleSize / 2),
+      top: y - (_handleSize / 2),
+      child: SizedBox(
+        width: width + _handleSize,
+        height: height + _handleSize,
+        child: Stack(
           children: [
-            ListTile(
-              leading: const Icon(Icons.info),
-              title: Text(widget.keyConfig.label),
-              subtitle: Text('Key: ${widget.keyConfig.keyCode}'),
+            // The main draggable button
+            Positioned(
+              left: _handleSize / 2,
+              top: _handleSize / 2,
+              child: GestureDetector(
+                onPanUpdate: (details) {
+                  if (!widget.isSelected) {
+                    widget.onSelected(true);
+                    return; // Don't move on the first drag frame
+                  }
+                  setState(() {
+                    x += details.delta.dx;
+                    y += details.delta.dy;
+                  });
+                },
+                onPanEnd: (details) {
+                  final clampedX = x.clamp(0.0, widget.screenWidth - width);
+                  final clampedY = y.clamp(0.0, widget.screenHeight - height);
+                  widget.onPositionChanged(clampedX, clampedY);
+                },
+                child: keyButton,
+              ),
             ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Delete Key'),
-              onTap: () {
-                Navigator.pop(context);
-                _confirmDelete(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.close),
-              title: const Text('Cancel'),
-              onTap: () => Navigator.pop(context),
-            ),
+            // Delete button
+            if (widget.isSelected)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: widget.onDelete,
+                  child: Container(
+                    width: _handleSize,
+                    height: _handleSize,
+                    color: Colors.transparent, // Make area tappable
+                    child: Center(
+                      child: Container(
+                        width: _handleSize * 0.8,
+                        height: _handleSize * 0.8,
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close, color: Colors.white, size: 14),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // Resize handle (bottom-right)
+            if (widget.isSelected)
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: _buildResizeHandle(),
+              ),
           ],
         ),
       ),
     );
   }
 
-  /// Confirm deletion
-  void _confirmDelete(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Key'),
-        content: Text('Remove "${widget.keyConfig.label}" from template?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              widget.onDelete();
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
+  Widget _buildResizeHandle() {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (details) {
+        _initialWidth = widget.keyConfig.widthPercent * widget.screenWidth;
+        _initialHeight = widget.keyConfig.heightPercent * widget.screenHeight;
+        _dragStartOffset = details.globalPosition;
+      },
+      onPanUpdate: (details) {
+        final dx = details.globalPosition.dx - _dragStartOffset.dx;
+        final dy = details.globalPosition.dy - _dragStartOffset.dy;
+
+        final newWidth = _initialWidth + dx;
+        final newHeight = _initialHeight + dy;
+
+        // Enforce a minimum size to prevent negative dimensions
+        const minSize = minKeySize;
+        final clampedWidth = max(minSize, newWidth);
+        final clampedHeight = max(minSize, newHeight);
+
+        widget.onResize(clampedWidth, clampedHeight);
+      },
+      child: Container(
+        width: _handleSize,
+        height: _handleSize,
+        decoration: BoxDecoration(
+          color: Colors.green.withAlpha(128),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+        ),
+        child: const Icon(Icons.zoom_out_map, color: Colors.white, size: 14),
       ),
     );
   }

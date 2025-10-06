@@ -14,10 +14,17 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PicoBot Controller'),
+        leading: const Padding(
+          padding: EdgeInsets.only(left: 16.0),
+          child: ConnectionStatusWidget(),
+        ),
         actions: [
-          // Connection status indicator
-          const ConnectionStatusWidget(),
+          // Add new template button
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () => _showCreateTemplateDialog(context),
+            tooltip: 'New Template',
+          ),
           // Settings button
           IconButton(
             icon: const Icon(Icons.settings),
@@ -68,58 +75,8 @@ class HomeScreen extends StatelessWidget {
             itemCount: templates.length,
             itemBuilder: (context, index) {
               final template = templates[index];
-              final isActive =
-                  templateProvider.activeTemplate?.id == template.id;
-
               return Card(
-                elevation: isActive ? 4 : 1,
-                color: isActive
-                    ? Theme.of(context).colorScheme.primaryContainer
-                    : null,
-                child: ListTile(
-                  leading: Icon(
-                    Icons.keyboard,
-                    color: isActive
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                  title: Text(
-                    template.name,
-                    style: TextStyle(
-                      fontWeight: isActive ? FontWeight.bold : null,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${template.layouts['fullscreen']?.keys.length ?? 0} keys',
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Edit button
-                      IconButton(
-                        icon: const Icon(Icons.edit),
-                        onPressed: () {
-                          templateProvider.setActiveTemplate(template);
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const TemplateEditorScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      // Delete button
-                      if (templates.length > 1)
-                        IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _showDeleteDialog(
-                            context,
-                            template.id,
-                            template.name,
-                          ),
-                        ),
-                    ],
-                  ),
+                child: InkWell(
                   onTap: () async {
                     await templateProvider.setActiveTemplate(template);
                     if (context.mounted) {
@@ -131,16 +88,45 @@ class HomeScreen extends StatelessWidget {
                       );
                     }
                   },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            template.name,
+                            style: TextStyle(
+                              fontWeight: FontWeight.normal,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          style: IconButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          ),
+                          icon: const Icon(Icons.edit, size: 20),
+                          onPressed: () {
+                            templateProvider.setActiveTemplate(template);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const TemplateEditorScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showCreateTemplateDialog(context),
-        icon: const Icon(Icons.add),
-        label: const Text('New Template'),
       ),
     );
   }
@@ -176,12 +162,6 @@ class HomeScreen extends StatelessWidget {
                 
                 if (context.mounted) {
                   Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const TemplateEditorScreen(),
-                    ),
-                  );
                 }
               }
             },
@@ -192,28 +172,4 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  /// Show dialog to confirm template deletion
-  void _showDeleteDialog(BuildContext context, String id, String name) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Template'),
-        content: Text('Are you sure you want to delete "$name"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              context.read<TemplateProvider>().deleteTemplate(id);
-              Navigator.pop(context);
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
 }
