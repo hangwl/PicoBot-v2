@@ -200,4 +200,19 @@ class TemplateProvider extends ChangeNotifier {
     _currentLayout = updatedLayout;
     notifyListeners();
   }
+
+  // ========== Import / Export ==========
+
+  Future<String> exportTemplatesJson({bool pretty = true}) {
+    return _storageService.exportTemplatesJson(pretty: pretty);
+  }
+
+  Future<bool> importTemplatesJson(String jsonString, {bool merge = true}) async {
+    final ok = await _storageService.importTemplatesJson(jsonString, merge: merge);
+    if (ok) {
+      await loadTemplates();
+      await loadActiveTemplate();
+    }
+    return ok;
+  }
 }

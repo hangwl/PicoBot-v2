@@ -37,6 +37,77 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
     context.read<TemplateProvider>().updateLayoutForWidth(width);
   }
 
+  // ================= Grid helpers =================
+  double _snapToGrid(double value) {
+    return (value / gridStep).round() * gridStep;
+  }
+
+  Rect _rectForKey(KeyConfig key, double screenWidth, double screenHeight) {
+    final x = key.xPercent * screenWidth;
+    final y = key.yPercent * screenHeight;
+    final w = key.widthPercent * screenWidth;
+    final h = key.heightPercent * screenHeight;
+    return Rect.fromLTWH(x, y, w, h);
+  }
+
+  bool _overlapsWithGap(Rect a, Rect b) {
+    return a.inflate(minKeyGap / 2).overlaps(b.inflate(minKeyGap / 2));
+  }
+
+  bool _isFreeAt(Rect candidate, List<KeyConfig> keys, String movingId, double screenWidth, double screenHeight) {
+    for (final other in keys) {
+      if (other.id == movingId) continue;
+      final r = _rectForKey(other, screenWidth, screenHeight);
+      if (_overlapsWithGap(candidate, r)) return false;
+    }
+    return true;
+  }
+
+  Offset _findNearestFreeSnappedPosition({
+    required Size screen,
+    required Size keySize,
+    required Offset start,
+    required List<KeyConfig> keys,
+    required String movingId,
+  }) {
+    // Snap start
+    double sx = _snapToGrid(start.dx);
+    double sy = _snapToGrid(start.dy);
+    // Clamp to bounds
+    sx = sx.clamp(0.0, screen.width - keySize.width);
+    sy = sy.clamp(0.0, screen.height - keySize.height);
+
+    Rect candidate = Rect.fromLTWH(sx, sy, keySize.width, keySize.height);
+    if (_isFreeAt(candidate, keys, movingId, screen.width, screen.height)) {
+      return Offset(sx, sy);
+    }
+
+    // Spiral search around start in snapped steps
+    const int maxRadiusSteps = 20; // 20 * gridStep in each direction
+    for (int radius = 1; radius <= maxRadiusSteps; radius++) {
+      final offsets = <Offset>[
+        Offset(radius * gridStep, 0),
+        Offset(-radius * gridStep, 0),
+        Offset(0, radius * gridStep),
+        Offset(0, -radius * gridStep),
+        Offset(radius * gridStep, radius * gridStep),
+        Offset(radius * gridStep, -radius * gridStep),
+        Offset(-radius * gridStep, radius * gridStep),
+        Offset(-radius * gridStep, -radius * gridStep),
+      ];
+      for (final d in offsets) {
+        double nx = _snapToGrid(sx + d.dx).clamp(0.0, screen.width - keySize.width);
+        double ny = _snapToGrid(sy + d.dy).clamp(0.0, screen.height - keySize.height);
+        final rect = Rect.fromLTWH(nx, ny, keySize.width, keySize.height);
+        if (_isFreeAt(rect, keys, movingId, screen.width, screen.height)) {
+          return Offset(nx, ny);
+        }
+      }
+    }
+    // Fallback: return snapped clamped start even if overlapping
+    return Offset(sx, sy);
+  }
+
   void _setSelectedKey(String? keyId) {
     setState(() {
       _selectedKeyId = keyId;
@@ -104,16 +175,36 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
                               _setSelectedKey(isSelected ? keyConfig.id : null);
                             },
                             onPositionChanged: (newX, newY) {
+                              // Snap and resolve against grid and existing keys
+                              final keySize = Size(
+                                keyConfig.widthPercent * screenWidth,
+                                keyConfig.heightPercent * screenHeight,
+                              );
+                              final start = Offset(newX, newY);
+                              final pos = _findNearestFreeSnappedPosition(
+                                screen: Size(screenWidth, screenHeight),
+                                keySize: keySize,
+                                start: start,
+                                keys: layout.keys,
+                                movingId: keyConfig.id,
+                              );
                               final updatedKey = keyConfig.copyWith(
-                                xPercent: newX / screenWidth,
-                                yPercent: newY / screenHeight,
+                                xPercent: pos.dx / screenWidth,
+                                yPercent: pos.dy / screenHeight,
                               );
                               templateProvider.updateKey(updatedKey);
                             },
                             onResize: (newWidth, newHeight) {
+                              // Snap size to grid and clamp within bounds
+                              final xPx = keyConfig.xPercent * screenWidth;
+                              final yPx = keyConfig.yPercent * screenHeight;
+                              final maxWidth = (screenWidth - xPx).clamp(0.0, screenWidth);
+                              final maxHeight = (screenHeight - yPx).clamp(0.0, screenHeight);
+                              final snappedW = _snapToGrid(newWidth.clamp(minKeySize, maxWidth));
+                              final snappedH = _snapToGrid(newHeight.clamp(minKeySize, maxHeight));
                               final updatedKey = keyConfig.copyWith(
-                                widthPercent: newWidth / screenWidth,
-                                heightPercent: newHeight / screenHeight,
+                                widthPercent: snappedW / screenWidth,
+                                heightPercent: snappedH / screenHeight,
                               );
                               templateProvider.updateKey(updatedKey);
                             },
@@ -372,15 +463,30 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
     final screenWidth = _canvasKey.currentContext!.size!.width;
     final screenHeight = _canvasKey.currentContext!.size!.height;
 
+    // Desired size (snapped)
+    final desiredW = _snapToGrid(DefaultKeySizes.width);
+    final desiredH = _snapToGrid(DefaultKeySizes.height);
+    final keySize = Size(desiredW, desiredH);
+
+    // Start near center
+    final start = Offset(0.4 * screenWidth, 0.4 * screenHeight);
+    final pos = _findNearestFreeSnappedPosition(
+      screen: Size(screenWidth, screenHeight),
+      keySize: keySize,
+      start: start,
+      keys: layout.keys,
+      movingId: '__new__',
+    );
+
     final newKey = KeyConfig(
       label: label,
       keyCode: keyCode,
       type: type,
       shiftLabel: shiftLabel,
-      xPercent: 0.4, // Center of the screen
-      yPercent: 0.4, // Center of the screen
-      widthPercent: DefaultKeySizes.width / screenWidth,
-      heightPercent: DefaultKeySizes.height / screenHeight,
+      xPercent: pos.dx / screenWidth,
+      yPercent: pos.dy / screenHeight,
+      widthPercent: keySize.width / screenWidth,
+      heightPercent: keySize.height / screenHeight,
     );
 
     templateProvider.addKey(newKey);

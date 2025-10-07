@@ -48,12 +48,6 @@ PicoBot Mobile Controller – a Flutter app to design and use custom on-screen k
 
 ## Recommended improvements
 
-- **[Exponential backoff]** Add backoff and jitter to reconnection attempts in `WebSocketService` to reduce thrash on long outages.
 - **[Dedicated ping/pong]** Optionally add explicit `ping|<nonce>`/`pong|<nonce>` to the server and switch the client heartbeat from `macro|query` to a purpose-built ping.
-- **[Template migration]** One-time backfill to populate `shiftLabel` for existing saved templates by matching `keyCode` against `AvailableKeys`.
-- **[Gesture robustness]** Consider low-level pointer handling (`Listener`) for multi-touch hold scenarios to further minimize tap-cancel edge cases.
-- **[Multiple layouts]** Support alternate layouts per template (e.g., pip/split/fullscreen/orientation variants) and quick switching.
-- **[Template import/export]** JSON import/export and sharing.
-- **[Theming]** Per-template styles and improved theme customization.
 - **[Observability]** Centralized logging, error reporting, and analytics hooks.
 - **[Testing]** Unit tests for providers/services and widget tests for editor/controller interactions.

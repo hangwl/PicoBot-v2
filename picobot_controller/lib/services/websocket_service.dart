@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as status;
 import '../utils/constants.dart';
@@ -10,6 +11,8 @@ class WebSocketService {
   Timer? _reconnectTimer;
   Timer? _pingTimer;
   bool _awaitingHeartbeat = false; // true if last ping has not received any message yet
+  int _reconnectAttempts = 0; // grows with each consecutive failure
+  final Random _random = Random();
 
   String _host = ConnectionDefaults.defaultHost;
   int _port = ConnectionDefaults.defaultPort;
@@ -67,6 +70,8 @@ class WebSocketService {
       _startPingTimer();
 
       onConnectionChanged?.call(true);
+      // Successful connection resets backoff attempts
+      _reconnectAttempts = 0;
       _isConnecting = false;
 
       // Query initial macro state
@@ -112,11 +117,33 @@ class WebSocketService {
   /// Attempt to reconnect
   void _reconnect() {
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(ConnectionDefaults.reconnectDelay, () {
+    // Full jitter exponential backoff: random(0, min(cap, base * 2^attempt))
+    final int baseMs = ConnectionDefaults.reconnectBaseDelay.inMilliseconds;
+    final int capMs = ConnectionDefaults.reconnectMaxDelay.inMilliseconds;
+    // Compute exponential growth, capping to avoid overflow
+    int expFactor;
+    try {
+      expFactor = 1 << _reconnectAttempts; // 2^attempts
+    } catch (_) {
+      expFactor = 1 << 30; // fallback large value
+    }
+    int ceiling = baseMs * expFactor;
+    if (ceiling > capMs) ceiling = capMs;
+    if (ceiling < baseMs) ceiling = baseMs; // guard
+
+    final int jitterMs = _random.nextInt(ceiling + 1); // [0, ceiling]
+    final delay = Duration(milliseconds: jitterMs);
+
+    _reconnectTimer = Timer(delay, () {
       if (_shouldReconnect) {
         _connect();
       }
     });
+
+    // Prepare for the next attempt
+    if (_reconnectAttempts < 30) {
+      _reconnectAttempts += 1;
+    }
   }
 
   /// Start ping timer to keep connection alive
@@ -202,6 +229,8 @@ class WebSocketService {
     _shouldReconnect = false;
     _cleanup();
     onConnectionChanged?.call(false);
+    // Manual disconnect should clear backoff
+    _reconnectAttempts = 0;
   }
 
   /// Clean up resources

@@ -188,4 +188,59 @@ class StorageService {
     final prefs = await _getPrefs();
     return await prefs.clear();
   }
+
+  // ========== Import/Export ==========
+
+  /// Export all templates to a JSON string
+  Future<String> exportTemplatesJson({bool pretty = true}) async {
+    try {
+      final templates = await loadTemplates();
+      final jsonList = templates.map((t) => t.toJson()).toList();
+      if (pretty) {
+        const encoder = JsonEncoder.withIndent('  ');
+        return encoder.convert(jsonList);
+      }
+      return jsonEncode(jsonList);
+    } catch (e) {
+      debugPrint('Error exporting templates: $e');
+      return '[]';
+    }
+  }
+
+  /// Import templates from a JSON string.
+  ///
+  /// The JSON must be an array of Template objects.
+  /// If [merge] is true, incoming templates replace existing ones with the same ID
+  /// and add new ones; otherwise the existing set is fully replaced.
+  Future<bool> importTemplatesJson(String jsonString, {bool merge = true}) async {
+    try {
+      final prefs = await _getPrefs();
+      final dynamic decoded = jsonDecode(jsonString);
+      if (decoded is! List) {
+        throw FormatException('Expected a JSON array of templates');
+      }
+      final incoming = decoded.map((e) => Template.fromJson(e as Map<String, dynamic>)).toList();
+
+      if (!merge) {
+        // Replace all
+        final newJson = jsonEncode(incoming.map((t) => t.toJson()).toList());
+        final ok = await prefs.setString(_templatesKey, newJson);
+        return ok;
+      }
+
+      // Merge with existing
+      final existing = await loadTemplates();
+      final byId = {for (final t in existing) t.id: t};
+      for (final t in incoming) {
+        byId[t.id] = t; // replace or add
+      }
+      final merged = byId.values.toList();
+      final newJson = jsonEncode(merged.map((t) => t.toJson()).toList());
+      final ok = await prefs.setString(_templatesKey, newJson);
+      return ok;
+    } catch (e) {
+      debugPrint('Error importing templates: $e');
+      return false;
+    }
+  }
 }

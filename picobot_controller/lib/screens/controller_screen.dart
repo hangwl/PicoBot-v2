@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/connection_provider.dart';
 import '../providers/template_provider.dart';
 import '../widgets/key_button.dart';
+import '../models/key_config.dart';
 
 /// Controller screen for using the template (locked mode)
 class ControllerScreen extends StatefulWidget {
@@ -13,6 +14,10 @@ class ControllerScreen extends StatefulWidget {
 }
 
 class _ControllerScreenState extends State<ControllerScreen> {
+  // Active pointers state and per-key active counts (for multi-touch on same key)
+  final Map<int, _PointerState> _pointers = {};
+  final Map<String, int> _keyActiveCounts = {};
+
   @override
   void initState() {
     super.initState();
@@ -108,26 +113,55 @@ class _ControllerScreenState extends State<ControllerScreen> {
               final screenWidth = constraints.maxWidth;
               final screenHeight = constraints.maxHeight;
 
-              return Stack(
-                children: layout.keys.map((keyConfig) {
-                  final x = keyConfig.xPercent * screenWidth;
-                  final y = keyConfig.yPercent * screenHeight;
-                  final width = keyConfig.widthPercent * screenWidth;
-                  final height = keyConfig.heightPercent * screenHeight;
-
-                  return Positioned(
-                    left: x,
-                    top: y,
-                    child: KeyButton(
-                      keyConfig: keyConfig,
-                      width: width,
-                      height: height,
-                      isEditMode: false,
-                      onPressed: () => connectionProvider.handleKeyPress(keyConfig),
-                      onReleased: () => connectionProvider.handleKeyRelease(keyConfig),
-                    ),
+              return Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: (event) {
+                  _handlePointerDown(
+                    pointer: event.pointer,
+                    pos: event.localPosition,
+                    screenWidth: screenWidth,
+                    screenHeight: screenHeight,
+                    templateProvider: context.read<TemplateProvider>(),
+                    connectionProvider: context.read<ConnectionProvider>(),
                   );
-                }).toList(),
+                },
+                onPointerMove: (event) {
+                  // No-op for central controller: movement does not change press state
+                },
+                onPointerUp: (event) {
+                  _handlePointerUp(
+                    pointer: event.pointer,
+                    connectionProvider: context.read<ConnectionProvider>(),
+                  );
+                },
+                onPointerCancel: (event) {
+                  _handlePointerCancel(
+                    pointer: event.pointer,
+                    connectionProvider: context.read<ConnectionProvider>(),
+                  );
+                },
+                child: SizedBox.expand(
+                  child: Stack(
+                    children: layout.keys.map((keyConfig) {
+                      final x = keyConfig.xPercent * screenWidth;
+                      final y = keyConfig.yPercent * screenHeight;
+                      final width = keyConfig.widthPercent * screenWidth;
+                      final height = keyConfig.heightPercent * screenHeight;
+
+                      return Positioned(
+                        left: x,
+                        top: y,
+                        child: KeyButton(
+                          keyConfig: keyConfig,
+                          width: width,
+                          height: height,
+                          isEditMode: true,
+                          // Central Listener handles input; no per-key gesture callbacks
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
               );
             },
           );
@@ -135,4 +169,99 @@ class _ControllerScreenState extends State<ControllerScreen> {
       ),
     );
   }
+
+  // ================= Pointer handling and hit-testing =================
+
+  void _handlePointerDown({
+    required int pointer,
+    required Offset pos,
+    required double screenWidth,
+    required double screenHeight,
+    required TemplateProvider templateProvider,
+    required ConnectionProvider connectionProvider,
+  }) {
+    final key = _hitTestKey(pos, screenWidth, screenHeight, templateProvider);
+    final st = _PointerState(pointer, key);
+    _pointers[pointer] = st;
+
+    if (key != null) {
+      final count = (_keyActiveCounts[key.id] ?? 0) + 1;
+      _keyActiveCounts[key.id] = count;
+      if (count == 1) {
+        // First active pointer for this key: send press immediately
+        if (!connectionProvider.isKeyPressed(key.id)) {
+          connectionProvider.handleKeyPress(key);
+        }
+      }
+    }
+  }
+
+  void _handlePointerUp({
+    required int pointer,
+    required ConnectionProvider connectionProvider,
+  }) {
+    final st = _pointers.remove(pointer);
+    final key = st?.key;
+    if (key == null) return;
+
+    final current = (_keyActiveCounts[key.id] ?? 0) - 1;
+    if (current <= 0) {
+      _keyActiveCounts.remove(key.id);
+      if (connectionProvider.isKeyPressed(key.id)) {
+        connectionProvider.handleKeyRelease(key);
+      }
+    } else {
+      _keyActiveCounts[key.id] = current;
+    }
+  }
+
+  void _handlePointerCancel({
+    required int pointer,
+    required ConnectionProvider connectionProvider,
+  }) {
+    final st = _pointers.remove(pointer);
+    final key = st?.key;
+    if (key == null) return;
+
+    final current = (_keyActiveCounts[key.id] ?? 0) - 1;
+    if (current <= 0) {
+      _keyActiveCounts.remove(key.id);
+      if (connectionProvider.isKeyPressed(key.id)) {
+        connectionProvider.handleKeyRelease(key);
+      }
+    } else {
+      _keyActiveCounts[key.id] = current;
+    }
+  }
+
+  KeyConfig? _hitTestKey(
+    Offset pos,
+    double screenWidth,
+    double screenHeight,
+    TemplateProvider templateProvider,
+  ) {
+    final layout = templateProvider.currentLayout;
+    if (layout == null) return null;
+    // Iterate in reverse so visually top-most (later) keys win
+    for (final key in layout.keys.reversed) {
+      final rect = _rectForKey(key, screenWidth, screenHeight);
+      if (rect.contains(pos)) return key;
+    }
+    return null;
+  }
+
+  Rect _rectForKey(KeyConfig key, double screenWidth, double screenHeight) {
+    final x = key.xPercent * screenWidth;
+    final y = key.yPercent * screenHeight;
+    final w = key.widthPercent * screenWidth;
+    final h = key.heightPercent * screenHeight;
+    return Rect.fromLTWH(x, y, w, h);
+  }
+
+}
+
+class _PointerState {
+  _PointerState(this.pointer, this.key);
+  final int pointer;
+  final KeyConfig? key;
 }

@@ -131,7 +131,6 @@ class AvailableKeys {
 
 /// Default screen size breakpoints
 class ScreenBreakpoints {
-  static const double pipMaxWidth = 299.0;
   static const double splitMinWidth = 300.0;
   static const double splitMaxWidth = 599.0;
   static const double fullscreenMinWidth = 600.0;
@@ -149,10 +148,21 @@ class DefaultKeySizes {
   static const double minTouchTarget = 48.0; // Minimum touch target in dp
 }
 
+/// Step used to snap positions and sizes when editing templates.
+const double gridStep = 8.0; // logical pixels
+
+/// Optional minimum gap to visually separate keys (can be used alongside snapping)
+const double minKeyGap = 8.0; // logical pixels
+
 /// WebSocket connection defaults
 class ConnectionDefaults {
   static const String defaultHost = '192.168.1.100';
   static const int defaultPort = 8765;
   static const Duration reconnectDelay = Duration(seconds: 2);
   static const Duration pingInterval = Duration(seconds: 20);
+  // Exponential backoff settings for WebSocket reconnects
+  // Base delay used for 2^n growth and full-jitter calculation
+  static const Duration reconnectBaseDelay = Duration(seconds: 1);
+  // Maximum cap for backoff before jitter is applied
+  static const Duration reconnectMaxDelay = Duration(seconds: 30);
 }

@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/template_provider.dart';
+import '../models/template.dart';
 
 /// Screen for managing and deleting templates
 class ManageTemplatesScreen extends StatelessWidget {
@@ -12,6 +15,15 @@ class ManageTemplatesScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Manage Templates'),
         centerTitle: true,
+        actions: [
+          Tooltip(
+            message: 'Import Template (JSON)',
+            child: IconButton(
+              icon: const Icon(Icons.file_upload),
+              onPressed: () => _showImportTemplateDialog(context),
+            ),
+          ),
+        ],
       ),
       body: Consumer<TemplateProvider>(
         builder: (context, templateProvider, child) {
@@ -44,6 +56,22 @@ class ManageTemplatesScreen extends StatelessWidget {
                           template.name,
                           style: const TextStyle(fontSize: 16),
                         ),
+                      ),
+                      // Export button
+                      IconButton(
+                        style: IconButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                        ),
+                        tooltip: 'Export as JSON',
+                        icon: const Icon(Icons.file_download, size: 20),
+                        onPressed: () {
+                          _showExportTemplateDialog(context, template);
+                        },
                       ),
                       IconButton(
                         style: IconButton.styleFrom(
@@ -94,6 +122,107 @@ class ManageTemplatesScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  void _showExportTemplateDialog(BuildContext context, Template template) {
+    final encoder = const JsonEncoder.withIndent('  ');
+    final json = encoder.convert(template.toJson());
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Export "${template.name}"'),
+          content: SizedBox(
+            width: 600,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                json,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                // Capture before async gap
+                final nav = Navigator.of(dialogContext);
+                final messenger = ScaffoldMessenger.of(dialogContext);
+                await Clipboard.setData(ClipboardData(text: json));
+                nav.pop();
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Copied to clipboard')),
+                );
+              },
+              child: const Text('Copy'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showImportTemplateDialog(BuildContext context) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Import Template (JSON)'),
+          content: SizedBox(
+            width: 600,
+            child: TextField(
+              controller: controller,
+              maxLines: 12,
+              decoration: const InputDecoration(
+                hintText: 'Paste a single Template JSON object or a one-item array',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final jsonText = controller.text.trim();
+                if (jsonText.isEmpty) return;
+                // Capture before async gap
+                final provider = context.read<TemplateProvider>();
+                final nav = Navigator.of(dialogContext);
+                final messenger = ScaffoldMessenger.of(dialogContext);
+                try {
+                  final decoded = jsonDecode(jsonText);
+                  late final String normalized;
+                  if (decoded is Map<String, dynamic>) {
+                    normalized = jsonEncode([decoded]);
+                  } else if (decoded is List && decoded.length == 1 && decoded.first is Map<String, dynamic>) {
+                    normalized = jsonEncode([decoded.first]);
+                  } else {
+                    throw const FormatException('Expected a single template object');
+                  }
+                  final ok = await provider.importTemplatesJson(normalized, merge: true);
+                  nav.pop();
+                  messenger.showSnackBar(
+                    SnackBar(content: Text(ok ? 'Import successful' : 'Import failed')),
+                  );
+                } catch (_) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Invalid template JSON')),
+                  );
+                }
+              },
+              child: const Text('Import'),
+            ),
+          ],
+        );
+      },
     );
   }
 }
