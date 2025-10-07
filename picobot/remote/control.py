@@ -380,6 +380,15 @@ class RemoteControlServer:
         msg = (message or "").strip()
         if not msg:
             return
+        # Dedicated ping/pong for client heartbeat latency checks
+        if msg.startswith("ping|"):
+            try:
+                # Echo back the nonce part unchanged
+                nonce = msg.split("|", 1)[1] if "|" in msg else ""
+                await websocket.send(f"pong|{nonce}")
+            except Exception:
+                pass
+            return
         if msg.startswith("macro|"):
             action = msg.split("|", 1)[1] if "|" in msg else ""
             if action == "start":

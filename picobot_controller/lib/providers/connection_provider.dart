@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
 import '../models/key_config.dart';
+import '../models/server_profile.dart';
 
 /// Provider for managing WebSocket connection state
 class ConnectionProvider extends ChangeNotifier {
@@ -10,15 +11,16 @@ class ConnectionProvider extends ChangeNotifier {
   final StorageService _storageService;
 
   bool _isConnected = false;
-  String _serverHost = '192.168.1.100';
-  int _serverPort = 8765;
-  bool _autoConnect = true;
+  // Server profiles
+  List<ServerProfile> _profiles = [];
+  String? _selectedProfileId;
   bool _isMacroPlaying = false;
   String? _lastError;
   bool _isShiftPressed = false;
   int _shiftPressCount = 0; // number of active SHIFT presses (supports multiple shift keys)
   final Set<String> _pressedKeys = {};
   bool _isLoading = true;
+  Duration? _lastPingRtt;
 
   ConnectionProvider(this._storageService) {
     _init();
@@ -26,22 +28,28 @@ class ConnectionProvider extends ChangeNotifier {
 
   // Getters
   bool get isConnected => _isConnected;
-  String get serverHost => _serverHost;
-  int get serverPort => _serverPort;
-  bool get autoConnect => _autoConnect;
+  // Legacy getters (computed from selected profile when present)
+  String get serverHost => selectedProfile?.host ?? '—';
+  int get serverPort => selectedProfile?.port ?? 0;
+  bool get autoConnect => _selectedProfileId != null; // deprecated
   bool get isMacroPlaying => _isMacroPlaying;
   String? get lastError => _lastError;
   bool get isShiftPressed => _isShiftPressed;
   bool isKeyPressed(String keyId) => _pressedKeys.contains(keyId);
   bool get isLoading => _isLoading;
-  String get serverAddress => '$_serverHost:$_serverPort';
+  String get serverAddress =>
+      selectedProfile != null ? '${selectedProfile!.host}:${selectedProfile!.port}' : '—';
+  List<ServerProfile> get profiles => List.unmodifiable(_profiles);
+  ServerProfile? get selectedProfile =>
+      _profiles.where((p) => p.id == _selectedProfileId).cast<ServerProfile?>().firstWhere((e) => true, orElse: () => null);
+  Duration? get lastPingRtt => _lastPingRtt;
 
   /// Initialize provider
   Future<void> _init() async {
-    // Load settings
-    _serverHost = await _storageService.getServerHost();
-    _serverPort = await _storageService.getServerPort();
-    _autoConnect = await _storageService.getAutoConnect();
+    // Profiles: migrate legacy and load
+    await _storageService.migrateLegacyServerSettingsIfNeeded();
+    _profiles = await _storageService.getServerProfiles();
+    _selectedProfileId = await _storageService.getSelectedServerProfileId();
 
     // Set up WebSocket callbacks
     _wsService.onConnectionChanged = (connected) {
@@ -61,8 +69,13 @@ class ConnectionProvider extends ChangeNotifier {
       notifyListeners();
     };
 
-    // Auto-connect if enabled
-    if (_autoConnect) {
+    _wsService.onPingRtt = (rtt) {
+      _lastPingRtt = rtt;
+      notifyListeners();
+    };
+
+    // Auto-connect if a selected profile exists
+    if (_selectedProfileId != null && selectedProfile != null) {
       connect();
     }
 
@@ -84,25 +97,62 @@ class ConnectionProvider extends ChangeNotifier {
   /// Connect to server
   Future<void> connect() async {
     _lastError = null;
-    await _wsService.connect(_serverHost, _serverPort);
+    final profile = selectedProfile;
+    if (profile == null) {
+      notifyListeners();
+      return;
+    }
+    await _wsService.connect(profile.host, profile.port);
   }
 
   /// Disconnect from server
   void disconnect() {
     _wsService.disconnect();
+    _lastPingRtt = null;
   }
 
-  /// Update server settings
-  Future<void> updateServerSettings(String host, int port, bool autoConnect) async {
-    _serverHost = host;
-    _serverPort = port;
-    _autoConnect = autoConnect;
-
-    await _storageService.setServerHost(host);
-    await _storageService.setServerPort(port);
-    await _storageService.setAutoConnect(autoConnect);
-
+  // ========== Profiles API ==========
+  Future<void> reloadProfiles() async {
+    _profiles = await _storageService.getServerProfiles();
     notifyListeners();
+  }
+
+  Future<void> selectProfile(String id) async {
+    _selectedProfileId = id;
+    await _storageService.setSelectedServerProfileId(id);
+    notifyListeners();
+    await connect();
+  }
+
+  Future<void> clearSelectedProfile() async {
+    _selectedProfileId = null;
+    await _storageService.setSelectedServerProfileId(null);
+    disconnect();
+    notifyListeners();
+  }
+
+  Future<void> addOrUpdateProfile(ServerProfile profile) async {
+    final idx = _profiles.indexWhere((p) => p.id == profile.id);
+    if (idx >= 0) {
+      _profiles[idx] = profile.copyWith(updatedAt: DateTime.now());
+    } else {
+      _profiles.add(profile);
+    }
+    await _storageService.saveServerProfiles(_profiles);
+    notifyListeners();
+    if (_selectedProfileId == profile.id) {
+      await connect();
+    }
+  }
+
+  Future<void> deleteProfile(String id) async {
+    _profiles.removeWhere((p) => p.id == id);
+    await _storageService.saveServerProfiles(_profiles);
+    if (_selectedProfileId == id) {
+      await clearSelectedProfile();
+    } else {
+      notifyListeners();
+    }
   }
 
   /// Handles the logic for a key being pressed down.

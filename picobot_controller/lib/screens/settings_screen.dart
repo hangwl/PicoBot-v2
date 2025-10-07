@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:provider/provider.dart';
 import 'package:picobot_controller/screens/manage_templates_screen.dart';
 import '../providers/connection_provider.dart';
+import '../models/server_profile.dart';
+import 'log_console_screen.dart';
 
 /// Settings screen for server configuration
 class SettingsScreen extends StatefulWidget {
@@ -12,25 +15,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late TextEditingController _hostController;
-  late TextEditingController _portController;
-  bool _autoConnect = true;
-
-  @override
-  void initState() {
-    super.initState();
-    final connectionProvider = context.read<ConnectionProvider>();
-    _hostController = TextEditingController(text: connectionProvider.serverHost);
-    _portController = TextEditingController(text: connectionProvider.serverPort.toString());
-    _autoConnect = connectionProvider.autoConnect;
-  }
-
-  @override
-  void dispose() {
-    _hostController.dispose();
-    _portController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,53 +46,99 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 32),
 
-          // Server Configuration Section
+          // Server Profiles Section
           Text(
-            'Server Configuration',
+            'Server Profiles',
             style: Theme.of(context).textTheme.titleLarge,
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _hostController,
-            decoration: const InputDecoration(
-              labelText: 'Server Host',
-              hintText: '192.168.1.100',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.computer),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _portController,
-            decoration: const InputDecoration(
-              labelText: 'Server Port',
-              hintText: '8765',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.numbers),
-            ),
-            keyboardType: TextInputType.number,
-          ),
-          const SizedBox(height: 16),
-          SwitchListTile(
-            title: const Text('Auto-connect on startup'),
-            subtitle: const Text('Automatically connect when app starts'),
-            value: _autoConnect,
-            onChanged: (value) {
-              setState(() {
-                _autoConnect = value;
-              });
-            },
-          ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
           Consumer<ConnectionProvider>(
             builder: (context, connectionProvider, child) {
+              final profiles = connectionProvider.profiles;
+              final selected = connectionProvider.selectedProfile;
               return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (profiles.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text('No profiles yet. Add one to get started.'),
+                    ),
+                  ...profiles.map((p) => Card(
+                        child: ListTile(
+                          leading: Icon(
+                            selected?.id == p.id
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_off,
+                            color: selected?.id == p.id
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                          ),
+                          title: Text(p.name),
+                          subtitle: Text('${p.host}:${p.port}'),
+                          onTap: () => connectionProvider.selectProfile(p.id),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit',
+                                icon: const Icon(Icons.edit),
+                                onPressed: () => _showProfileDialog(context, existing: p),
+                              ),
+                              IconButton(
+                                tooltip: 'Delete',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () async {
+                                  final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (_) => AlertDialog(
+                                      title: const Text('Delete profile?'),
+                                      content: Text('Delete "${p.name}"?'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                                        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirmed == true) {
+                                    await connectionProvider.deleteProfile(p.id);
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      )),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add Profile'),
+                          onPressed: () => _showProfileDialog(context),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.clear),
+                          label: const Text('Clear Selection'),
+                          onPressed: selected != null
+                              ? () => connectionProvider.clearSelectedProfile()
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
                   if (connectionProvider.isConnected)
                     ElevatedButton.icon(
-                      onPressed: () {
-                        connectionProvider.disconnect();
-                      },
+                      onPressed: () => connectionProvider.disconnect(),
                       icon: const Icon(Icons.link_off),
                       label: const Text('Disconnect'),
                       style: ElevatedButton.styleFrom(
@@ -118,47 +148,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     )
                   else
                     ElevatedButton.icon(
-                      onPressed: () async {
-                        final host = _hostController.text.trim();
-                        final port = int.tryParse(_portController.text.trim()) ?? 8765;
-                        
-                        await connectionProvider.updateServerSettings(
-                          host,
-                          port,
-                          _autoConnect,
-                        );
-                        connectionProvider.connect();
-                      },
+                      onPressed: selected != null ? () => connectionProvider.connect() : null,
                       icon: const Icon(Icons.link),
                       label: const Text('Connect'),
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(double.infinity, 48),
                       ),
                     ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      final host = _hostController.text.trim();
-                      final port = int.tryParse(_portController.text.trim()) ?? 8765;
-                      
-                      await connectionProvider.updateServerSettings(
-                        host,
-                        port,
-                        _autoConnect,
-                      );
-                      
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Settings saved')),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.save),
-                    label: const Text('Save Settings'),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 48),
-                    ),
-                  ),
                 ],
               );
             },
@@ -180,9 +176,108 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text('PicoBot Mobile Controller'),
             subtitle: Text('Customizable remote keyboard controller'),
           ),
+          if (!kReleaseMode) ...[
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LogConsoleScreen()),
+              ),
+              icon: const Icon(Icons.terminal),
+              label: const Text('View Logs'),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 48)),
+            ),
+          ],
         ],
       ),
     );
   }
 
+  void _showProfileDialog(BuildContext context, {ServerProfile? existing}) {
+    final nameController = TextEditingController(text: existing?.name ?? '');
+    final hostController = TextEditingController(text: existing?.host ?? '');
+    final portController = TextEditingController(text: existing?.port.toString() ?? '8765');
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(existing == null ? 'Add Profile' : 'Edit Profile'),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    hintText: 'Home / Office / Lab',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: hostController,
+                  decoration: const InputDecoration(
+                    labelText: 'Host',
+                    hintText: '192.168.1.100 or hostname',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: portController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Port',
+                    hintText: '8765',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final name = nameController.text.trim();
+                final host = hostController.text.trim();
+                final port = int.tryParse(portController.text.trim()) ?? 0;
+                if (name.isEmpty || host.isEmpty || port < 1 || port > 65535) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    const SnackBar(content: Text('Please enter valid name, host, and port (1-65535)')),
+                  );
+                  return;
+                }
+                final provider = context.read<ConnectionProvider>();
+                final now = DateTime.now();
+                final profile = existing == null
+                    ? ServerProfile(
+                        id: 'p${now.millisecondsSinceEpoch}',
+                        name: name,
+                        host: host,
+                        port: port,
+                        createdAt: now,
+                        updatedAt: now,
+                      )
+                    : existing.copyWith(
+                        name: name,
+                        host: host,
+                        port: port,
+                        updatedAt: now,
+                      );
+                await provider.addOrUpdateProfile(profile);
+                if (context.mounted) Navigator.pop(dialogContext);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }

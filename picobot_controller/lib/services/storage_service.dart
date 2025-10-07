@@ -1,8 +1,9 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import '../models/server_profile.dart';
 import '../models/template.dart';
+import 'logger_service.dart';
 
 /// Service for persisting templates and app settings
 class StorageService {
@@ -11,6 +12,8 @@ class StorageService {
   static const String _serverHostKey = 'server_host';
   static const String _serverPortKey = 'server_port';
   static const String _autoConnectKey = 'auto_connect';
+  static const String _serverProfilesKey = 'server_profiles';
+  static const String _selectedServerProfileIdKey = 'selected_server_profile_id';
 
   SharedPreferences? _prefs;
 
@@ -45,9 +48,8 @@ class StorageService {
       final jsonList = templates.map((t) => t.toJson()).toList();
       final jsonString = jsonEncode(jsonList);
       return await prefs.setString(_templatesKey, jsonString);
-    } catch (e) {
-      // TODO: Use proper logging framework
-      debugPrint('Error saving template: $e');
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error saving template ${template.id}', e, st);
       return false;
     }
   }
@@ -64,9 +66,8 @@ class StorageService {
 
       final jsonList = jsonDecode(jsonString) as List;
       return jsonList.map((json) => Template.fromJson(json)).toList();
-    } catch (e) {
-      // TODO: Use proper logging framework
-      debugPrint('Error loading templates: $e');
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error loading templates', e, st);
       return [];
     }
   }
@@ -90,7 +91,7 @@ class StorageService {
       
       // Check if any template was actually removed
       if (templates.length == initialLength) {
-        debugPrint('Template with id $id not found');
+        LoggerService().w('Storage', 'Template with id $id not found');
         return false;
       }
 
@@ -98,9 +99,8 @@ class StorageService {
       final jsonList = templates.map((t) => t.toJson()).toList();
       final jsonString = jsonEncode(jsonList);
       return await prefs.setString(_templatesKey, jsonString);
-    } catch (e) {
-      // TODO: Use proper logging framework
-      debugPrint('Error deleting template: $e');
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error deleting template $id', e, st);
       return false;
     }
   }
@@ -124,8 +124,8 @@ class StorageService {
       final jsonList = templates.map((t) => t.toJson()).toList();
       final jsonString = jsonEncode(jsonList);
       return await prefs.setString(_templatesKey, jsonString);
-    } catch (e) {
-      debugPrint('Error saving all templates: $e');
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error saving all templates', e, st);
       return false;
     }
   }
@@ -138,6 +138,75 @@ class StorageService {
 
   // ========== Server Settings ==========
 
+  // ---- Profiles (new) ----
+  Future<List<ServerProfile>> getServerProfiles() async {
+    try {
+      final prefs = await _getPrefs();
+      final jsonString = prefs.getString(_serverProfilesKey);
+      if (jsonString == null || jsonString.isEmpty) return [];
+      final list = (jsonDecode(jsonString) as List)
+          .map((e) => ServerProfile.fromJson(e as Map<String, dynamic>))
+          .toList();
+      return list;
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error loading server profiles', e, st);
+      return [];
+    }
+  }
+
+  Future<bool> saveServerProfiles(List<ServerProfile> profiles) async {
+    try {
+      final prefs = await _getPrefs();
+      final jsonList = profiles.map((p) => p.toJson()).toList();
+      final jsonString = jsonEncode(jsonList);
+      return await prefs.setString(_serverProfilesKey, jsonString);
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error saving server profiles', e, st);
+      return false;
+    }
+  }
+
+  Future<String?> getSelectedServerProfileId() async {
+    final prefs = await _getPrefs();
+    return prefs.getString(_selectedServerProfileIdKey);
+  }
+
+  Future<bool> setSelectedServerProfileId(String? id) async {
+    final prefs = await _getPrefs();
+    if (id == null || id.isEmpty) {
+      return await prefs.remove(_selectedServerProfileIdKey);
+    }
+    return await prefs.setString(_selectedServerProfileIdKey, id);
+  }
+
+  Future<void> migrateLegacyServerSettingsIfNeeded() async {
+    try {
+      final prefs = await _getPrefs();
+      final existing = prefs.getString(_serverProfilesKey);
+      if (existing != null && existing.isNotEmpty) return; // already migrated
+
+      // Read legacy values
+      final host = prefs.getString(_serverHostKey) ?? '192.168.1.100';
+      final port = prefs.getInt(_serverPortKey) ?? 8765;
+      final auto = prefs.getBool(_autoConnectKey) ?? true;
+
+      final now = DateTime.now();
+      final profile = ServerProfile(
+        id: 'p${now.millisecondsSinceEpoch}',
+        name: 'Default',
+        host: host,
+        port: port,
+        createdAt: now,
+        updatedAt: now,
+      );
+      await saveServerProfiles([profile]);
+      await setSelectedServerProfileId(auto ? profile.id : null);
+    } catch (e) {
+      LoggerService().w('Storage', 'Server settings migration skipped: $e');
+    }
+  }
+
+  // ---- Legacy single host/port (kept for backward compat, will be unused) ----
   /// Get server host
   Future<String> getServerHost() async {
     final prefs = await _getPrefs();
@@ -201,8 +270,8 @@ class StorageService {
         return encoder.convert(jsonList);
       }
       return jsonEncode(jsonList);
-    } catch (e) {
-      debugPrint('Error exporting templates: $e');
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error exporting templates', e, st);
       return '[]';
     }
   }
@@ -238,8 +307,8 @@ class StorageService {
       final newJson = jsonEncode(merged.map((t) => t.toJson()).toList());
       final ok = await prefs.setString(_templatesKey, newJson);
       return ok;
-    } catch (e) {
-      debugPrint('Error importing templates: $e');
+    } catch (e, st) {
+      LoggerService().e('Storage', 'Error importing templates', e, st);
       return false;
     }
   }

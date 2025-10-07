@@ -67,15 +67,27 @@ class _ControllerScreenState extends State<ControllerScreen> {
         ),
         centerTitle: true,
         actions: [
-          // Connection status indicator
+          // Connection + latency indicator
           Consumer<ConnectionProvider>(
             builder: (context, connectionProvider, child) {
+              final rtt = connectionProvider.lastPingRtt;
+              final rttMs = rtt?.inMilliseconds;
               return Padding(
                 padding: const EdgeInsets.only(right: 16.0),
-                child: Icon(
-                  Icons.circle,
-                  color: connectionProvider.isConnected ? Colors.green : Colors.red,
-                  size: 16,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.circle,
+                      color: connectionProvider.isConnected ? Colors.green : Colors.red,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      rttMs != null ? '${rttMs}ms' : '--',
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                  ],
                 ),
               );
             },

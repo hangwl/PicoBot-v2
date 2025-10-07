@@ -3,9 +3,14 @@ import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as status;
 import '../utils/constants.dart';
+import 'logger_service.dart';
 
 /// WebSocket service for communicating with PicoBot server
 class WebSocketService {
+  // Singleton factory
+  static final WebSocketService _instance = WebSocketService._internal();
+  factory WebSocketService() => _instance;
+  WebSocketService._internal();
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _reconnectTimer;
@@ -13,6 +18,10 @@ class WebSocketService {
   bool _awaitingHeartbeat = false; // true if last ping has not received any message yet
   int _reconnectAttempts = 0; // grows with each consecutive failure
   final Random _random = Random();
+  // Ping/pong tracking
+  String? _lastPingNonce;
+  DateTime? _lastPingSentAt;
+  int _pingSeq = 0;
 
   String _host = ConnectionDefaults.defaultHost;
   int _port = ConnectionDefaults.defaultPort;
@@ -23,6 +32,8 @@ class WebSocketService {
   Function(bool connected)? onConnectionChanged;
   Function(String message)? onMessageReceived;
   Function(String error)? onError;
+  // Optional: report ping RTT to observers
+  Function(Duration rtt)? onPingRtt;
 
   /// Current connection state
   bool get isConnected => _channel != null;
@@ -47,6 +58,7 @@ class WebSocketService {
     _isConnecting = true;
     try {
       final uri = Uri.parse('ws://$_host:$_port');
+      LoggerService().dF('WS', () => 'Connecting to $uri');
       _channel = WebSocketChannel.connect(uri);
 
       // Listen to messages
@@ -73,6 +85,7 @@ class WebSocketService {
       // Successful connection resets backoff attempts
       _reconnectAttempts = 0;
       _isConnecting = false;
+      LoggerService().i('WS', 'Connected to ws://$_host:$_port');
 
       // Query initial macro state
       send('macro|query');
@@ -88,7 +101,27 @@ class WebSocketService {
     final msg = message.trim();
     if (msg.isEmpty) return;
 
-    // Any message counts as heartbeat reply
+    // Handle dedicated pong first; do not forward to app callbacks
+    if (msg.startsWith('pong|')) {
+      final parts = msg.split('|');
+      if (parts.length >= 2) {
+        final nonce = parts[1];
+        if (_lastPingNonce != null && nonce == _lastPingNonce) {
+          _awaitingHeartbeat = false;
+          if (_lastPingSentAt != null) {
+            final rtt = DateTime.now().difference(_lastPingSentAt!);
+            onPingRtt?.call(rtt);
+            LoggerService().dF('WS', () => 'Pong $nonce; rtt=${rtt.inMilliseconds}ms');
+          }
+          // Clear last ping markers
+          _lastPingNonce = null;
+          _lastPingSentAt = null;
+        }
+      }
+      return; // swallow pong
+    }
+
+    // Backward-compat: any non-pong message counts as heartbeat
     _awaitingHeartbeat = false;
 
     // Notify listeners
@@ -103,12 +136,14 @@ class WebSocketService {
   /// Handle connection errors
   void _handleError(String error) {
     onError?.call(error);
+    LoggerService().e('WS', error);
   }
 
   /// Handle disconnection
   void _handleDisconnect() {
     _cleanup();
     onConnectionChanged?.call(false);
+    LoggerService().w('WS', 'Disconnected');
     if (_shouldReconnect) {
       _reconnect();
     }
@@ -133,6 +168,7 @@ class WebSocketService {
 
     final int jitterMs = _random.nextInt(ceiling + 1); // [0, ceiling]
     final delay = Duration(milliseconds: jitterMs);
+    LoggerService().wF('WS', () => 'Reconnect in ${delay.inMilliseconds}ms (attempt ${_reconnectAttempts + 1})');
 
     _reconnectTimer = Timer(delay, () {
       if (_shouldReconnect) {
@@ -157,9 +193,7 @@ class WebSocketService {
           return;
         }
         try {
-          _awaitingHeartbeat = true;
-          // Send a lightweight query to keep connection alive
-          send('macro|query');
+          _sendPing();
         } catch (e) {
           // Connection lost, will be handled by stream listener
         }
@@ -167,6 +201,14 @@ class WebSocketService {
         timer.cancel();
       }
     });
+  }
+
+  void _sendPing() {
+    _awaitingHeartbeat = true;
+    _lastPingNonce = 'n${_pingSeq++}-${DateTime.now().millisecondsSinceEpoch}';
+    _lastPingSentAt = DateTime.now();
+    send('ping|$_lastPingNonce');
+    LoggerService().dF('WS', () => 'Ping $_lastPingNonce');
   }
 
   /// Send a message to the server
@@ -242,7 +284,9 @@ class WebSocketService {
     _awaitingHeartbeat = false;
     _subscription?.cancel();
     _subscription = null;
-    _channel?.sink.close(status.goingAway);
+    // On web, only 1000 or 3000-4999 are allowed for application close codes.
+    // Use normalClosure (1000) to avoid DOM exceptions.
+    _channel?.sink.close(status.normalClosure);
     _channel = null;
     _isConnecting = false;
   }
