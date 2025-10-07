@@ -79,6 +79,11 @@ class _ControllerScreenState extends State<ControllerScreen> {
       ),
       body: Consumer2<TemplateProvider, ConnectionProvider>(
         builder: (context, templateProvider, connectionProvider, child) {
+          // Show loading indicator while provider is initializing
+          if (connectionProvider.isLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
           final layout = templateProvider.currentLayout;
           
           if (layout == null || layout.keys.isEmpty) {
@@ -118,24 +123,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
                       width: width,
                       height: height,
                       isEditMode: false,
-                      onPressed: connectionProvider.isConnected
-                          ? () {
-                              if (keyConfig.type == 'mouse') {
-                                connectionProvider.sendMouseDown(keyConfig.keyCode);
-                              } else {
-                                connectionProvider.sendKeyDown(keyConfig.keyCode);
-                              }
-                            }
-                          : null,
-                      onReleased: connectionProvider.isConnected
-                          ? () {
-                              if (keyConfig.type == 'mouse') {
-                                connectionProvider.sendMouseUp(keyConfig.keyCode);
-                              } else {
-                                connectionProvider.sendKeyUp(keyConfig.keyCode);
-                              }
-                            }
-                          : null,
+                      onPressed: () => connectionProvider.handleKeyPress(keyConfig),
+                      onReleased: () => connectionProvider.handleKeyRelease(keyConfig),
                     ),
                   );
                 }).toList(),

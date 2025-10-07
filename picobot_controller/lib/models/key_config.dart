@@ -12,6 +12,9 @@ class KeyConfig {
   /// Display label on the button
   final String label;
 
+  /// Alternate label to display when Shift is active
+  final String? shiftLabel;
+
   /// Actual key code to send (e.g., "w", "space", "enter")
   final String keyCode;
 
@@ -39,12 +42,14 @@ class KeyConfig {
     required this.yPercent,
     required this.widthPercent,
     required this.heightPercent,
+    this.shiftLabel,
   }) : id = id ?? const Uuid().v4();
 
   /// Create a copy with modified fields
   KeyConfig copyWith({
     String? id,
     String? label,
+    String? shiftLabel,
     String? keyCode,
     String? type,
     double? xPercent,
@@ -55,6 +60,7 @@ class KeyConfig {
     return KeyConfig(
       id: id ?? this.id,
       label: label ?? this.label,
+      shiftLabel: shiftLabel ?? this.shiftLabel,
       keyCode: keyCode ?? this.keyCode,
       type: type ?? this.type,
       xPercent: xPercent ?? this.xPercent,

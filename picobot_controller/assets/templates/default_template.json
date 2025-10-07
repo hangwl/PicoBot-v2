@@ -52,6 +52,7 @@
                 {
                     "id": "33a1d45d-6846-46fc-8f9a-a1ad891d050c",
                     "label": "1",
+                    "shiftLabel": "!",
                     "keyCode": "1",
                     "type": "key",
                     "xPercent": 0.16504201680672267,
@@ -61,7 +62,8 @@
                 },
                 {
                     "id": "c7f8382a-3442-4afc-b8b8-84b870e65d96",
-                    "label": "E",
+                    "label": "e",
+                    "shiftLabel": "E",
                     "keyCode": "e",
                     "type": "key",
                     "xPercent": 0.8577777777777778,
@@ -91,7 +93,8 @@
                 },
                 {
                     "id": "e599f1b7-db0b-4d6c-9a6b-4103a48592fa",
-                    "label": "I",
+                    "label": "i",
+                    "shiftLabel": "I",
                     "keyCode": "i",
                     "type": "key",
                     "xPercent": 0.5894444444444444,
@@ -131,7 +134,8 @@
                 },
                 {
                     "id": "b8481f56-bb37-41ff-a4eb-1cabdb56d534",
-                    "label": "Y",
+                    "label": "y",
+                    "shiftLabel": "Y",
                     "keyCode": "y",
                     "type": "key",
                     "xPercent": 0.3289251207729469,
@@ -141,7 +145,8 @@
                 },
                 {
                     "id": "1843eea5-60e5-46b1-9c0a-2577c3399722",
-                    "label": "N",
+                    "label": "n",
+                    "shiftLabel": "N",
                     "keyCode": "n",
                     "type": "key",
                     "xPercent": 0.5179347826086956,

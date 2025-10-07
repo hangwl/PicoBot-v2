@@ -299,27 +299,62 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
         final label = keyData['label']!;
         final keyCode = keyData['keyCode']!;
         final type = keyData['type'] ?? 'key';
+        final shiftLabel = keyData['shiftLabel'];
 
         return InkWell(
-          onTap: () => _addKey(label, keyCode, type),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            child: Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+          onTap: () => _addKey(label, keyCode, type, shiftLabel),
+          child: Stack(
+            children: [
+              // Main tile surface
+              Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
-                textAlign: TextAlign.center,
+                child: Center(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ),
-            ),
+              // Alt label badge (only if present)
+              if (shiftLabel != null)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Tooltip(
+                    message: 'Alt: $shiftLabel',
+                    child: Semantics(
+                      label: 'Alternate label $shiftLabel',
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          shiftLabel,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.onSecondaryContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         );
       },
@@ -327,17 +362,13 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
   }
 
   /// Add a key to the template
-  void _addKey(String label, String keyCode, String type) {
+  void _addKey(String label, String keyCode, String type, String? shiftLabel) {
     final templateProvider = context.read<TemplateProvider>();
     final layout = templateProvider.currentLayout;
     
     if (layout == null) return;
 
-    // Calculate position for new key (center of screen with slight offset)
-    final numKeys = layout.keys.length;
-    final offsetX = (numKeys % 3) * 0.2;
-    final offsetY = (numKeys ~/ 3) * 0.15;
-
+    // Spawn new keys at a fixed central location
     final screenWidth = _canvasKey.currentContext!.size!.width;
     final screenHeight = _canvasKey.currentContext!.size!.height;
 
@@ -345,8 +376,9 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
       label: label,
       keyCode: keyCode,
       type: type,
-      xPercent: 0.3 + offsetX,
-      yPercent: 0.3 + offsetY,
+      shiftLabel: shiftLabel,
+      xPercent: 0.4, // Center of the screen
+      yPercent: 0.4, // Center of the screen
       widthPercent: DefaultKeySizes.width / screenWidth,
       heightPercent: DefaultKeySizes.height / screenHeight,
     );

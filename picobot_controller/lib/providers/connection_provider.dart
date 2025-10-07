@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
+import '../models/key_config.dart';
 
 /// Provider for managing WebSocket connection state
 class ConnectionProvider extends ChangeNotifier {
@@ -13,6 +15,10 @@ class ConnectionProvider extends ChangeNotifier {
   bool _autoConnect = true;
   bool _isMacroPlaying = false;
   String? _lastError;
+  bool _isShiftPressed = false;
+  int _shiftPressCount = 0; // number of active SHIFT presses (supports multiple shift keys)
+  final Set<String> _pressedKeys = {};
+  bool _isLoading = true;
 
   ConnectionProvider(this._storageService) {
     _init();
@@ -25,6 +31,9 @@ class ConnectionProvider extends ChangeNotifier {
   bool get autoConnect => _autoConnect;
   bool get isMacroPlaying => _isMacroPlaying;
   String? get lastError => _lastError;
+  bool get isShiftPressed => _isShiftPressed;
+  bool isKeyPressed(String keyId) => _pressedKeys.contains(keyId);
+  bool get isLoading => _isLoading;
   String get serverAddress => '$_serverHost:$_serverPort';
 
   /// Initialize provider
@@ -57,6 +66,7 @@ class ConnectionProvider extends ChangeNotifier {
       connect();
     }
 
+    _isLoading = false;
     notifyListeners();
   }
 
@@ -95,24 +105,44 @@ class ConnectionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Send key down
-  void sendKeyDown(String key) {
-    _wsService.sendKeyDown(key);
+  /// Handles the logic for a key being pressed down.
+  void handleKeyPress(KeyConfig keyConfig) {
+    // Update shift state if a shift key is pressed
+    if (keyConfig.keyCode == 'shift') {
+      _shiftPressCount++;
+      _isShiftPressed = _shiftPressCount > 0;
+    }
+    _pressedKeys.add(keyConfig.id);
+    notifyListeners();
+
+    // Send the actual key/mouse command
+    if (_isConnected) {
+      if (keyConfig.type == 'mouse') {
+        _wsService.sendMouseDown(keyConfig.keyCode);
+      } else {
+        _wsService.sendKeyDown(keyConfig.keyCode);
+      }
+    }
   }
 
-  /// Send key up
-  void sendKeyUp(String key) {
-    _wsService.sendKeyUp(key);
-  }
+  /// Handles the logic for a key being released.
+  void handleKeyRelease(KeyConfig keyConfig) {
+    // Update shift state if a shift key is released
+    if (keyConfig.keyCode == 'shift') {
+      if (_shiftPressCount > 0) _shiftPressCount--;
+      _isShiftPressed = _shiftPressCount > 0;
+    }
+    _pressedKeys.remove(keyConfig.id);
+    notifyListeners();
 
-  /// Send mouse down
-  void sendMouseDown(String button) {
-    _wsService.sendMouseDown(button);
-  }
-
-  /// Send mouse up
-  void sendMouseUp(String button) {
-    _wsService.sendMouseUp(button);
+    // Send the actual key/mouse command
+    if (_isConnected) {
+      if (keyConfig.type == 'mouse') {
+        _wsService.sendMouseUp(keyConfig.keyCode);
+      } else {
+        _wsService.sendKeyUp(keyConfig.keyCode);
+      }
+    }
   }
 
   /// Start macro

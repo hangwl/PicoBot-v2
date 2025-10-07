@@ -9,6 +9,7 @@ class WebSocketService {
   StreamSubscription? _subscription;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
+  bool _awaitingHeartbeat = false; // true if last ping has not received any message yet
 
   String _host = ConnectionDefaults.defaultHost;
   int _port = ConnectionDefaults.defaultPort;
@@ -51,8 +52,9 @@ class WebSocketService {
           _handleMessage(message.toString());
         },
         onError: (error) {
+          // Treat errors as a disconnect: cleanup, notify, and schedule reconnect.
           _handleError('WebSocket error: $error');
-          _reconnect();
+          _handleDisconnect();
         },
         onDone: () {
           _handleDisconnect();
@@ -60,7 +62,8 @@ class WebSocketService {
         cancelOnError: true,
       );
 
-      // Start ping timer to keep connection alive
+      // Reset heartbeat state and start ping timer to keep connection alive
+      _awaitingHeartbeat = false;
       _startPingTimer();
 
       onConnectionChanged?.call(true);
@@ -79,6 +82,9 @@ class WebSocketService {
   void _handleMessage(String message) {
     final msg = message.trim();
     if (msg.isEmpty) return;
+
+    // Any message counts as heartbeat reply
+    _awaitingHeartbeat = false;
 
     // Notify listeners
     onMessageReceived?.call(msg);
@@ -118,7 +124,13 @@ class WebSocketService {
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(ConnectionDefaults.pingInterval, (timer) {
       if (_channel != null) {
+        // If previous ping had no message since then, assume connection is stale
+        if (_awaitingHeartbeat) {
+          _handleDisconnect();
+          return;
+        }
         try {
+          _awaitingHeartbeat = true;
           // Send a lightweight query to keep connection alive
           send('macro|query');
         } catch (e) {
@@ -198,6 +210,7 @@ class WebSocketService {
     _reconnectTimer = null;
     _pingTimer?.cancel();
     _pingTimer = null;
+    _awaitingHeartbeat = false;
     _subscription?.cancel();
     _subscription = null;
     _channel?.sink.close(status.goingAway);

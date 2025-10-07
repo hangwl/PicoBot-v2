@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/key_config.dart';
+import '../providers/connection_provider.dart';
 
 /// A button representing a key in the controller
-class KeyButton extends StatefulWidget {
+class KeyButton extends StatelessWidget {
   final KeyConfig keyConfig;
   final double width;
   final double height;
@@ -21,64 +23,51 @@ class KeyButton extends StatefulWidget {
   });
 
   @override
-  State<KeyButton> createState() => _KeyButtonState();
-}
-
-class _KeyButtonState extends State<KeyButton> {
-  bool _isPressed = false;
-
-  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: widget.isEditMode
-          ? null
-          : (_) {
-              setState(() => _isPressed = true);
-              widget.onPressed?.call();
-            },
-      onTapUp: widget.isEditMode
-          ? null
-          : (_) {
-              setState(() => _isPressed = false);
-              widget.onReleased?.call();
-            },
-      onTapCancel: widget.isEditMode
-          ? null
-          : () {
-              setState(() => _isPressed = false);
-              widget.onReleased?.call();
-            },
-      child: Container(
-        width: widget.width,
-        height: widget.height,
-        decoration: BoxDecoration(
-          color: _isPressed
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withAlpha(77),
-              blurRadius: _isPressed ? 2 : 4,
-              offset: Offset(0, _isPressed ? 1 : 2),
+    return Consumer<ConnectionProvider>(
+      builder: (context, connectionProvider, child) {
+        final isShiftPressed = connectionProvider.isShiftPressed;
+        final isPressed = connectionProvider.isKeyPressed(keyConfig.id);
+
+        return GestureDetector(
+          onTapDown: isEditMode ? null : (_) => onPressed?.call(),
+          onTapUp: isEditMode ? null : (_) => onReleased?.call(),
+          onTapCancel: isEditMode ? null : () => onReleased?.call(),
+          child: Container(
+            width: width,
+            height: height,
+            decoration: BoxDecoration(
+              color: isPressed
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(77),
+                  blurRadius: isPressed ? 2 : 4,
+                  offset: Offset(0, isPressed ? 1 : 2),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Center(
-          child: Text(
-            widget.keyConfig.label,
-            style: TextStyle(
-              fontSize: widget.width > 80 ? 18 : 14,
-              fontWeight: FontWeight.bold,
-              color: _isPressed
-                  ? Theme.of(context).colorScheme.onPrimary
-                  : Theme.of(context).colorScheme.onSurfaceVariant,
+            child: Center(
+              child: Text(
+                (isShiftPressed && keyConfig.shiftLabel != null)
+                    ? keyConfig.shiftLabel!
+                    : keyConfig.label,
+                style: TextStyle(
+                  fontSize: width > 80 ? 18 : 14,
+                  fontWeight: FontWeight.bold,
+                  color: isPressed
+                      ? Theme.of(context).colorScheme.onPrimary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
