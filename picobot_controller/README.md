@@ -41,6 +41,35 @@ PicoBot Mobile Controller – a Flutter app to design and use custom on-screen k
 - **[Heartbeat]**
   - Client sends periodic `ping|<nonce>` and the server replies `pong|<same-nonce>`. Any non-pong message also clears the heartbeat wait for backward compatibility.
 
+## Server configuration (Tailscale + ws)
+
+- **[Prerequisites]**
+  - Install Tailscale on the server (where PicoBot desktop app runs) and on mobile devices.
+  - Ensure both are connected to the same tailnet and MagicDNS is enabled.
+
+- **[Choose a hostname]**
+  - Use the server’s MagicDNS hostname (e.g., `device-name.<tailnet>.ts.net`). Avoid using 100.x IPs because Android’s network security config whitelists hostnames, not IPs.
+
+- **[Start the PicoBot server]**
+  - Launch the desktop PicoBot app (`picobot/app.py`).
+  - Start the Remote Control WebSocket server (default port `8765`).
+  - The server listens on cleartext ws by default (`ws_tls` defaults to false in `picobot/config.json`).
+
+- **[Configure the mobile app]**
+  - In Settings → Server Profiles, add a profile with Host = `your-device.ts.net` and Port = `8765`.
+  - Select the profile to connect. The app uses `ws://` and shows RTT in the AppBar when connected.
+
+- **[Platform notes]**
+  - Android allows cleartext only for `*.ts.net` via `android/app/src/main/res/xml/network_security_config.xml`.
+  - iOS allows cleartext only for `*.ts.net` via `ios/Runner/Info.plist` ATS exceptions.
+  - If you use bare IPs (100.x), platform policies will block `ws://` by default. Prefer MagicDNS hostnames.
+
+- **[Firewall]**
+  - Allow inbound TCP `8765` on the server host (Windows Defender Firewall, etc.).
+
+- **[Future: switch to TLS]**
+  - If desired later, mint a Tailscale certificate for your MagicDNS name (`tailscale cert <host>`) and set `ws_tls=true`, `ws_certfile`, `ws_keyfile` in `picobot/config.json`, then switch the client to `wss://`.
+
 ## Running the app
 
 - **[Prerequisites]** Flutter SDK installed and configured.
@@ -51,6 +80,12 @@ PicoBot Mobile Controller – a Flutter app to design and use custom on-screen k
 - **[Server]** Ensure the PicoBot server is running and reachable at the configured host/port (set in Settings).
   - In Settings → Server Profiles, add/select a profile (host/port). The last selected profile auto-connects on startup; clear selection to disable auto-connect.
 
-## Recommended improvements
+## Latency and performance tuning
 
-- **[Testing]** Unit tests for providers/services and widget tests for editor/controller interactions.
+- **[Direct vs DERP]** Over mobile data, Tailscale may relay via DERP, adding tens–hundreds of ms. On the server, use `tailscale status` and `tailscale ping <phone>` to see if the path is "direct" or "via DERP(...)". Same‑LAN Wi‑Fi is usually single‑digit ms.
+- **[Disable WebSocket compression]** For tiny, frequent frames (e.g., `key|down|a`), compression adds CPU/buffering with negligible size savings. This project disables compression on both ends:
+  - Server: `websockets.serve(..., compression=None)` in `picobot/remote/control.py`.
+  - Client: `dart:io` `WebSocket.connect(..., compression: CompressionOptions(enabled: false))` in `lib/services/websocket_service.dart`.
+- **[Build mode]** Test on Profile/Release builds on mobile; Debug adds overhead that can affect perceived latency.
+- **[UI path]** Trigger sends directly in pointer handlers; keep rebuilds minimal and wrap the canvas in `RepaintBoundary` to reduce invalidation cost.
+- **[Server/serial]** Avoid sleeps/batching for key events in `_writer_loop()`; keep serial `write_timeout` low and ACK waits off for immediate actions.

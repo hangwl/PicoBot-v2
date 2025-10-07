@@ -1,7 +1,9 @@
 import logging
 import os
+import ssl
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .config import AppConfig
@@ -75,7 +77,14 @@ class MacroControllerApp:
         self.selected_port = tk.StringVar(root)
         self.create_pico_connection_ui()
 
-        self.selected_window = tk.StringVar(root, value=self.config.last_window)
+        # Target window selection and optional lock
+        initial_window = (
+            self.config.window_lock_title
+            if getattr(self.config, "window_lock_enabled", False)
+            else ""
+        )
+        self.selected_window = tk.StringVar(root, value=initial_window)
+        self.window_lock_var = tk.BooleanVar(value=self.config.window_lock_enabled)
         self.create_window_selection_ui()
 
         self.macro_folder_path = tk.StringVar(
@@ -178,10 +187,18 @@ class MacroControllerApp:
         )
         self.window_menu.pack(side=tk.LEFT, fill="x", expand=True)
         self.window_menu.bind("<<ComboboxSelected>>", self.save_config)
+        # Controls: Lock and Refresh
         self.refresh_win_button = tk.Button(
             self.window_frame, text="Refresh", command=self.refresh_windows
         )
         self.refresh_win_button.pack(side=tk.RIGHT, padx=(10, 0))
+        self.lock_window_button = tk.Checkbutton(
+            self.window_frame,
+            text="Lock",
+            variable=self.window_lock_var,
+            command=self.on_toggle_window_lock,
+        )
+        self.lock_window_button.pack(side=tk.RIGHT, padx=(0, 10))
         self.refresh_windows()
 
     def create_macro_folder_ui(self):
@@ -327,7 +344,22 @@ class MacroControllerApp:
             is_macro_playing=lambda: bool(self.is_playing),
             broadcast=lambda msg: None,
         )
-        self.remote_server = RemoteControlServer(port_name, ws_port, callbacks)
+        # TLS: attempt to construct SSL context if enabled and certs available
+        ssl_ctx = None
+        try:
+            if bool(self.config.ws_tls):
+                cert_path = Path(self.config.ws_certfile or "")
+                key_path = Path(self.config.ws_keyfile or "")
+                if cert_path.exists() and key_path.exists():
+                    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ssl_ctx.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+                else:
+                    logging.warning("WS TLS enabled but cert/key not found; falling back to ws.")
+        except Exception as exc:
+            logging.error("Failed to initialize TLS context: %s", exc)
+            ssl_ctx = None
+
+        self.remote_server = RemoteControlServer(port_name, ws_port, callbacks, ssl_context=ssl_ctx)
         self.remote_status_var.set("Remote: Starting...")
         self.remote_server.start()
         if not self.remote_server.serial_manager.is_open:
@@ -415,7 +447,11 @@ class MacroControllerApp:
 
     def _apply_config_to_ui(self) -> None:
         cfg = self.config
-        self.selected_window.set(cfg.last_window or "")
+        if getattr(cfg, "window_lock_enabled", False) and getattr(cfg, "window_lock_title", ""):
+            self.selected_window.set(cfg.window_lock_title)
+        else:
+            self.selected_window.set("")
+        self.window_lock_var.set(bool(getattr(cfg, "window_lock_enabled", False)))
         folder = cfg.last_folder or "No folder selected."
         self.macro_folder_path.set(folder)
         self.pin_var.set(cfg.always_on_top)
@@ -433,7 +469,11 @@ class MacroControllerApp:
 
     def _capture_config_from_ui(self) -> None:
         cfg = self.config
-        cfg.last_window = self.selected_window.get()
+        # Persist window lock settings
+        cfg.window_lock_enabled = bool(self.window_lock_var.get())
+        if cfg.window_lock_enabled:
+            # Save the currently selected title as the lock target
+            cfg.window_lock_title = self.selected_window.get()
         folder = self.macro_folder_path.get() or "No folder selected."
         cfg.last_folder = folder
         cfg.always_on_top = bool(self.pin_var.get())
@@ -617,6 +657,19 @@ class MacroControllerApp:
         if selection.selected and not self.remote_server:
             self.start_remote()
 
+    def on_toggle_window_lock(self) -> None:
+        """Toggle saving the current window as the fixed target window to locate."""
+        enabled = bool(self.window_lock_var.get())
+        if enabled:
+            # Save the current selection as the locked title
+            self.config.window_lock_enabled = True
+            self.config.window_lock_title = self.selected_window.get()
+        else:
+            self.config.window_lock_enabled = False
+        # Persist and re-apply in case the list should snap to the locked title
+        save_app_config(self.config)
+        self.refresh_windows()
+
     def refresh_windows(self):
         """Refresh the list of available windows using the window service."""
         selection = self.context.window_service.build_selection(
@@ -630,11 +683,21 @@ class MacroControllerApp:
         self.window_menu["values"] = display_titles
 
         previous = self.selected_window.get()
-        new_value = selection.selected or (
-            previous
-            if previous in titles
-            else (titles[0] if titles else "No windows found")
-        )
+        # If lock enabled and locked title is available, prefer it
+        locked_title = self.config.window_lock_title if self.config.window_lock_enabled else ""
+        default_title = getattr(self.config, "default_target_window", "")
+
+        if self.config.window_lock_enabled and locked_title in titles:
+            new_value = locked_title
+        elif default_title in titles:
+            new_value = default_title
+        elif previous in titles:
+            new_value = previous
+        elif titles:
+            # Leave empty to force the user to choose
+            new_value = ""
+        else:
+            new_value = "No windows found"
         self.selected_window.set(new_value)
 
     def select_macro_folder(self):

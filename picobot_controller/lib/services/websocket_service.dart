@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:io';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/status.dart' as status;
 import '../utils/constants.dart';
 import 'logger_service.dart';
@@ -18,6 +20,7 @@ class WebSocketService {
   bool _awaitingHeartbeat = false; // true if last ping has not received any message yet
   int _reconnectAttempts = 0; // grows with each consecutive failure
   final Random _random = Random();
+  bool _announcedConnected = false; // flips true once we receive first message
   // Ping/pong tracking
   String? _lastPingNonce;
   DateTime? _lastPingSentAt;
@@ -27,6 +30,14 @@ class WebSocketService {
   int _port = ConnectionDefaults.defaultPort;
   bool _isConnecting = false;
   bool _shouldReconnect = true;
+  // Scheme handling: use cleartext ws for development
+  String _scheme = 'ws';
+
+  // Connector seam for tests
+  static Future<WebSocketChannel> Function(Uri uri)? _testConnector;
+  static void setConnectorForTest(Future<WebSocketChannel> Function(Uri uri)? fn) {
+    _testConnector = fn;
+  }
 
   /// Connection state callbacks
   Function(bool connected)? onConnectionChanged;
@@ -48,6 +59,9 @@ class WebSocketService {
     _host = host;
     _port = port;
     _shouldReconnect = true;
+    // Always use ws for dev per platform exceptions
+    _scheme = 'ws';
+    _announcedConnected = false;
     await _connect();
   }
 
@@ -57,13 +71,36 @@ class WebSocketService {
 
     _isConnecting = true;
     try {
-      final uri = Uri.parse('ws://$_host:$_port');
+      final uri = Uri.parse('$_scheme://$_host:$_port');
       LoggerService().dF('WS', () => 'Connecting to $uri');
-      _channel = WebSocketChannel.connect(uri);
+      if (_testConnector != null) {
+        _channel = await _testConnector!(uri);
+      } else {
+        // Use dart:io WebSocket to control compression (disable permessage-deflate)
+        final ws = await WebSocket.connect(
+          uri.toString(),
+          compression: CompressionOptions(enabled: false),
+        );
+        _channel = IOWebSocketChannel(ws);
+      }
 
       // Listen to messages
       _subscription = _channel!.stream.listen(
         (message) {
+          // Mark connected on first received message (pong or any data)
+          if (!_announcedConnected) {
+            _announcedConnected = true;
+            onConnectionChanged?.call(true);
+            // Successful connection resets backoff attempts
+            _reconnectAttempts = 0;
+            _isConnecting = false;
+            LoggerService().i('WS', 'Connected to $_scheme://$_host:$_port');
+            // Query initial macro state now that the link is validated
+            send('macro|query');
+            // Send an extra ping now that the server listener is certainly attached.
+            // This avoids a race where the pre-listen immediate ping could be missed.
+            try { _sendPing(); } catch (_) {}
+          }
           _handleMessage(message.toString());
         },
         onError: (error) {
@@ -77,18 +114,10 @@ class WebSocketService {
         cancelOnError: true,
       );
 
-      // Reset heartbeat state and start ping timer to keep connection alive
+      // Reset heartbeat state and start ping timer; also send an immediate ping to validate link
       _awaitingHeartbeat = false;
       _startPingTimer();
-
-      onConnectionChanged?.call(true);
-      // Successful connection resets backoff attempts
-      _reconnectAttempts = 0;
-      _isConnecting = false;
-      LoggerService().i('WS', 'Connected to ws://$_host:$_port');
-
-      // Query initial macro state
-      send('macro|query');
+      _sendPing();
     } catch (e) {
       _isConnecting = false;
       _handleError('Connection failed: $e');
@@ -294,5 +323,11 @@ class WebSocketService {
   /// Dispose service
   void dispose() {
     disconnect();
+  }
+
+  // Test-only hook to trigger an immediate ping
+  // ignore: avoid_public_notifier
+  void pingNowForTest() {
+    _sendPing();
   }
 }

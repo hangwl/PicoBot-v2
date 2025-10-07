@@ -8,7 +8,7 @@ from picobot.config import AppConfig
 class CreateApplicationTests(unittest.TestCase):
     def test_uses_injected_dependencies(self) -> None:
         root = mock.Mock(name="root")
-        cfg = AppConfig(last_window="Game")
+        cfg = AppConfig(default_target_window="Game")
         context = mock.Mock(name="context")
 
         with mock.patch("picobot.app.MacroControllerApp", autospec=True) as factory:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+import ssl
 import threading
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -51,6 +52,7 @@ class AsyncWebsocketBridge:
         on_client_disconnected: Optional[Callable[[object], None]] = None,
         on_error: Optional[Callable[[Exception], None]] = None,
         max_attempts: int = 10,
+        ssl_context: Optional[ssl.SSLContext] = None,
     ) -> None:
         self.host = host
         self.base_port = int(port)
@@ -65,6 +67,7 @@ class AsyncWebsocketBridge:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._server = None
         self.port = int(port)
+        self.ssl_context = ssl_context
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -140,6 +143,8 @@ class AsyncWebsocketBridge:
                     port,
                     ping_interval=20,
                     ping_timeout=20,
+                    ssl=self.ssl_context,
+                    compression=None,
                 )
                 self.port = port
                 if self.on_port_bound:
@@ -205,11 +210,13 @@ class RemoteControlServer:
         callbacks: RemoteCallbacks,
         *,
         serial_manager: Optional[SerialManager] = None,
+        ssl_context: Optional[ssl.SSLContext] = None,
     ) -> None:
         self.serial_port_name = serial_port_name
         self.ws_port = ws_port
         self.callbacks = callbacks
         self.serial_manager = serial_manager or SerialManager(serial_port_name)
+        self.ssl_context = ssl_context
         self.cmd_queue: "queue.Queue[tuple[str, bool, Optional[queue.Queue[bool]], Optional[float]]]" = queue.Queue()
         self.stop_event = threading.Event()
         self.writer_thread: Optional[threading.Thread] = None
@@ -244,6 +251,7 @@ class RemoteControlServer:
             on_client_connected=self._on_ws_client_connected,
             on_client_disconnected=self._on_ws_client_disconnected,
             on_error=self._on_ws_error,
+            ssl_context=self.ssl_context,
         )
         self.bridge.start()
 
@@ -418,13 +426,15 @@ class RemoteControlServer:
             self.clients.add(websocket)
         peer = getattr(websocket, "remote_address", None)
         self._log(f"WS: client connected {peer}")
-        self._set_status(f"Remote: Connected (ws://0.0.0.0:{self.ws_port})")
+        scheme = "wss" if (self.bridge and getattr(self.bridge, "ssl_context", None)) else "ws"
+        self._set_status(f"Remote: Connected ({scheme}://0.0.0.0:{self.ws_port})")
 
     def _on_ws_client_disconnected(self, websocket) -> None:
         with self.clients_lock:
             self.clients.discard(websocket)
         self._log("WS: client disconnected")
-        self._set_status(f"Remote: Listening (ws://0.0.0.0:{self.ws_port})")
+        scheme = "wss" if (self.bridge and getattr(self.bridge, "ssl_context", None)) else "ws"
+        self._set_status(f"Remote: Listening ({scheme}://0.0.0.0:{self.ws_port})")
 
     def _on_ws_error(self, error: Exception) -> None:
         logging.error("WebSocket bridge error: %s", error)
