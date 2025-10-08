@@ -30,18 +30,24 @@ class _LifecycleReconnectorState extends State<LifecycleReconnector>
     final provider = context.read<ConnectionProvider>();
     switch (state) {
       case AppLifecycleState.resumed:
-        LoggerService().i('Lifecycle', 'App resumed; attempting clean WS reconnect');
-        // Perform a clean disconnect first to reset any stuck state
-        try { provider.disconnect(); } catch (_) {}
-        Future.delayed(const Duration(milliseconds: 200), () async {
-          if (!mounted) return;
-          if (provider.selectedProfile != null) {
+        LoggerService().i('Lifecycle', 'App resumed');
+        // If already connected, avoid forcing a reconnect. Just nudge the link and refresh data.
+        if (provider.isConnected) {
+          try {
+            provider.requestPlaylists();
+          } catch (_) {}
+          break;
+        }
+        // If not connected and a profile exists, reconnect (avoid double-attempt if already connecting)
+        if (provider.selectedProfile != null && !provider.isConnecting) {
+          Future.microtask(() async {
+            if (!mounted) return;
             await provider.connect();
             if (provider.isConnected) {
               provider.requestPlaylists();
             }
-          }
-        });
+          });
+        }
         break;
       case AppLifecycleState.inactive:
         LoggerService().i('Lifecycle', 'App inactive; keeping WS open');
