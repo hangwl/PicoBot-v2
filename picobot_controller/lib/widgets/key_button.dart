@@ -38,12 +38,12 @@ class KeyButton extends StatelessWidget {
             height: height,
             decoration: BoxDecoration(
               color: isPressed
-                  ? Colors.white.withOpacity(0.2)
+                  ? Colors.white.withValues(alpha: 0.2)
                   : Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withAlpha(77),
+                  color: Colors.black.withValues(alpha: 77/255),
                   blurRadius: isPressed ? 2 : 4,
                   offset: Offset(0, isPressed ? 1 : 2),
                 ),

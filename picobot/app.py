@@ -546,13 +546,28 @@ class MacroControllerApp:
             window_title = self.selected_window.get()
             macro_folder = self.macro_folder_path.get()
 
-            # If a remote playlist is selected, use it
+            # If a remote playlist is selected, resolve it. If the current macro_folder
+            # looks like a single-playlist folder (contains .txt), resolve against its parent.
             if self.remote_server and self.remote_server.selected_playlist:
-                playlist_path = os.path.join(macro_folder, self.remote_server.selected_playlist)
+                try:
+                    entries = os.listdir(macro_folder)
+                except Exception:
+                    entries = []
+                has_txt = any((e.lower().endswith('.txt')) for e in entries)
+                base_root = macro_folder
+                if has_txt:
+                    parent = os.path.dirname(macro_folder)
+                    if parent and os.path.isdir(parent):
+                        self.log_remote(f"Resolve playlist using parent of selected folder: '{parent}'")
+                        base_root = parent
+                playlist_path = os.path.join(base_root, self.remote_server.selected_playlist)
                 if os.path.isdir(playlist_path):
                     macro_folder = playlist_path
+                    self.log_remote(f"Using playlist folder: '{macro_folder}'")
                 else:
-                    self.log_remote(f"WARN: Remote playlist '{self.remote_server.selected_playlist}' not found.")
+                    self.log_remote(
+                        f"WARN: Remote playlist '{self.remote_server.selected_playlist}' not found under '{base_root}'."
+                    )
 
 
             if (

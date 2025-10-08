@@ -381,13 +381,31 @@ class RemoteControlServer:
                 self._log("Playlists|get: base_path missing or not a directory; returning []")
                 playlists = []
             else:
+                # Heuristic: if the selected base contains .txt files (a single playlist folder),
+                # list playlists from its parent directory instead, so the client can choose siblings.
+                search_root = base_path
+                try:
+                    entries = os.listdir(base_path)
+                except Exception:
+                    entries = []
+                has_txt = any((e.lower().endswith(".txt")) for e in entries)
+                if has_txt:
+                    parent = os.path.dirname(base_path)
+                    if parent and os.path.isdir(parent):
+                        self._log(
+                            f"Playlists|get: base looks like a playlist folder; using parent '{parent}'"
+                        )
+                        search_root = parent
+                else:
+                    self._log(f"Playlists|get: using base_path as search root: '{base_path}'")
+
                 playlists = sorted([
                     d
-                    for d in os.listdir(base_path)
-                    if os.path.isdir(os.path.join(base_path, d))
+                    for d in os.listdir(search_root)
+                    if os.path.isdir(os.path.join(search_root, d))
                 ])
                 self._log(
-                    f"Playlists|get: found {len(playlists)} playlist dirs: "
+                    f"Playlists|get: found {len(playlists)} playlist dirs under '{search_root}': "
                     f"{', '.join(playlists) if playlists else '(none)'}"
                 )
             payload = {"event": "macroPlaylists", "playlists": playlists}
