@@ -376,7 +376,9 @@ class RemoteControlServer:
     def _handle_get_playlists(self, websocket) -> None:
         try:
             base_path = self.callbacks.get_macro_base_path()
+            self._log(f"Playlists|get: base_path='{base_path}'")
             if not base_path or not os.path.isdir(base_path):
+                self._log("Playlists|get: base_path missing or not a directory; returning []")
                 playlists = []
             else:
                 playlists = sorted([
@@ -384,7 +386,12 @@ class RemoteControlServer:
                     for d in os.listdir(base_path)
                     if os.path.isdir(os.path.join(base_path, d))
                 ])
+                self._log(
+                    f"Playlists|get: found {len(playlists)} playlist dirs: "
+                    f"{', '.join(playlists) if playlists else '(none)'}"
+                )
             payload = {"event": "macroPlaylists", "playlists": playlists}
+            self._log(f"Playlists|get: sending payload {payload}")
             asyncio.run_coroutine_threadsafe(
                 websocket.send(json.dumps(payload)), self.bridge._loop
             )
@@ -394,6 +401,16 @@ class RemoteControlServer:
     def _handle_set_playlist(self, playlist: Optional[str]) -> None:
         self.selected_playlist = playlist
         self._log(f"Remote client set playlist to: {playlist}")
+        try:
+            base = self.callbacks.get_macro_base_path()
+        except Exception:
+            base = None
+        resolved = os.path.join(base, playlist) if base and playlist else None
+        if resolved:
+            if os.path.isdir(resolved):
+                self._log(f"Playlists|set: resolved path exists: {resolved}")
+            else:
+                self._log(f"Playlists|set: WARN path not found: {resolved}")
         self.callbacks.on_remote_playlist_selected(playlist or "")
 
     def broadcast(self, message: str) -> None:
@@ -431,22 +448,27 @@ class RemoteControlServer:
             if action == "playlists":
                 sub_action = parts[2] if len(parts) > 2 else ""
                 if sub_action == "get":
+                    self._log("WS: macro|playlists|get received")
                     self._handle_get_playlists(websocket)
                 elif sub_action == "set":
                     playlist = parts[3] if len(parts) > 3 else None
+                    self._log(f"WS: macro|playlists|set received -> {playlist}")
                     self._handle_set_playlist(playlist)
                 return
                 return
 
             if action == "start":
+                self._log("WS: macro|start received")
                 self._schedule(self.callbacks.start_macro)
             elif action == "stop":
+                self._log("WS: macro|stop received")
                 self._schedule(self.callbacks.stop_macro)
             elif action == "query":
                 try:
                     playing = bool(self.callbacks.is_macro_playing())
                 except Exception:
                     playing = False
+                self._log(f"WS: macro|query received -> playing={playing}")
                 try:
                     await websocket.send("macro|playing" if playing else "macro|stopped")
                 except Exception:
