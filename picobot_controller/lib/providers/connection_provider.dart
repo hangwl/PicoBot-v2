@@ -130,6 +130,8 @@ class ConnectionProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    // Ensure we always start from a clean state to avoid stuck channels/flags
+    _wsService.disconnect();
     await _wsService.connect(profile.host, profile.port);
   }
 

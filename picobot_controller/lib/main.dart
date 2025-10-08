@@ -6,6 +6,7 @@ import 'services/storage_service.dart';
 import 'providers/connection_provider.dart';
 import 'providers/template_provider.dart';
 import 'screens/home_screen.dart';
+import 'services/lifecycle_reconnector.dart';
 import 'services/logger_service.dart';
 
 void main() async {
@@ -56,7 +57,7 @@ class PicoBotApp extends StatelessWidget {
           ),
           useMaterial3: true,
         ),
-        home: const HomeScreen(),
+        home: const LifecycleReconnector(child: HomeScreen()),
       ),
     );
   }

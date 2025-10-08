@@ -16,6 +16,7 @@ class WebSocketService {
   StreamSubscription? _subscription;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
+  Timer? _connectTimeoutTimer;
   bool _awaitingHeartbeat = false; // true if last ping has not received any message yet
   int _reconnectAttempts = 0; // grows with each consecutive failure
   final Random _random = Random();
@@ -24,6 +25,7 @@ class WebSocketService {
   String? _lastPingNonce;
   DateTime? _lastPingSentAt;
   int _pingSeq = 0;
+  int _connectAttemptSeq = 0;
 
   String _host = ConnectionDefaults.defaultHost;
   int _port = ConnectionDefaults.defaultPort;
@@ -69,6 +71,16 @@ class WebSocketService {
     if (_isConnecting || _channel != null) return;
 
     _isConnecting = true;
+    // Increment attempt sequence and arm a timeout to prevent getting stuck
+    final int attemptId = ++_connectAttemptSeq;
+    _connectTimeoutTimer?.cancel();
+    _connectTimeoutTimer = Timer(const Duration(seconds: 8), () {
+      if (_channel == null && _isConnecting && attemptId == _connectAttemptSeq) {
+        _isConnecting = false;
+        _handleError('Connection attempt timed out');
+        _reconnect();
+      }
+    });
     try {
       final uri = Uri.parse('$_scheme://$_host:$_port');
       LoggerService().dF('WS', () => 'Connecting to $uri');
@@ -87,7 +99,6 @@ class WebSocketService {
             onConnectionChanged?.call(true);
             // Successful connection resets backoff attempts
             _reconnectAttempts = 0;
-            _isConnecting = false;
             LoggerService().i('WS', 'Connected to $_scheme://$_host:$_port');
             // Query initial macro state now that the link is validated
             send('macro|query');
@@ -112,6 +123,10 @@ class WebSocketService {
       _awaitingHeartbeat = false;
       _startPingTimer();
       _sendPing();
+      // Connection attempt is considered established (channel open & listener wired),
+      // even if we haven't received the first message yet. Allow further connect attempts.
+      _isConnecting = false;
+      _connectTimeoutTimer?.cancel();
     } catch (e) {
       _isConnecting = false;
       _handleError('Connection failed: $e');
@@ -304,6 +319,8 @@ class WebSocketService {
     _reconnectTimer = null;
     _pingTimer?.cancel();
     _pingTimer = null;
+    _connectTimeoutTimer?.cancel();
+    _connectTimeoutTimer = null;
     _awaitingHeartbeat = false;
     _subscription?.cancel();
     _subscription = null;
@@ -312,6 +329,8 @@ class WebSocketService {
     _channel?.sink.close(status.normalClosure);
     _channel = null;
     _isConnecting = false;
+    // Important: allow the next successful receive to announce connected again
+    _announcedConnected = false;
   }
 
   /// Dispose service
