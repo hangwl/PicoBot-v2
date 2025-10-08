@@ -11,16 +11,19 @@ class ConnectionStatusWidget extends StatelessWidget {
     return Consumer<ConnectionProvider>(
       builder: (context, connectionProvider, child) {
         final isConnected = connectionProvider.isConnected;
+        final isConnecting = connectionProvider.isConnecting && !isConnected;
+        final color = isConnected
+            ? Colors.green
+            : (isConnecting ? Colors.orange : Colors.red);
+        final label = isConnected
+            ? 'Connected'
+            : (isConnecting ? 'Reconnecting…' : 'Disconnected');
         
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
           child: Tooltip(
-            message: isConnected ? 'Connected' : 'Disconnected',
-            child: Icon(
-              Icons.circle,
-              color: isConnected ? Colors.green : Colors.red,
-              size: 16,
-            ),
+            message: label,
+            child: Icon(Icons.circle, color: color, size: 16),
           ),
         );
       },

@@ -11,48 +11,50 @@ import 'settings_screen.dart';
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  Widget _buildPlaylistSelector(BuildContext context) {
-    return Consumer<ConnectionProvider>(
-      builder: (context, connection, child) {
-        if (!connection.isConnected || connection.playlists.isEmpty) {
-          return const SizedBox.shrink(); // Hide if not connected or no playlists
-        }
-
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: InputDecorator(
-            decoration: const InputDecoration(
-              labelText: 'Macro Playlist',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: connection.selectedPlaylist,
-                hint: const Text('Select Macro Playlist'),
-                isExpanded: true,
-                items: connection.playlists.map((playlist) {
-                  return DropdownMenuItem(value: playlist, child: Text(playlist));
-                }).toList(),
-                onChanged: (value) {
-                  connection.selectPlaylist(value);
-                },
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final connection = context.watch<ConnectionProvider>();
+    final Widget? titleWidget = (connection.isConnected && connection.playlists.isNotEmpty)
+        ? SizedBox(
+            height: kToolbarHeight,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 240),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: connection.selectedPlaylist,
+                    hint: const Text('Select Macro Playlist'),
+                    isExpanded: true,
+                    isDense: true,
+                    iconSize: 18,
+                    style: const TextStyle(fontSize: 12),
+                    items: connection.playlists.map((playlist) {
+                      return DropdownMenuItem(
+                        value: playlist,
+                        child: Text(
+                          playlist,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      connection.selectPlaylist(value);
+                    },
+                  ),
+                ),
+              ),
+            ),
+          )
+        : null;
     return Scaffold(
       appBar: AppBar(
         leading: const Padding(
           padding: EdgeInsets.only(left: 16.0),
           child: ConnectionStatusWidget(),
         ),
+        title: titleWidget,
+        centerTitle: false,
         actions: [
           // Add new template button
           IconButton(
@@ -79,7 +81,6 @@ class HomeScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          _buildPlaylistSelector(context),
           Expanded(
             child: Consumer<TemplateProvider>(
         builder: (context, templateProvider, child) {

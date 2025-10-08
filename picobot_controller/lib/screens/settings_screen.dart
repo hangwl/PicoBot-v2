@@ -129,6 +129,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       )),
                   const SizedBox(height: 8),
+                  // Row 1: Add Profile (full width)
                   Row(
                     children: [
                       Expanded(
@@ -136,6 +137,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           icon: const Icon(Icons.add),
                           label: const Text('Add Profile'),
                           onPressed: () => _showProfileDialog(context),
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 48),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Row 2: Reconnect and Disconnect
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Reconnect'),
+                          onPressed: (selected != null && !connectionProvider.isConnecting)
+                              ? () async {
+                                  await connectionProvider.connect();
+                                }
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 48),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -148,6 +172,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               : null,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: connectionProvider.isConnected ? Colors.red : null,
+                            minimumSize: const Size(double.infinity, 48),
                           ),
                         ),
                       ),

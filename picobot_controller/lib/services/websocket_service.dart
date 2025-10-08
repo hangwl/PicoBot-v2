@@ -46,6 +46,9 @@ class WebSocketService {
   Function(String error)? onError;
   // Optional: report ping RTT to observers
   Function(Duration rtt)? onPingRtt;
+  // New: lifecycle callbacks for interim states
+  Function()? onConnecting;
+  Function(Duration delay, int attempt)? onReconnectScheduled;
 
   /// Current connection state
   bool get isConnected => _channel != null;
@@ -71,6 +74,8 @@ class WebSocketService {
     if (_isConnecting || _channel != null) return;
 
     _isConnecting = true;
+    // Notify observers that a connection attempt is starting
+    try { onConnecting?.call(); } catch (_) {}
     // Increment attempt sequence and arm a timeout to prevent getting stuck
     final int attemptId = ++_connectAttemptSeq;
     _connectTimeoutTimer?.cancel();
@@ -207,6 +212,8 @@ class WebSocketService {
     final int jitterMs = _random.nextInt(ceiling + 1); // [0, ceiling]
     final delay = Duration(milliseconds: jitterMs);
     LoggerService().wF('WS', () => 'Reconnect in ${delay.inMilliseconds}ms (attempt ${_reconnectAttempts + 1})');
+    // Notify observers that a reconnect has been scheduled
+    try { onReconnectScheduled?.call(delay, _reconnectAttempts + 1); } catch (_) {}
 
     _reconnectTimer = Timer(delay, () {
       if (_shouldReconnect) {

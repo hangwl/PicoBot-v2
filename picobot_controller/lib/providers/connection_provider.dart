@@ -12,6 +12,7 @@ class ConnectionProvider extends ChangeNotifier {
   final StorageService _storageService;
 
   bool _isConnected = false;
+  bool _isConnecting = false;
   // Server profiles
   List<ServerProfile> _profiles = [];
   String? _selectedProfileId;
@@ -31,6 +32,7 @@ class ConnectionProvider extends ChangeNotifier {
 
   // Getters
   bool get isConnected => _isConnected;
+  bool get isConnecting => _isConnecting;
   // Legacy getters (computed from selected profile when present)
   String get serverHost => selectedProfile?.host ?? '—';
   int get serverPort => selectedProfile?.port ?? 0;
@@ -60,6 +62,9 @@ class ConnectionProvider extends ChangeNotifier {
     _wsService.onConnectionChanged = (connected) {
       _isConnected = connected;
       if (connected) {
+        _isConnecting = false;
+      }
+      if (connected) {
         requestPlaylists();
       } else {
         _isMacroPlaying = false;
@@ -67,6 +72,16 @@ class ConnectionProvider extends ChangeNotifier {
         _selectedPlaylist = null;
         _lastPingRtt = null;
       }
+      notifyListeners();
+    };
+
+    _wsService.onConnecting = () {
+      _isConnecting = true;
+      notifyListeners();
+    };
+
+    _wsService.onReconnectScheduled = (delay, attempt) {
+      _isConnecting = true;
       notifyListeners();
     };
 
@@ -130,6 +145,8 @@ class ConnectionProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    _isConnecting = true;
+    notifyListeners();
     // Ensure we always start from a clean state to avoid stuck channels/flags
     _wsService.disconnect();
     await _wsService.connect(profile.host, profile.port);
@@ -139,6 +156,9 @@ class ConnectionProvider extends ChangeNotifier {
   void disconnect() {
     _wsService.disconnect();
     _lastPingRtt = null;
+    _isConnecting = false;
+    _isConnected = false;
+    notifyListeners();
   }
 
   // ========== Profiles API ==========
