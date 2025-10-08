@@ -44,7 +44,11 @@ class _LifecycleReconnectorState extends State<LifecycleReconnector>
         });
         break;
       case AppLifecycleState.inactive:
+        LoggerService().i('Lifecycle', 'App inactive; keeping WS open');
+        break;
       case AppLifecycleState.paused:
+        LoggerService().i('Lifecycle', 'App paused; keeping WS open');
+        break;
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
         LoggerService().i('Lifecycle', 'App backgrounding; closing WS');
