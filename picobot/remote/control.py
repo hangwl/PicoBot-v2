@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import queue
+import ssl
 import threading
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -35,6 +38,8 @@ class RemoteCallbacks:
     stop_macro: Callable[[], None]
     is_macro_playing: Callable[[], bool]
     broadcast: Callable[[str], None]
+    get_macro_base_path: Callable[[], str]
+    on_remote_playlist_selected: Callable[[str], None]
 
 
 class AsyncWebsocketBridge:
@@ -51,6 +56,7 @@ class AsyncWebsocketBridge:
         on_client_disconnected: Optional[Callable[[object], None]] = None,
         on_error: Optional[Callable[[Exception], None]] = None,
         max_attempts: int = 10,
+        ssl_context: Optional[ssl.SSLContext] = None,
     ) -> None:
         self.host = host
         self.base_port = int(port)
@@ -65,6 +71,7 @@ class AsyncWebsocketBridge:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._server = None
         self.port = int(port)
+        self.ssl_context = ssl_context
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -140,6 +147,8 @@ class AsyncWebsocketBridge:
                     port,
                     ping_interval=20,
                     ping_timeout=20,
+                    ssl=self.ssl_context,
+                    compression=None,
                 )
                 self.port = port
                 if self.on_port_bound:
@@ -205,17 +214,20 @@ class RemoteControlServer:
         callbacks: RemoteCallbacks,
         *,
         serial_manager: Optional[SerialManager] = None,
+        ssl_context: Optional[ssl.SSLContext] = None,
     ) -> None:
         self.serial_port_name = serial_port_name
         self.ws_port = ws_port
         self.callbacks = callbacks
         self.serial_manager = serial_manager or SerialManager(serial_port_name)
+        self.ssl_context = ssl_context
         self.cmd_queue: "queue.Queue[tuple[str, bool, Optional[queue.Queue[bool]], Optional[float]]]" = queue.Queue()
         self.stop_event = threading.Event()
         self.writer_thread: Optional[threading.Thread] = None
         self.bridge: Optional[AsyncWebsocketBridge] = None
         self.clients: set = set()
         self.clients_lock = threading.Lock()
+        self.selected_playlist: Optional[str] = None
 
     # -- Lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -244,6 +256,7 @@ class RemoteControlServer:
             on_client_connected=self._on_ws_client_connected,
             on_client_disconnected=self._on_ws_client_disconnected,
             on_error=self._on_ws_error,
+            ssl_context=self.ssl_context,
         )
         self.bridge.start()
 
@@ -360,6 +373,64 @@ class RemoteControlServer:
         payload = f"{event_type}|{key}"
         return self.enqueue_hid_payload(payload, wait_ack=wait_ack, timeout=timeout)
 
+    def _handle_get_playlists(self, websocket) -> None:
+        try:
+            base_path = self.callbacks.get_macro_base_path()
+            self._log(f"Playlists|get: base_path='{base_path}'")
+            if not base_path or not os.path.isdir(base_path):
+                self._log("Playlists|get: base_path missing or not a directory; returning []")
+                playlists = []
+            else:
+                # Heuristic: if the selected base contains .txt files (a single playlist folder),
+                # list playlists from its parent directory instead, so the client can choose siblings.
+                search_root = base_path
+                try:
+                    entries = os.listdir(base_path)
+                except Exception:
+                    entries = []
+                has_txt = any((e.lower().endswith(".txt")) for e in entries)
+                if has_txt:
+                    parent = os.path.dirname(base_path)
+                    if parent and os.path.isdir(parent):
+                        self._log(
+                            f"Playlists|get: base looks like a playlist folder; using parent '{parent}'"
+                        )
+                        search_root = parent
+                else:
+                    self._log(f"Playlists|get: using base_path as search root: '{base_path}'")
+
+                playlists = sorted([
+                    d
+                    for d in os.listdir(search_root)
+                    if os.path.isdir(os.path.join(search_root, d))
+                ])
+                self._log(
+                    f"Playlists|get: found {len(playlists)} playlist dirs under '{search_root}': "
+                    f"{', '.join(playlists) if playlists else '(none)'}"
+                )
+            payload = {"event": "macroPlaylists", "playlists": playlists}
+            self._log(f"Playlists|get: sending payload {payload}")
+            asyncio.run_coroutine_threadsafe(
+                websocket.send(json.dumps(payload)), self.bridge._loop
+            )
+        except Exception as e:
+            self._log(f"Error getting playlists: {e}")
+
+    def _handle_set_playlist(self, playlist: Optional[str]) -> None:
+        self.selected_playlist = playlist
+        self._log(f"Remote client set playlist to: {playlist}")
+        try:
+            base = self.callbacks.get_macro_base_path()
+        except Exception:
+            base = None
+        resolved = os.path.join(base, playlist) if base and playlist else None
+        if resolved:
+            if os.path.isdir(resolved):
+                self._log(f"Playlists|set: resolved path exists: {resolved}")
+            else:
+                self._log(f"Playlists|set: WARN path not found: {resolved}")
+        self.callbacks.on_remote_playlist_selected(playlist or "")
+
     def broadcast(self, message: str) -> None:
         """Send a message to all connected WebSocket clients."""
         msg = (message or "").strip()
@@ -380,17 +451,42 @@ class RemoteControlServer:
         msg = (message or "").strip()
         if not msg:
             return
+        # Dedicated ping/pong for client heartbeat latency checks
+        if msg.startswith("ping|"):
+            try:
+                # Echo back the nonce part unchanged
+                nonce = msg.split("|", 1)[1] if "|" in msg else ""
+                await websocket.send(f"pong|{nonce}")
+            except Exception:
+                pass
+            return
         if msg.startswith("macro|"):
-            action = msg.split("|", 1)[1] if "|" in msg else ""
+            parts = msg.split("|")
+            action = parts[1] if len(parts) > 1 else ""
+            if action == "playlists":
+                sub_action = parts[2] if len(parts) > 2 else ""
+                if sub_action == "get":
+                    self._log("WS: macro|playlists|get received")
+                    self._handle_get_playlists(websocket)
+                elif sub_action == "set":
+                    playlist = parts[3] if len(parts) > 3 else None
+                    self._log(f"WS: macro|playlists|set received -> {playlist}")
+                    self._handle_set_playlist(playlist)
+                return
+                return
+
             if action == "start":
+                self._log("WS: macro|start received")
                 self._schedule(self.callbacks.start_macro)
             elif action == "stop":
+                self._log("WS: macro|stop received")
                 self._schedule(self.callbacks.stop_macro)
             elif action == "query":
                 try:
                     playing = bool(self.callbacks.is_macro_playing())
                 except Exception:
                     playing = False
+                self._log(f"WS: macro|query received -> playing={playing}")
                 try:
                     await websocket.send("macro|playing" if playing else "macro|stopped")
                 except Exception:
@@ -409,13 +505,15 @@ class RemoteControlServer:
             self.clients.add(websocket)
         peer = getattr(websocket, "remote_address", None)
         self._log(f"WS: client connected {peer}")
-        self._set_status(f"Remote: Connected (ws://0.0.0.0:{self.ws_port})")
+        scheme = "wss" if (self.bridge and getattr(self.bridge, "ssl_context", None)) else "ws"
+        self._set_status(f"Remote: Connected ({scheme}://0.0.0.0:{self.ws_port})")
 
     def _on_ws_client_disconnected(self, websocket) -> None:
         with self.clients_lock:
             self.clients.discard(websocket)
         self._log("WS: client disconnected")
-        self._set_status(f"Remote: Listening (ws://0.0.0.0:{self.ws_port})")
+        scheme = "wss" if (self.bridge and getattr(self.bridge, "ssl_context", None)) else "ws"
+        self._set_status(f"Remote: Listening ({scheme}://0.0.0.0:{self.ws_port})")
 
     def _on_ws_error(self, error: Exception) -> None:
         logging.error("WebSocket bridge error: %s", error)

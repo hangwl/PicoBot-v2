@@ -17,6 +17,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.json"
             payload = {
+                # Deprecated key should migrate into default_target_window
                 "last_window": "Notepad",
                 "ws_port": "9000",
                 "countdown_seconds": "15",
@@ -24,7 +25,7 @@ class ConfigTests(unittest.TestCase):
             }
             path.write_text(json.dumps(payload), encoding="utf-8")
             cfg = load_config(path)
-        self.assertEqual(cfg.last_window, "Notepad")
+        self.assertEqual(cfg.default_target_window, "Notepad")
         self.assertEqual(cfg.ws_port, 9000)
         self.assertEqual(cfg.countdown_seconds, 15)
         self.assertFalse(cfg.always_on_top)
@@ -35,7 +36,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.json"
             cfg = AppConfig(
-                last_window="Game",
+                default_target_window="Game",
                 last_folder="C:/macros",
                 always_on_top=False,
                 bot_token="abc",
@@ -47,6 +48,20 @@ class ConfigTests(unittest.TestCase):
             save_config(cfg, path)
             loaded = load_config(path)
         self.assertEqual(loaded, cfg)
+
+    def test_load_tls_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            payload = {
+                "ws_tls": True,
+                "ws_certfile": "C:/certs/cert.pem",
+                "ws_keyfile": "C:/certs/key.pem",
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            cfg = load_config(path)
+        self.assertTrue(cfg.ws_tls)
+        self.assertEqual(cfg.ws_certfile, "C:/certs/cert.pem")
+        self.assertEqual(cfg.ws_keyfile, "C:/certs/key.pem")
 
 
 if __name__ == "__main__":

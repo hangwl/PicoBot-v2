@@ -30,7 +30,8 @@ def _coerce_int(value: Any, default: int) -> int:
 
 @dataclass
 class AppConfig:
-    last_window: str = ""
+    # Default target window to prefer on startup/refresh when unlocked
+    default_target_window: str = "Eluna (x64)"
     last_folder: str = "No folder selected."
     always_on_top: bool = True
     bot_token: str = ""
@@ -38,6 +39,13 @@ class AppConfig:
     countdown_seconds: int = 60
     ws_port: int = 8765
     http_port: int = 8000
+    # TLS for WebSocket server
+    ws_tls: bool = False
+    ws_certfile: str = ""
+    ws_keyfile: str = ""
+    # Target window lock
+    window_lock_enabled: bool = False
+    window_lock_title: str = ""
 
 
 def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
@@ -62,7 +70,18 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
         return defaults
 
     data = asdict(defaults)
-    data["last_window"] = str(raw.get("last_window", data["last_window"]))
+    # New field replacing deprecated last_window
+    data["default_target_window"] = str(
+        raw.get("default_target_window", data["default_target_window"])
+    )
+    # Migration fallback: if old key exists and new key absent, adopt it once
+    if "last_window" in raw and "default_target_window" not in raw:
+        try:
+            lw = str(raw.get("last_window") or "")
+            if lw:
+                data["default_target_window"] = lw
+        except Exception:
+            pass
     data["last_folder"] = str(raw.get("last_folder", data["last_folder"]))
     data["always_on_top"] = bool(raw.get("always_on_top", data["always_on_top"]))
     data["bot_token"] = str(raw.get("bot_token", data["bot_token"]))
@@ -72,6 +91,15 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
     )
     data["ws_port"] = _coerce_int(raw.get("ws_port"), defaults.ws_port)
     data["http_port"] = _coerce_int(raw.get("http_port"), defaults.http_port)
+    data["ws_tls"] = bool(raw.get("ws_tls", defaults.ws_tls))
+    data["ws_certfile"] = str(raw.get("ws_certfile", defaults.ws_certfile))
+    data["ws_keyfile"] = str(raw.get("ws_keyfile", defaults.ws_keyfile))
+    data["window_lock_enabled"] = bool(
+        raw.get("window_lock_enabled", defaults.window_lock_enabled)
+    )
+    data["window_lock_title"] = str(
+        raw.get("window_lock_title", defaults.window_lock_title)
+    )
 
     return AppConfig(**data)
 
@@ -82,6 +110,9 @@ def save_config(config: AppConfig, path: str | Path = CONFIG_FILE) -> None:
     cfg_path = Path(path)
     _ensure_parent(cfg_path)
     try:
-        cfg_path.write_text(json.dumps(asdict(config), indent=4), encoding="utf-8")
+        payload = asdict(config)
+        # Ensure deprecated keys are not written back out
+        payload.pop("last_window", None)
+        cfg_path.write_text(json.dumps(payload, indent=4), encoding="utf-8")
     except OSError as exc:
         logger.error("Could not write config file %s: %s", cfg_path, exc)
