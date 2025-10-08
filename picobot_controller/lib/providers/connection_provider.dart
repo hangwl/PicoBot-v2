@@ -86,7 +86,8 @@ class ConnectionProvider extends ChangeNotifier {
 
     // Auto-connect if a selected profile exists
     if (_selectedProfileId != null && selectedProfile != null) {
-      connect();
+      // Postpone connection to allow listeners to be set up.
+      Future.delayed(Duration.zero, connect);
     }
 
     _isLoading = false;

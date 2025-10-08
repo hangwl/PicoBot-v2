@@ -436,6 +436,7 @@ class RemoteControlServer:
                     playlist = parts[3] if len(parts) > 3 else None
                     self._handle_set_playlist(playlist)
                 return
+                return
 
             if action == "start":
                 self._schedule(self.callbacks.start_macro)

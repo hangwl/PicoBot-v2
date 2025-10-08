@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:io';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:web_socket_channel/io.dart';
+import 'websocket_connector.dart';
 import 'package:web_socket_channel/status.dart' as status;
 import '../utils/constants.dart';
 import 'logger_service.dart';
@@ -76,12 +75,7 @@ class WebSocketService {
       if (_testConnector != null) {
         _channel = await _testConnector!(uri);
       } else {
-        // Use dart:io WebSocket to control compression (disable permessage-deflate)
-        final ws = await WebSocket.connect(
-          uri.toString(),
-          compression: CompressionOptions(enabled: false),
-        );
-        _channel = IOWebSocketChannel(ws);
+        _channel = await WebSocketConnector().connect(uri);
       }
 
       // Listen to messages
