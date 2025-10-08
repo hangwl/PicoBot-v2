@@ -81,17 +81,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: Text(p.name),
                           subtitle: Text('${p.host}:${p.port}'),
                           onTap: () => connectionProvider.selectProfile(p.id),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
+                          trailing: Transform.translate(
+                            offset: const Offset(8, 0), // Shift right to reduce trailing space
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
                               IconButton(
+                                style: IconButton.styleFrom(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                ),
                                 tooltip: 'Edit',
-                                icon: const Icon(Icons.edit),
+                                icon: const Icon(Icons.edit, size: 20),
                                 onPressed: () => _showProfileDialog(context, existing: p),
                               ),
+                              const SizedBox(width: 8),
                               IconButton(
+                                style: IconButton.styleFrom(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                ),
                                 tooltip: 'Delete',
-                                icon: const Icon(Icons.delete_outline),
+                                icon: const Icon(Icons.delete, color: Colors.red, size: 20),
                                 onPressed: () async {
                                   final confirmed = await showDialog<bool>(
                                     context: context,
@@ -110,7 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 },
                               ),
                             ],
-                          ),
+                          ),),
                         ),
                       )),
                   const SizedBox(height: 8),
@@ -126,35 +141,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: ElevatedButton.icon(
-                          icon: const Icon(Icons.clear),
-                          label: const Text('Clear Selection'),
-                          onPressed: selected != null
+                          icon: const Icon(Icons.link_off),
+                          label: const Text('Disconnect'),
+                          onPressed: connectionProvider.isConnected
                               ? () => connectionProvider.clearSelectedProfile()
                               : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: connectionProvider.isConnected ? Colors.red : null,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  if (connectionProvider.isConnected)
-                    ElevatedButton.icon(
-                      onPressed: () => connectionProvider.disconnect(),
-                      icon: const Icon(Icons.link_off),
-                      label: const Text('Disconnect'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                    )
-                  else
-                    ElevatedButton.icon(
-                      onPressed: selected != null ? () => connectionProvider.connect() : null,
-                      icon: const Icon(Icons.link),
-                      label: const Text('Connect'),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                    ),
                 ],
               );
             },

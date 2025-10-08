@@ -38,7 +38,7 @@ class KeyButton extends StatelessWidget {
             height: height,
             decoration: BoxDecoration(
               color: isPressed
-                  ? Theme.of(context).colorScheme.primary
+                  ? Colors.white.withOpacity(0.2)
                   : Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
               boxShadow: [
@@ -58,7 +58,7 @@ class KeyButton extends StatelessWidget {
                   fontSize: width > 80 ? 18 : 14,
                   fontWeight: FontWeight.bold,
                   color: isPressed
-                      ? Theme.of(context).colorScheme.onPrimary
+                      ? Colors.white
                       : Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 textAlign: TextAlign.center,

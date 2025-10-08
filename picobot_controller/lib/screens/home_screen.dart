@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../providers/connection_provider.dart';
 import '../providers/template_provider.dart';
 import '../widgets/connection_status.dart';
 import 'template_editor_screen.dart';
@@ -9,6 +10,40 @@ import 'settings_screen.dart';
 /// Home screen showing template list
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
+
+  Widget _buildPlaylistSelector(BuildContext context) {
+    return Consumer<ConnectionProvider>(
+      builder: (context, connection, child) {
+        if (!connection.isConnected || connection.playlists.isEmpty) {
+          return const SizedBox.shrink(); // Hide if not connected or no playlists
+        }
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Macro Playlist',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: connection.selectedPlaylist,
+                hint: const Text('Select Macro Playlist'),
+                isExpanded: true,
+                items: connection.playlists.map((playlist) {
+                  return DropdownMenuItem(value: playlist, child: Text(playlist));
+                }).toList(),
+                onChanged: (value) {
+                  connection.selectPlaylist(value);
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,18 +61,27 @@ class HomeScreen extends StatelessWidget {
             tooltip: 'New Template',
           ),
           // Settings button
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: Tooltip(
+              message: 'Settings',
+              child: IconButton(
+                icon: const Icon(Icons.settings),
+                onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
+            ),), // End Tooltip
           ),
         ],
       ),
-      body: Consumer<TemplateProvider>(
+      body: Column(
+        children: [
+          _buildPlaylistSelector(context),
+          Expanded(
+            child: Consumer<TemplateProvider>(
         builder: (context, templateProvider, child) {
           if (templateProvider.isLoading) {
             return const Center(child: CircularProgressIndicator());
@@ -101,8 +145,10 @@ class HomeScreen extends StatelessWidget {
                             ),
                           ),
                         ),
-                        IconButton(
-                          style: IconButton.styleFrom(
+                        Tooltip(
+                          message: 'Edit Template',
+                          child: IconButton(
+                            style: IconButton.styleFrom(
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -118,7 +164,8 @@ class HomeScreen extends StatelessWidget {
                               ),
                             );
                           },
-                        ),
+                          ), // End IconButton
+                        ), // End Tooltip
                       ],
                     ),
                   ),
@@ -127,7 +174,8 @@ class HomeScreen extends StatelessWidget {
             },
           );
         },
-      ),
+      ),), // End Expanded
+      ],), // End Column
     );
   }
 

@@ -343,6 +343,8 @@ class MacroControllerApp:
             stop_macro=self.stop_macro,
             is_macro_playing=lambda: bool(self.is_playing),
             broadcast=lambda msg: None,
+            get_macro_base_path=self.macro_folder_path.get,
+            on_remote_playlist_selected=self.on_remote_playlist_selected,
         )
         # TLS: attempt to construct SSL context if enabled and certs available
         ssl_ctx = None
@@ -371,6 +373,9 @@ class MacroControllerApp:
         callbacks.broadcast = self.remote_server.broadcast
         self._start_http_server()
         self.remote_view.set_running(True)
+
+    def on_remote_playlist_selected(self, playlist: str) -> None:
+        self.log_remote(f"Remote selected playlist: {playlist}")
 
     def stop_remote(self) -> None:
         if self.remote_server:
@@ -540,6 +545,15 @@ class MacroControllerApp:
             port = self.selected_port.get()
             window_title = self.selected_window.get()
             macro_folder = self.macro_folder_path.get()
+
+            # If a remote playlist is selected, use it
+            if self.remote_server and self.remote_server.selected_playlist:
+                playlist_path = os.path.join(macro_folder, self.remote_server.selected_playlist)
+                if os.path.isdir(playlist_path):
+                    macro_folder = playlist_path
+                else:
+                    self.log_remote(f"WARN: Remote playlist '{self.remote_server.selected_playlist}' not found.")
+
 
             if (
                 (not port)

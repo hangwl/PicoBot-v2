@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
@@ -21,6 +22,8 @@ class ConnectionProvider extends ChangeNotifier {
   final Set<String> _pressedKeys = {};
   bool _isLoading = true;
   Duration? _lastPingRtt;
+  List<String> _playlists = [];
+  String? _selectedPlaylist;
 
   ConnectionProvider(this._storageService) {
     _init();
@@ -43,6 +46,8 @@ class ConnectionProvider extends ChangeNotifier {
   ServerProfile? get selectedProfile =>
       _profiles.where((p) => p.id == _selectedProfileId).cast<ServerProfile?>().firstWhere((e) => true, orElse: () => null);
   Duration? get lastPingRtt => _lastPingRtt;
+  List<String> get playlists => List.unmodifiable(_playlists);
+  String? get selectedPlaylist => _selectedPlaylist;
 
   /// Initialize provider
   Future<void> _init() async {
@@ -54,8 +59,13 @@ class ConnectionProvider extends ChangeNotifier {
     // Set up WebSocket callbacks
     _wsService.onConnectionChanged = (connected) {
       _isConnected = connected;
-      if (!connected) {
+      if (connected) {
+        requestPlaylists();
+      } else {
         _isMacroPlaying = false;
+        _playlists = [];
+        _selectedPlaylist = null;
+        _lastPingRtt = null;
       }
       notifyListeners();
     };
@@ -85,6 +95,23 @@ class ConnectionProvider extends ChangeNotifier {
 
   /// Handle incoming WebSocket messages
   void _handleMessage(String message) {
+    if (message.startsWith('{')) {
+      try {
+        final data = jsonDecode(message);
+        if (data['event'] == 'macroPlaylists') {
+          _playlists = List<String>.from(data['playlists'] ?? []);
+          // If the current selection is no longer valid, clear it
+          if (_selectedPlaylist != null && !_playlists.contains(_selectedPlaylist)) {
+            _selectedPlaylist = null;
+          }
+          notifyListeners();
+        }
+      } catch (e) {
+        // Not a valid JSON message, ignore
+      }
+      return;
+    }
+
     if (message == 'macro|playing') {
       _isMacroPlaying = true;
       notifyListeners();
@@ -203,6 +230,24 @@ class ConnectionProvider extends ChangeNotifier {
   /// Stop macro
   void stopMacro() {
     _wsService.stopMacro();
+  }
+
+  // ========== Macro Playlists API ==========
+
+  /// Request the list of macro playlists from the server.
+  void requestPlaylists() {
+    _wsService.send('macro|playlists|get');
+  }
+
+  /// Set the active macro playlist on the server.
+  void selectPlaylist(String? playlist) {
+    _selectedPlaylist = playlist;
+    if (playlist != null) {
+      _wsService.send('macro|playlists|set|$playlist');
+    } else {
+      _wsService.send('macro|playlists|set|');
+    }
+    notifyListeners();
   }
 
   @override

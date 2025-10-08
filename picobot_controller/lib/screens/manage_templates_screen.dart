@@ -16,11 +16,14 @@ class ManageTemplatesScreen extends StatelessWidget {
         title: const Text('Manage Templates'),
         centerTitle: true,
         actions: [
-          Tooltip(
-            message: 'Import Template (JSON)',
-            child: IconButton(
-              icon: const Icon(Icons.file_upload),
-              onPressed: () => _showImportTemplateDialog(context),
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: Tooltip(
+              message: 'Import Template (JSON)',
+              child: IconButton(
+                icon: const Icon(Icons.file_upload),
+                onPressed: () => _showImportTemplateDialog(context),
+              ),
             ),
           ),
         ],
@@ -42,51 +45,55 @@ class ManageTemplatesScreen extends StatelessWidget {
               final template = templates[index];
               return Card(
                 key: ValueKey(template.id),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Row(
-                    children: [
-                      ReorderableDragStartListener(
-                        index: index,
-                        child: const Icon(Icons.drag_handle),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(
-                          template.name,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                      ),
-                      // Export button
-                      IconButton(
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.only(left: 16, right: 8, top: 4, bottom: 4),
+                  leading: ReorderableDragStartListener(
+                    index: index,
+                    child: const Icon(Icons.drag_handle),
+                  ),
+                  title: Text(
+                    template.name,
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  trailing: Transform.translate(
+                    offset: const Offset(0, 0),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Export button
+                        IconButton(
+                          style: IconButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            backgroundColor: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
                           ),
-                          backgroundColor: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
+                          tooltip: 'Export as JSON',
+                          icon: const Icon(Icons.file_download, size: 20),
+                          onPressed: () {
+                            _showExportTemplateDialog(context, template);
+                          },
                         ),
-                        tooltip: 'Export as JSON',
-                        icon: const Icon(Icons.file_download, size: 20),
-                        onPressed: () {
-                          _showExportTemplateDialog(context, template);
-                        },
-                      ),
-                      IconButton(
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          style: IconButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            backgroundColor:
+                                Theme.of(context).colorScheme.surfaceContainerHighest,
                           ),
-                          backgroundColor: Colors.red.withAlpha(25),
+                          tooltip: 'Delete',
+                          icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                          onPressed: () {
+                            // Show confirmation dialog before deleting
+                            _showDeleteDialog(context, template.id, template.name);
+                          },
                         ),
-                        icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                        onPressed: () {
-                          // Show confirmation dialog before deleting
-                          _showDeleteDialog(context, template.id, template.name);
-                        },
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               );

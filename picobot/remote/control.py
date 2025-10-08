@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import queue
 import ssl
 import threading
@@ -36,6 +38,8 @@ class RemoteCallbacks:
     stop_macro: Callable[[], None]
     is_macro_playing: Callable[[], bool]
     broadcast: Callable[[str], None]
+    get_macro_base_path: Callable[[], str]
+    on_remote_playlist_selected: Callable[[str], None]
 
 
 class AsyncWebsocketBridge:
@@ -223,6 +227,7 @@ class RemoteControlServer:
         self.bridge: Optional[AsyncWebsocketBridge] = None
         self.clients: set = set()
         self.clients_lock = threading.Lock()
+        self.selected_playlist: Optional[str] = None
 
     # -- Lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -368,6 +373,29 @@ class RemoteControlServer:
         payload = f"{event_type}|{key}"
         return self.enqueue_hid_payload(payload, wait_ack=wait_ack, timeout=timeout)
 
+    def _handle_get_playlists(self, websocket) -> None:
+        try:
+            base_path = self.callbacks.get_macro_base_path()
+            if not base_path or not os.path.isdir(base_path):
+                playlists = []
+            else:
+                playlists = sorted([
+                    d
+                    for d in os.listdir(base_path)
+                    if os.path.isdir(os.path.join(base_path, d))
+                ])
+            payload = {"event": "macroPlaylists", "playlists": playlists}
+            asyncio.run_coroutine_threadsafe(
+                websocket.send(json.dumps(payload)), self.bridge._loop
+            )
+        except Exception as e:
+            self._log(f"Error getting playlists: {e}")
+
+    def _handle_set_playlist(self, playlist: Optional[str]) -> None:
+        self.selected_playlist = playlist
+        self._log(f"Remote client set playlist to: {playlist}")
+        self.callbacks.on_remote_playlist_selected(playlist or "")
+
     def broadcast(self, message: str) -> None:
         """Send a message to all connected WebSocket clients."""
         msg = (message or "").strip()
@@ -398,7 +426,17 @@ class RemoteControlServer:
                 pass
             return
         if msg.startswith("macro|"):
-            action = msg.split("|", 1)[1] if "|" in msg else ""
+            parts = msg.split("|")
+            action = parts[1] if len(parts) > 1 else ""
+            if action == "playlists":
+                sub_action = parts[2] if len(parts) > 2 else ""
+                if sub_action == "get":
+                    self._handle_get_playlists(websocket)
+                elif sub_action == "set":
+                    playlist = parts[3] if len(parts) > 3 else None
+                    self._handle_set_playlist(playlist)
+                return
+
             if action == "start":
                 self._schedule(self.callbacks.start_macro)
             elif action == "stop":

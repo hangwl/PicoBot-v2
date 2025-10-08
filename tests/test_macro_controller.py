@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import unittest
@@ -5,7 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from picobot.app import MacroControllerApp
 from picobot.playback import MacroController, build_playlist, parse_macro_file
+from picobot.remote import RemoteControlServer
 
 
 class DummyPortService:
@@ -34,6 +37,70 @@ class DummyWindowService:
 
     def build_selection(self, current=None):
         return SimpleNamespace(titles=[], selected=None)
+
+
+class RemoteControlPlaylistTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.macro_folder = Path(self.temp_dir.name)
+
+        # Create playlist subdirectories
+        (self.macro_folder / "playlist1").mkdir()
+        (self.macro_folder / "playlist2").mkdir()
+        (self.macro_folder / "playlist1" / "macro.txt").write_text("0.1 down a\n")
+
+        with mock.patch('picobot.app.MacroControllerApp.__init__', lambda s, r, context=None, config=None: None):
+            self.app = MacroControllerApp(mock.Mock())
+            self.app.macro_folder_path = mock.Mock()
+            self.app.selected_port = mock.Mock()
+            self.app.selected_window = mock.Mock()
+            self.app.remote_server = None
+            self.app.log_remote = mock.Mock()
+            self.app.context = mock.Mock()
+            self.app.context.window_service.activate.return_value = True
+            self.app.macro_controller = mock.Mock()
+            self.app.is_playing = False
+            self.app.countdown_service = mock.Mock()
+            self.app.countdown_service.is_running = False
+            self.app.countdown_status_var = mock.Mock()
+            self.app.start_button = mock.Mock()
+        self.app.macro_folder_path.get.return_value = str(self.macro_folder)
+        self.app.selected_port.get.return_value = "COM3"
+        self.app.selected_window.get.return_value = "Test Window"
+
+        self.callbacks = mock.Mock()
+        self.callbacks.get_macro_base_path = mock.Mock(return_value=str(self.macro_folder))
+        self.callbacks.on_remote_playlist_selected = mock.Mock()
+
+        self.server = RemoteControlServer(
+            serial_port_name="COM3",
+            ws_port=8765,
+            callbacks=self.callbacks,
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    async def test_get_playlists_returns_subdirectories(self):
+        # Simulate a WebSocket client
+        websocket = mock.AsyncMock()
+        self.server.bridge = mock.Mock()
+        self.server.bridge._loop = asyncio.get_event_loop()
+
+        # Act
+        await self.server._handle_ws_message(websocket, "macro|playlists|get")
+
+        # Assert
+        # Check that send was called on the websocket
+        websocket.send.assert_called_once()
+        sent_data = websocket.send.call_args[0][0]
+        import json
+        payload = json.loads(sent_data)
+
+        self.assertEqual(payload['event'], 'macroPlaylists')
+        self.assertCountEqual(payload['playlists'], ['playlist1', 'playlist2'])
+
+
 
 
 class MacroControllerPlaybackTests(unittest.TestCase):
