@@ -62,14 +62,6 @@ class AnnotateTests(unittest.TestCase):
         # original untouched
         self.assertFalse(img.any())
 
-    def test_draws_name_rect(self):
-        img = np.zeros((100, 160, 3), dtype=np.uint8)
-        out = annotate(img, {"name_rect": (20, 30, 60, 20)})
-        cyan = (255, 255, 0)
-        self.assertTrue((out[30, 20] == cyan).all())   # top-left corner
-        self.assertTrue((out[49, 79] == cyan).all())   # bottom-right
-        self.assertFalse((out[40, 40] == cyan).all())  # interior untouched
-
     def test_encode_jpeg_roundtrip(self):
         img = np.full((40, 60, 3), (10, 200, 90), dtype=np.uint8)
         data = encode_jpeg(img, quality=60)
@@ -194,30 +186,6 @@ class HostCommandTests(unittest.TestCase):
         self.assertIsNone(self.host.serial_port)
         self.save_mock.assert_not_called()
 
-    def test_view_command_accepts_title(self):
-        self.assertTrue(self.host._handle_command("dash|view|title"))
-        self.assertEqual(self.host.streamer.mode, "title")
-
-    def test_title_mode_serves_name_strip(self):
-        img = np.zeros((20, 100, 3), dtype=np.uint8)
-        feed = Mock()
-        feed.name_region.return_value = (0, 0, 100, 40)
-        feed.name_img.return_value = img
-        self.host._feed = feed
-        self.host.bot_config.name_ocr = False
-        snap = self.host._provide_frame("title")
-        self.assertIs(snap["img"], img)
-
-    def test_title_mode_forces_minimap_locate(self):
-        feed = Mock()
-        feed.name_region.return_value = None
-        feed.name_img.return_value = None
-        self.host._feed = feed
-        self.host.bot_config.name_ocr = False
-        snap = self.host._provide_frame("title")
-        feed.minimap_img.assert_called_once()
-        self.assertEqual(snap["state"], "IDLE")
-
     def test_host_state_payload(self):
         self.host._handle_command("host|state")
         self.assertTrue(self.sent)
@@ -234,7 +202,6 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap.region = (8, 40, 200, 150)
         feed.minimap_img.return_value = None
         self.host._feed = feed
-        self.host.bot_config.name_ocr = False
         self.host._active_map_override = "m1"
         with tempfile.TemporaryDirectory() as tmp:
             self.host.maps = MapStore(tmp)
@@ -259,7 +226,6 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap_img.return_value = None
         self.host._feed = feed
         self.host._active_map_override = None
-        self.host.bot_config.name_ocr = False
         with tempfile.TemporaryDirectory() as tmp:
             self.host.maps = MapStore(tmp)
             self.host._handle_command("layout|save")
@@ -267,22 +233,6 @@ class HostCommandTests(unittest.TestCase):
             e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
         ]
         self.assertTrue(any("no maps saved" in m for m in msgs))
-
-    def test_layout_save_backfills_map_name(self):
-        feed = Mock()
-        feed.minimap.region = (8, 40, 200, 150)
-        feed.minimap_img.return_value = None
-        self.host._feed = feed
-        self.host._name_reader = Mock(read=Mock(return_value="Lake X"))
-        self.host.bot_config.name_ocr = True
-        self.host._active_map_override = "m1"
-        with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="m1"))
-            self.host._handle_command("layout|save")
-            e = MapStore(tmp).get("m1")
-            self.assertEqual(e.map_name, "Lake X")
-            self.assertEqual(e.minimap_region, (8, 40, 200, 150))
 
     def test_layout_clear_removes_stored(self):
         self.host._active_map_override = "m1"
@@ -301,7 +251,6 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap.player_pos.return_value = None
         feed.minimap.region = (0, 0, 40, 30)
         self.host._feed = feed
-        self.host.bot_config.name_ocr = False
         self.host._active_map_override = "m1"
         with tempfile.TemporaryDirectory() as tmp:
             self.host.maps = MapStore(tmp)
@@ -342,25 +291,14 @@ class HostCommandTests(unittest.TestCase):
         )
         self.save_mock.assert_called()
 
-    def test_layout_region_title_sets_name_region(self):
-        feed = Mock()
-        feed._name_region = None
-        self.host._feed = feed
-        self.assertTrue(
-            self.host._handle_command("layout|region|title|5,8,300,40")
-        )
-        self.assertEqual(feed._name_region, (5, 8, 300, 40))
-        self.assertEqual(
-            self.host.bot_config.minimap_name_region, (5, 8, 300, 40)
-        )
-        self.save_mock.assert_called()
-
     def test_layout_region_rejects_bad_payloads(self):
         feed = Mock()
         self.host._feed = feed
         self.host._handle_command("layout|region|minimap|a,b,c,d")
         self.host._handle_command("layout|region|minimap|1,2,3,4")  # too small
+        self.host._handle_command("layout|region|title|5,8,300,40")
         feed.minimap.set_region.assert_not_called()
+        self.save_mock.assert_not_called()
 
     def test_layout_source_reports_provenance(self):
         feed = Mock()
@@ -375,7 +313,6 @@ class HostCommandTests(unittest.TestCase):
         self.host.calibrator = cal
         feed = Mock()
         feed.minimap_img.return_value = None
-        feed.name_img.return_value = None
         feed.minimap.region = (0, 0, 100, 100)
         self.host._feed = feed
         self.host._active_map_override = "detected_map"

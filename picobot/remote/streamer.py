@@ -60,10 +60,6 @@ def _rect(img: np.ndarray, x: int, y: int, w: int, h: int, color) -> None:
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
-    rect = meta.get("name_rect")
-    if rect:
-        x, y, w, h = (int(v) for v in rect)
-        _rect(out, x, y, w, h, (255, 255, 0))             # cyan name strip
     for x, y in meta.get("anchors") or []:
         _box(out, int(x), int(y), 3, (255, 128, 0))      # blue anchors
     pos = meta.get("player")
@@ -124,7 +120,7 @@ class FrameStreamer:
         self._thread = None
 
     def set_mode(self, mode: str) -> None:
-        if mode in ("minimap", "window", "title"):
+        if mode in ("minimap", "window"):
             self.mode = mode
 
     def _loop(self) -> None:
@@ -134,8 +130,6 @@ class FrameStreamer:
                 snap = self.provider(self.mode) or {}
                 img = snap.get("img")
                 if img is not None:
-                    # annotate is a no-op for snaps carrying no markers —
-                    # window mode only ever sets name_rect.
                     frame = annotate(img, snap)
                     payload = {
                         "event": "frame",
@@ -145,7 +139,7 @@ class FrameStreamer:
                         "jpeg": encode_jpeg(frame, self.quality),
                     }
                     for key in (
-                        "state", "map", "hazard", "player", "title",
+                        "state", "map", "hazard", "player",
                         "layout", "no_rotation",
                     ):
                         if snap.get(key) is not None:

@@ -9,19 +9,19 @@ File shape::
 
     {
       "name": "limina_1f_east",
-      "map_name": "Limina : 1-5 East",   // OCR'd title text (optional)
+      "map_name": "Limina : 1-5 East",   // optional label (legacy OCR field)
       "fingerprint": "<hex from vision.minimap.fingerprint>",
       "minimap_region": [x, y, w, h],    // remembered layout (optional)
       "rotation": { ...Rotation.to_dict()... },
       "skills":   { "fountain": {"key": "d", "cooldown": 57, "kind": "summon"} }
     }
 
-``map_name`` is the OCR-read title the game draws near the minimap;
-matching on it is exact and preferred. ``fingerprint`` is the fallback
-identity when OCR is unavailable or the strip can't be read.
-``minimap_region`` (client-area-relative) is the minimap layout captured
-at calibration time; once a map is identified the bot restores it, so
-auto-detection drift can't accumulate on known maps.
+``map_name`` is a free-form label kept for file compatibility — it is
+not used for matching (the OCR reader was removed; the strip's
+translucent background made it unreliable). ``fingerprint`` is the map
+identity. ``minimap_region`` (client-area-relative) is the minimap
+layout captured at calibration time; once a map is identified the bot
+restores it, so auto-detection drift can't accumulate on known maps.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from ..vision.mapname import normalize_name
 from ..vision.minimap import fingerprint_distance
 from .rotation import Rotation
 from .skills import Skill
@@ -46,7 +45,7 @@ class MapEntry:
     rotation: Rotation = field(default_factory=Rotation)
     skills: Dict[str, Skill] = field(default_factory=dict)
     fingerprint: Optional[str] = None
-    map_name: Optional[str] = None   # OCR'd title text, e.g. "Limina : 1-5"
+    map_name: Optional[str] = None   # optional label (legacy OCR field)
     minimap_region: Optional[tuple] = None  # remembered (x, y, w, h) layout
     path: Optional[Path] = None
 
@@ -131,23 +130,6 @@ class MapStore:
             dist = fingerprint_distance(fingerprint, entry.fingerprint or "")
             if dist < best_dist:
                 best, best_dist = entry, dist
-        return best
-
-    def match_name(self, ocr_text: Optional[str]) -> Optional[MapEntry]:
-        """Match on the OCR'd map title (normalized), else None.
-
-        The stored ``map_name`` only needs to appear inside the OCR'd
-        text — the strip may also pick up neighbouring UI text. Longest
-        stored name wins, so overlapping names stay unambiguous.
-        """
-        norm = normalize_name(ocr_text)
-        if not norm:
-            return None
-        best, best_len = None, 0
-        for entry in self.load_all():
-            en = normalize_name(entry.map_name)
-            if en and en in norm and len(en) > best_len:
-                best, best_len = entry, len(en)
         return best
 
     def save(self, entry: MapEntry) -> Path:

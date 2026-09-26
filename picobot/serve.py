@@ -41,8 +41,6 @@ class _VisionFeed:
         region,
         on_event=None,
         map_change_threshold: float = 15.0,
-        name_region=None,
-        name_strip_height: int = 26,
     ) -> None:
         from .vision.game_window import GameWindow
         from .vision.minimap import MinimapAnalyzer
@@ -56,8 +54,6 @@ class _VisionFeed:
             map_change_threshold=map_change_threshold,
         )
         self._on_event = on_event
-        self._name_region = name_region
-        self._name_h = name_strip_height
 
     def minimap_img(self):
         region = self.minimap.region
@@ -79,26 +75,6 @@ class _VisionFeed:
     def window_img(self):
         l, t, r, b = self.window.client_rect()
         return self.screen.capture((l, t, r - l, b - t))
-
-    def name_region(self):
-        """Window-relative (x, y, w, h) of the map-name strip, if known."""
-        if self._name_region is not None:
-            return self._name_region
-        if self.minimap.region is not None:
-            from .vision.mapname import name_strip_region
-
-            return name_strip_region(self.minimap.region, self._name_h)
-        return None
-
-    def name_img(self):
-        """BGR capture of the map-name strip (above the minimap)."""
-        region = self.name_region()
-        if region is None:
-            return None
-        x, y, w, h = region
-        return self.screen.capture(
-            (self.window.client_left + x, self.window.client_top + y, w, h)
-        )
 
     def close(self) -> None:
         self.screen.close()
@@ -131,8 +107,6 @@ class BotHost:
         self.bot = None
         self.bot_thread: Optional[threading.Thread] = None
         self.calibrator: Optional[CalibrationRunner] = None
-        self._name_reader = None
-        self._title_cache = (0.0, None)
         self._map_res_ts = 0.0
         self._map_res = None
 
@@ -277,36 +251,11 @@ class BotHost:
                         self.bot_config.minimap_region,
                         on_event=self.bus.emit,
                         map_change_threshold=self.bot_config.map_match_threshold,
-                        name_region=self.bot_config.minimap_name_region,
-                        name_strip_height=self.bot_config.name_strip_height,
                     )
                 except Exception as exc:
                     logger.warning("vision feed unavailable: %s", exc)
                     return None
             return self._feed
-
-    def _reader(self):
-        if self._name_reader is None:
-            from .vision.mapname import MapNameReader
-
-            self._name_reader = MapNameReader()
-        return self._name_reader
-
-    def _idle_title(self):
-        """OCR'd map name for the idle feed, refreshed every ~5s."""
-        now = time.time()
-        ts, cached = self._title_cache
-        if now - ts < 5.0:
-            return cached
-        name = None
-        if self.bot_config.name_ocr:
-            feed = self._get_feed()
-            if feed is not None:
-                name = self._reader().read(feed.name_img())
-        self._title_cache = (now, name)
-        if name and name != cached:
-            self.bus.emit("vision", f"map name: {name}")
-        return name
 
     def _layout_source(self):
         """Provenance of the live minimap region: explicit/stored/auto."""
@@ -324,22 +273,19 @@ class BotHost:
             return self.bot._map
         if self._active_map_override:
             return self.maps.get(self._active_map_override)
-        entry = self.maps.match_name(self._idle_title())
-        if entry is None:
-            feed = self._get_feed()
-            img = feed.minimap_img() if feed is not None else None
-            if img is not None:
-                from .vision.minimap import fingerprint
+        entry = None
+        feed = self._get_feed()
+        img = feed.minimap_img() if feed is not None else None
+        if img is not None:
+            from .vision.minimap import fingerprint
 
-                c = feed.minimap.colors
-                fp = fingerprint(
-                    img,
-                    ignore_colors=(c.player, c.other_player, c.rune),
-                    include_colors=(c.ink or c.border,),
-                )
-                entry = self.maps.match(
-                    fp, self.bot_config.map_match_threshold
-                )
+            c = feed.minimap.colors
+            fp = fingerprint(
+                img,
+                ignore_colors=(c.player, c.other_player, c.rune),
+                include_colors=(c.ink or c.border,),
+            )
+            entry = self.maps.match(fp, self.bot_config.map_match_threshold)
         return entry
 
     def _resolved_map_cached(self):
@@ -390,21 +336,13 @@ class BotHost:
                     "error", "no maps saved yet — Record a rotation first"
                 )
             else:
-                title = self._idle_title()
-                hint = f" (title reads: {title})" if title else ""
                 self.bus.emit(
-                    "error",
-                    "no map resolved — pick one in the Map dropdown" + hint,
+                    "error", "no map resolved — fingerprint didn't match"
                 )
             return
         entry.minimap_region = tuple(int(v) for v in region)
         # The save is explicit confirmation that the current screen is
-        # this map — backfill identity fields the entry is missing.
-        if not entry.map_name:
-            title = self._idle_title()
-            if title:
-                entry.map_name = title
-                self.bus.emit("map", f"map name stored: {title}")
+        # this map — backfill a missing fingerprint too.
         if not entry.fingerprint:
             img = (
                 bot.minimap_frame()
@@ -462,23 +400,16 @@ class BotHost:
             return
         if len(rect) != 4 or rect[2] < 10 or rect[3] < 10:
             return
-        bot_cfg = getattr(self.config, "bot", None) or {}
-        if which == "minimap":
-            for mm in self._analyzers():
-                mm.set_region(rect, explicit=True)
-            self.bot_config.minimap_region = rect
-            bot_cfg["minimap_region"] = list(rect)
-            self.bus.emit("vision", f"minimap region set: {list(rect)}")
-        elif which == "title":
-            if self._feed is not None:
-                self._feed._name_region = rect
-            self.bot_config.minimap_name_region = rect
-            bot_cfg["minimap_name_region"] = list(rect)
-            self.bus.emit("vision", f"title region set: {list(rect)}")
-        else:
+        if which != "minimap":
             return
+        for mm in self._analyzers():
+            mm.set_region(rect, explicit=True)
+        self.bot_config.minimap_region = rect
+        bot_cfg = getattr(self.config, "bot", None) or {}
+        bot_cfg["minimap_region"] = list(rect)
         self.config.bot = bot_cfg
         save_config(self.config)
+        self.bus.emit("vision", f"minimap region set: {list(rect)}")
 
     def _layout_clear(self) -> None:
         entry = self._resolved_map_entry()
@@ -491,21 +422,6 @@ class BotHost:
 
     def _provide_frame(self, mode: str):
         bot = self.bot
-        if mode == "title":
-            feed = self._get_feed()
-            if feed is None:
-                return None
-            if feed.name_region() is None:
-                feed.minimap_img()  # force locate so the region resolves
-            img = feed.name_img()
-            if img is None:
-                return {"state": "IDLE"}
-            return {
-                "img": img,
-                "title": self._idle_title(),
-                "layout": self._layout_source(),
-                **self._map_meta(),
-            }
         if mode == "window":
             if bot is not None:
                 img = bot._window_capture()
@@ -513,7 +429,6 @@ class BotHost:
                     return None
                 return {
                     "img": img,
-                    "name_rect": bot._name_region(),
                     "layout": self._layout_source(),
                     **self._map_meta(),
                 }
@@ -522,8 +437,6 @@ class BotHost:
                 return None
             return {
                 "img": feed.window_img(),
-                "name_rect": feed.name_region(),
-                "title": self._idle_title(),
                 "layout": self._layout_source(),
                 **self._map_meta(),
             }
@@ -542,7 +455,6 @@ class BotHost:
             "img": img,
             "player": feed.minimap.player_pos(img),
             "state": "IDLE",
-            "title": self._idle_title(),
             "layout": self._layout_source(),
             **self._map_meta(),
         }
@@ -724,18 +636,12 @@ class BotHost:
         if not self.calibrator:
             return
         if not name:
-            # Blank = save onto the currently resolved map; fall back to
-            # the OCR'd title, then 'unnamed'.
+            # Blank = save onto the currently resolved map, else 'unnamed'.
             resolved = self._resolved_map_entry()
-            name = (
-                resolved.name
-                if resolved is not None
-                else (self._idle_title() or "unnamed")
-            )
+            name = resolved.name if resolved is not None else "unnamed"
             self.bus.emit("cal", f"auto-named map: {name}")
         feed = self._get_feed()
         fp = None
-        map_name = None
         if feed is not None:
             img = feed.minimap_img()
             if img is not None:
@@ -747,16 +653,10 @@ class BotHost:
                     ignore_colors=(c.player, c.other_player, c.rune),
                     include_colors=(c.ink or c.border,),
                 ) or None
-            title_img = feed.name_img()
-            if title_img is not None:
-                map_name = self._reader().read(title_img)
-                if map_name:
-                    self.bus.emit("cal", f"map name read: {map_name}")
         try:
             entry = self.calibrator.finish(
                 name,
                 fingerprint=fp,
-                map_name=map_name,
                 minimap_region=feed.minimap.region if feed else None,
             )
             path = self.maps.save(entry)

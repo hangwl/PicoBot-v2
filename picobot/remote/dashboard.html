@@ -81,7 +81,6 @@
   <span id="ws" class="chip">ws: connecting…</span>
   <span id="serial" class="chip">serial: –</span>
   <span id="win" class="chip">win: –</span>
-  <span id="title" class="chip">title: –</span>
   <span id="layout" class="chip">layout: –</span>
   <span id="bot" class="chip">bot: ?</span>
   <span id="state" class="chip">state: –</span>
@@ -108,7 +107,6 @@
       <div class="row" style="margin-top:8px">
         <button id="vMin">Minimap</button>
         <button id="vWin">Window</button>
-        <button id="vTitle">Title</button>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="layoutSave">Save layout</button>
@@ -117,7 +115,6 @@
       </div>
       <div class="row" style="margin-top:8px">
         <button id="drawMinimap">Draw minimap</button>
-        <button id="drawTitle">Draw title</button>
         <label>drag a rect on the Window view</label>
       </div>
     </div>
@@ -225,7 +222,6 @@ ws.onmessage = e => {
       chip("map",
         "map: " + (p.map || "–") + (p.no_rotation ? " (no rotation)" : ""),
         p.no_rotation ? "warn" : "");
-    chip("title", "title: " + (p.title || "–"));
     if (p.layout !== undefined)
       chip("layout", "layout: " + (p.layout || "–"),
         p.layout === "auto" ? "warn" : "");
@@ -295,7 +291,6 @@ $("startBot").onclick = () => send("bot|start");
 $("stopBot").onclick = () => send("bot|stop");
 $("vMin").onclick = () => send("dash|view|minimap");
 $("vWin").onclick = () => send("dash|view|window");
-$("vTitle").onclick = () => send("dash|view|title");
 $("layoutSave").onclick = () => send("layout|save");
 $("layoutClear").onclick = () => send("layout|clear");
 $("layoutReset").onclick = () => send("layout|reset");
@@ -304,14 +299,12 @@ $("layoutReset").onclick = () => send("layout|reset");
 let drawMode = null, drawStart = null, lastImg = null;
 const viewEl = $("view");
 
-function armDraw(mode) {
-  drawMode = drawMode === mode ? null : mode;  // click again to cancel
+function armDraw() {
+  drawMode = drawMode ? null : "minimap";  // click again to cancel
   if (drawMode) send("dash|view|window");
-  $("drawMinimap").className = drawMode === "minimap" ? "armed" : "";
-  $("drawTitle").className = drawMode === "title" ? "armed" : "";
+  $("drawMinimap").className = drawMode ? "armed" : "";
 }
-$("drawMinimap").onclick = () => armDraw("minimap");
-$("drawTitle").onclick = () => armDraw("title");
+$("drawMinimap").onclick = () => armDraw();
 
 const viewXY = e => {
   const r = viewEl.getBoundingClientRect();
@@ -330,7 +323,7 @@ viewEl.addEventListener("pointermove", e => {
   const ctx = viewEl.getContext("2d");
   ctx.drawImage(lastImg, 0, 0);
   const [x, y] = viewXY(e);
-  ctx.strokeStyle = drawMode === "title" ? "#4ec9b0" : "#d9a13b";
+  ctx.strokeStyle = "#d9a13b";
   ctx.lineWidth = 2;
   ctx.strokeRect(drawStart[0], drawStart[1], x - drawStart[0], y - drawStart[1]);
 });
@@ -343,8 +336,8 @@ viewEl.addEventListener("pointerup", e => {
   const h = Math.round(Math.abs(ey - drawStart[1]));
   drawStart = null;
   if (w >= 10 && h >= 10)
-    send(`layout|region|${drawMode}|${x},${y},${w},${h}`);
-  armDraw(drawMode);  // toggles off
+    send(`layout|region|minimap|${x},${y},${w},${h}`);
+  armDraw();  // toggles off
 });
 $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.target.value); };
 $("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target.value); };

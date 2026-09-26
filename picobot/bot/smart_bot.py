@@ -16,7 +16,6 @@ import time
 from typing import List, Optional, Tuple
 
 from ..vision.game_window import GameWindow
-from ..vision.mapname import MapNameReader, name_strip_region
 from ..vision.minimap import (
     MinimapAnalyzer,
     fingerprint,
@@ -74,12 +73,10 @@ class SmartBot(BotBase):
         self._arrive_pending: List[Tuple[Skill, float]] = []
         self._minimap_warned = False
         self._map_warned = False
-        self._name_reader = MapNameReader()
-        self._name_cache: Tuple[float, Optional[str]] = (0.0, None)
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
-            "target": None, "map": None, "anchor": None, "title": None,
+            "target": None, "map": None, "anchor": None,
         }
 
     def _viz_state(self, name: str) -> None:
@@ -161,41 +158,6 @@ class SmartBot(BotBase):
     def _fp_ink_colors(self):
         c = self.minimap.colors
         return (c.ink or c.border,)
-
-    # -- Map-name OCR ----------------------------------------------------------
-    def _name_region(self):
-        if self.config.minimap_name_region:
-            return self.config.minimap_name_region
-        region = self.minimap.region
-        if region is None:
-            return None
-        return name_strip_region(region, self.config.name_strip_height)
-
-    def name_img(self):
-        """BGR capture of the map-name strip (above the minimap)."""
-        region = self._name_region()
-        if region is None:
-            return None
-        x, y, w, h = region
-        return self.screen.capture(
-            (self.window.client_left + x, self.window.client_top + y, w, h)
-        )
-
-    def map_name(self, force: bool = False) -> Optional[str]:
-        """OCR'd map title, cached a few seconds (it only changes on
-        map transitions). None = OCR off / engine missing / unreadable."""
-        if not self.config.name_ocr:
-            return None
-        now = time.time()
-        ts, cached = self._name_cache
-        if not force and now - ts < 5.0:
-            return cached
-        name = self._name_reader.read(self.name_img())
-        self._name_cache = (now, name)
-        if name and name != cached:
-            self.event("vision", f"map name: {name}")
-        self.viz["title"] = name
-        return name
 
     def minimap_fingerprint(self, img=None) -> Optional[str]:
         if img is None:
@@ -295,14 +257,9 @@ class SmartBot(BotBase):
                 self.log(f"Map '{cfg.active_map}' not found in {cfg.maps_dir}/")
                 self._map_warned = True
         else:
-            # Preferred ID: the OCR'd map-name text (exact match).
-            name = self.map_name()
-            if name:
-                entry = self.maps.match_name(name)
-            # Fallback: ink-masked fingerprint distance.
-            if entry is None:
-                fp = self.minimap_fingerprint(img)
-                entry = self.maps.match(fp, cfg.map_match_threshold)
+            # Ink-masked minimap fingerprint match.
+            fp = self.minimap_fingerprint(img)
+            entry = self.maps.match(fp, cfg.map_match_threshold)
         if entry is not self._map:
             self._map = entry
             self.viz["map"] = entry.name if entry else None
