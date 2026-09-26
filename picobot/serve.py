@@ -510,6 +510,7 @@ class BotHost:
         elif msg == "cal|cancel":
             if self.calibrator:
                 self.calibrator.stop()
+                self.bus.emit("cal", "recording cancelled")
         elif msg.startswith("dash|view|"):
             self.streamer.set_mode(msg.split("|", 2)[2])
         elif msg == "layout|save":
@@ -549,7 +550,8 @@ class BotHost:
         self._send_maps()
 
     def _send_history(self) -> None:
-        payload = {"event": "history", "items": self.bus.history()}
+        items = [e for e in self.bus.history() if e["kind"] != "calstat"]
+        payload = {"event": "history", "items": items}
         self.remote.broadcast("dash|" + json.dumps(payload))
 
     # -- Host connection (serial port + window) --------------------------------
@@ -654,7 +656,7 @@ class BotHost:
         self.calibrator = CalibrationRunner(
             feed.minimap_img,
             feed.minimap.player_pos,
-            event=lambda k, m: self.bus.emit(k, m),
+            event=lambda k, m, d=None: self.bus.emit(k, m, d),
         )
         img = feed.minimap_img()
         wh = (img.shape[1], img.shape[0]) if img is not None else (200, 150)

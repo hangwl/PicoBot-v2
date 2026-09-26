@@ -63,6 +63,7 @@
     border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer;
   }
   button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -126,12 +127,13 @@
         <input id="calName" placeholder="map name (blank = auto)" size="16">
       </div>
       <div class="row" style="margin-top:8px">
-        <button id="calStart">Record</button>
-        <button id="calMark">Mark anchor</button>
-        <button id="calFinish">Save</button>
-        <button id="calCancel">Cancel</button>
+        <button id="calStart" class="primary">Record</button>
+        <button id="calMark">Mark anchor (F9)</button>
+        <button id="calFinish">Save &amp; stop</button>
+        <button id="calCancel">Discard</button>
       </div>
-      <div style="margin-top:6px"><label>walk the rotation; F9 or Mark at each anchor; Save</label></div>
+      <div style="margin-top:6px"><label id="calStat">not recording</label></div>
+      <div style="margin-top:4px"><label>walk your farming route in-game; press F9 (or Mark) at each farming spot; Save writes the map file</label></div>
     </div>
     <div class="panel">
       <h3>Remote input</h3>
@@ -221,11 +223,20 @@ ws.onmessage = e => {
         p.layout === "auto" ? "warn" : "");
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
   } else if (p.event === "evt") {
+    if (p.kind === "calstat") {
+      const d = p.data || {};
+      $("calStat").textContent =
+        `recording — ${d.anchors} anchor(s) · ${d.samples} samples · ${Math.floor(d.elapsed)}s`;
+      return;
+    }
     log(p.kind, p.msg);
     if (p.kind === "bot")
       chip("bot", "bot: " + p.msg, p.msg === "started" ? "on" : "");
-    if (p.kind === "cal")
-      calActive = !p.msg.includes("saved") && !p.msg.includes("failed");
+    if (p.kind === "cal") {
+      if (p.msg.includes("started")) calActive = true;
+      if (/(saved|failed|cancelled)/.test(p.msg)) calActive = false;
+      syncCal();
+    }
   } else if (p.event === "history") {
     logEl.innerHTML = "";
     (p.items || []).forEach(it => log(it.kind, it.msg));
@@ -260,6 +271,16 @@ function fillSel(sel, placeholder, pairs, current) {
     sel.appendChild(o);
   }
 }
+
+function syncCal() {
+  $("calStart").disabled = calActive;
+  $("calStart").textContent = calActive ? "● Recording…" : "Record";
+  $("calMark").disabled = !calActive;
+  $("calFinish").disabled = !calActive;
+  $("calCancel").disabled = !calActive;
+  if (!calActive) $("calStat").textContent = "not recording";
+}
+syncCal();
 
 const send = m => { if (ws.readyState === 1) ws.send(m); };
 $("startBot").onclick = () => send("bot|start");

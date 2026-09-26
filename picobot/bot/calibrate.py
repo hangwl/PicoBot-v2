@@ -241,12 +241,13 @@ class CalibrationRunner:
     def __init__(self, frame_fn, pos_fn, event=None, hz: float = 15.0) -> None:
         self._frame_fn = frame_fn
         self._pos_fn = pos_fn
-        self._emit = event or (lambda kind, msg: None)
+        self._emit = event or (lambda kind, msg, data=None: None)
         self._period = 1.0 / max(1.0, hz)
         self.recorder: Optional[TraceRecorder] = None
         self.last_pos: Optional[_Pt] = None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._t0 = 0.0
 
     @property
     def running(self) -> bool:
@@ -255,6 +256,7 @@ class CalibrationRunner:
     def start(self, region_wh: Tuple[int, int]) -> None:
         self.stop()
         self.recorder = TraceRecorder(region_wh)
+        self._t0 = time.time()
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._loop, name="CalibrationRunner", daemon=True
@@ -263,6 +265,7 @@ class CalibrationRunner:
         self._emit("cal", "recording started")
 
     def _loop(self) -> None:
+        last_stat = 0.0
         while not self._stop.is_set():
             try:
                 img = self._frame_fn()
@@ -274,6 +277,15 @@ class CalibrationRunner:
                             self.recorder.sample(pos)
             except Exception:
                 logger.debug("calibration sample failed", exc_info=True)
+            # ~1Hz live status for the dashboard (not logged).
+            now = time.time()
+            if self.recorder is not None and now - last_stat >= 1.0:
+                last_stat = now
+                self._emit("calstat", "", {
+                    "anchors": len(self.recorder.anchors),
+                    "samples": len(self.recorder.samples),
+                    "elapsed": round(now - self._t0, 1),
+                })
             self._stop.wait(self._period)
 
     def record_key(self, key: str) -> None:
