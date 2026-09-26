@@ -17,7 +17,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from .config import AppConfig, load_config
+from .config import AppConfig, load_config, save_config
 from .events import EventBus
 from .messaging import TelegramHandler
 from .remote import EmbeddedHTTPServer, RemoteCallbacks, RemoteControlServer
@@ -110,7 +110,9 @@ class BotHost:
             self.config.ws_port,
             callbacks,
             ssl_context=self._ssl_context(),
-            serial_optional=serial_port is None,
+            # Always degraded-tolerant: a stale remembered port must not keep
+            # the dashboard from coming up.
+            serial_optional=True,
         )
         self.streamer = FrameStreamer(
             self._provide_frame, self.remote.broadcast, interval=0.35
@@ -171,8 +173,8 @@ class BotHost:
     def start_bot(self) -> None:
         if self.is_bot_running():
             return
-        if not self.serial_port:
-            self.bus.emit("error", "no serial port — start with --port")
+        if not self.serial_port or not self.remote.serial_manager.is_open:
+            self.bus.emit("error", "no serial — pick a port in the Connection panel")
             return
         self.bot_thread = threading.Thread(
             target=self._bot_entry, name="SmartBot", daemon=True
@@ -279,6 +281,12 @@ class BotHost:
             self._send_history()
         elif msg == "config|get":
             self._send_config()
+        elif msg == "host|state":
+            self._send_host_state()
+        elif msg.startswith("host|serial|"):
+            self._connect_serial(msg.split("|", 2)[2])
+        elif msg.startswith("host|window|"):
+            self._set_window(msg.split("|", 2)[2])
         else:
             return False
         return True
@@ -304,6 +312,87 @@ class BotHost:
     def _send_history(self) -> None:
         payload = {"event": "history", "items": self.bus.history()}
         self.remote.broadcast("dash|" + json.dumps(payload))
+
+    # -- Host connection (serial port + window) --------------------------------
+    @staticmethod
+    def _list_ports() -> list:
+        try:
+            from serial.tools import list_ports
+
+            return [
+                {"device": p.device, "desc": p.description or ""}
+                for p in list_ports.comports()
+            ]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _list_windows() -> list:
+        try:
+            import pygetwindow as gw
+
+            return sorted(
+                {t.strip() for t in gw.getAllTitles() if t and t.strip()}
+            )
+        except Exception:
+            return []
+
+    def _send_host_state(self) -> None:
+        payload = {
+            "event": "host",
+            "serial": self.serial_port,
+            "serial_open": bool(self.remote.serial_manager.is_open),
+            "window": self.window_title,
+            "ports": self._list_ports(),
+            "windows": self._list_windows(),
+        }
+        self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _connect_serial(self, port: str) -> None:
+        port = port.strip()
+        if port == "auto":
+            self.bus.emit("host", "probing serial ports…")
+
+            def probe() -> None:
+                from .transport import discover_data_port
+
+                found = discover_data_port()
+                if found:
+                    self._finish_serial_connect(found)
+                else:
+                    self.bus.emit("error", "no Pico DATA port discovered")
+                    self._send_host_state()
+
+            threading.Thread(target=probe, name="PortProbe", daemon=True).start()
+            return
+        self._finish_serial_connect(port)
+
+    def _finish_serial_connect(self, port: str) -> None:
+        if self.remote.connect_serial(port):
+            self.serial_port = port
+            self.config.serial_port = port
+            save_config(self.config)
+            self.bus.emit("host", f"serial: {port}")
+        else:
+            self.bus.emit("error", f"serial connect failed: {port}")
+        self._send_host_state()
+
+    def _set_window(self, title: str) -> None:
+        title = title.strip()
+        if not title or title == self.window_title:
+            return
+        self.window_title = title
+        self.config.default_target_window = title
+        save_config(self.config)
+        with self._feed_lock:
+            if self._feed is not None:
+                try:
+                    self._feed.close()
+                except Exception:
+                    pass
+                self._feed = None
+        self.bus.emit("host", f"window: {title}")
+        self._send_host_state()
 
     def _send_config(self) -> None:
         from dataclasses import asdict
@@ -395,7 +484,16 @@ def main() -> None:
         if port is None:
             parser.exit(2, "no Pico DATA port discovered\n")
         print(f"discovered Pico DATA port: {port}")
+    if port is None:
+        # Fall back to the port remembered from the dashboard/last run.
+        port = config.serial_port or None
+    elif port != config.serial_port:
+        config.serial_port = port
+        save_config(config)
     window_title = args.window or config.default_target_window
+    if args.window and args.window != config.default_target_window:
+        config.default_target_window = args.window
+        save_config(config)
     BotHost(port, window_title, config).run()
 
 

@@ -68,6 +68,8 @@
 <header>
   <b>PicoBot</b>
   <span id="ws" class="chip">ws: connecting…</span>
+  <span id="serial" class="chip">serial: –</span>
+  <span id="win" class="chip">win: –</span>
   <span id="bot" class="chip">bot: ?</span>
   <span id="state" class="chip">state: –</span>
   <span id="map" class="chip">map: –</span>
@@ -75,6 +77,18 @@
 </header>
 <main>
   <div class="col">
+    <div class="panel">
+      <h3>Connection</h3>
+      <div class="row">
+        <select id="portSel" style="min-width:150px"><option value="">(serial)</option></select>
+        <button id="portAuto">Auto</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <select id="winSel" style="min-width:220px"><option value="">(window)</option></select>
+        <button id="connRefresh">Refresh</button>
+      </div>
+      <div style="margin-top:6px"><label>selections are remembered</label></div>
+    </div>
     <div class="panel">
       <h3>View</h3>
       <canvas id="view" width="400" height="300"></canvas>
@@ -167,6 +181,7 @@ ws.onopen = () => {
   ws.send("bot|query");
   ws.send("map|list");
   ws.send("config|get");
+  ws.send("host|state");
 };
 ws.onclose = () => chip("ws", "ws: closed", "bad");
 ws.onerror = () => chip("ws", "ws: error", "warn");
@@ -208,8 +223,37 @@ ws.onmessage = e => {
       if (n === p.active) o.selected = true;
       sel.appendChild(o);
     });
+  } else if (p.event === "host") {
+    fillSel($("portSel"), "(serial)",
+      (p.ports || []).map(pt => [pt.device, pt.device + (pt.desc ? " · " + pt.desc : "")]),
+      p.serial);
+    fillSel($("winSel"), "(window)",
+      (p.windows || []).map(t => [t, t]),
+      p.window);
+    chip("serial", "serial: " + (p.serial || "–"),
+      p.serial_open ? "on" : (p.serial ? "warn" : ""));
+    chip("win", "win: " + (p.window || "–"));
   }
 };
+
+// Populate a <select>; keep the current value as an option even if it
+// wasn't enumerated (e.g. remembered port unplugged).
+function fillSel(sel, placeholder, pairs, current) {
+  sel.innerHTML = `<option value="">${placeholder}</option>`;
+  let found = false;
+  pairs.forEach(([v, label]) => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = label;
+    if (v === current) { o.selected = true; found = true; }
+    sel.appendChild(o);
+  });
+  if (current && !found) {
+    const o = document.createElement("option");
+    o.value = current; o.textContent = current + " (missing)";
+    o.selected = true;
+    sel.appendChild(o);
+  }
+}
 
 const send = m => { if (ws.readyState === 1) ws.send(m); };
 $("startBot").onclick = () => send("bot|start");
@@ -218,6 +262,10 @@ $("vMin").onclick = () => send("dash|view|minimap");
 $("vWin").onclick = () => send("dash|view|window");
 $("mapSel").onchange = e => send("map|set|" + e.target.value);
 $("mapRefresh").onclick = () => send("map|list");
+$("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.target.value); };
+$("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target.value); };
+$("portAuto").onclick = () => send("host|serial|auto");
+$("connRefresh").onclick = () => send("host|state");
 $("calStart").onclick = () => { calActive = true; send("cal|start"); };
 $("calMark").onclick = () => send("cal|mark");
 $("calFinish").onclick = () => {

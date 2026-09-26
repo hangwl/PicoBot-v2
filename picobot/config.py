@@ -37,6 +37,7 @@ class AppConfig:
     bot_token: str = ""
     chat_id: str = ""
     countdown_seconds: int = 60
+    serial_port: str = ""
     ws_port: int = 8765
     http_port: int = 8000
     # TLS for WebSocket server
@@ -91,6 +92,7 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
     data["countdown_seconds"] = max(
         1, _coerce_int(raw.get("countdown_seconds"), defaults.countdown_seconds)
     )
+    data["serial_port"] = str(raw.get("serial_port", data["serial_port"]))
     data["ws_port"] = _coerce_int(raw.get("ws_port"), defaults.ws_port)
     data["http_port"] = _coerce_int(raw.get("http_port"), defaults.http_port)
     data["ws_tls"] = bool(raw.get("ws_tls", defaults.ws_tls))

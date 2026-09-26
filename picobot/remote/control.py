@@ -21,9 +21,14 @@ from ..transport import SerialManager
 
 __all__ = [
     "AsyncWebsocketBridge",
+    "DASHBOARD_PREFIXES",
     "RemoteCallbacks",
     "RemoteControlServer",
 ]
+
+# WS message prefixes routed to the dashboard command sink rather than the
+# Pico's hid|... payload path.
+DASHBOARD_PREFIXES = ("bot|", "map|", "cal|", "dash|", "host|", "events|", "config|")
 
 
 @dataclass
@@ -284,6 +289,33 @@ class RemoteControlServer:
             self.clients.clear()
 
     # -- Serial bridge -----------------------------------------------------
+    def connect_serial(self, port: str) -> bool:
+        """(Re)open the serial transport on *port* at runtime.
+
+        Tries the new port before dropping the old session so a bad pick
+        doesn't tear down a working connection.
+        """
+        port = (port or "").strip()
+        if not port:
+            return False
+        if port == self.serial_port_name and self.serial_manager.is_open:
+            return True
+        manager = SerialManager(port)
+        try:
+            manager.open()
+        except Exception as exc:
+            self._log(f"serial connect failed on {port}: {exc}")
+            self._set_status("Remote: Serial error")
+            return False
+        self.serial_manager.unregister_line_callback(self._on_serial_line)
+        self.serial_manager.close()
+        self.serial_manager = manager
+        self.serial_port_name = port
+        manager.register_line_callback(self._on_serial_line)
+        self._log(f"serial connected on {port}")
+        self._set_status("Remote: Serial connected")
+        return True
+
     def _writer_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
@@ -471,7 +503,7 @@ class RemoteControlServer:
                 pass
             return
         # Dashboard commands: bot lifecycle, maps, calibration, stream mode.
-        if msg.startswith(("bot|", "map|", "cal|", "dash|")):
+        if msg.startswith(DASHBOARD_PREFIXES):
             handled = False
             if msg == "bot|start" and self.callbacks.start_bot:
                 self._log("WS: bot|start received")

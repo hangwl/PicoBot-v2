@@ -26,17 +26,22 @@ please use the program at your own risk.
 ## Running
 
 ```bash
-python -m picobot --port COM3 --window "Eluna (x64)"
-# or: python -m picobot.serve --port auto --window "Eluna (x64)"
+python -m picobot
+# or with explicit overrides: python -m picobot --port COM3 --window "Eluna (x64)"
+# or auto-detect the Pico:   python -m picobot --port auto
 ```
 
 This starts the headless host: serial transport + WebSocket (default :8765) +
 HTTP dashboard (default :8000). Open `http://localhost:8000` — the dashboard is
-the UI. `--port auto` discovers the Pico DATA port; omit `--port` entirely to
-run without a Pico (preview/calibration only).
+the UI. The Pico DATA port and game window can be picked from the dashboard's
+**Connection** panel (selects, or *Auto* to probe for the Pico); both are
+remembered in `config.json` so subsequent runs need no flags. CLI flags
+override the remembered values and are persisted the same way.
 
 ## Dashboard
 
+- **Connection** — pick the Pico DATA serial port (or *Auto*-detect) and the
+  game window title. Selections persist to `config.json`.
 - **View** — live annotated minimap feed (player dot, anchors, nav target,
   hazard markers) or the full game window on demand.
 - **Bot** — Start/Stop the smart bot.
