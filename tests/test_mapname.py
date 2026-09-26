@@ -36,22 +36,21 @@ class NameStripRegionTests(unittest.TestCase):
 
 
 class ReaderTests(unittest.TestCase):
-    def _engine(self, result):
+    def _engine(self, txts=None, scores=None):
+        from types import SimpleNamespace
+
         class Fake:
             def __call__(self, img):
-                return result, [0.0]
+                return SimpleNamespace(txts=txts, scores=scores)
 
         return Fake()
-
-    def _box(self, text, conf):
-        return [[[0, 0], [10, 0], [10, 10], [0, 10]], text, conf]
 
     def test_returns_joined_text(self):
         reader = MapNameReader(min_confidence=0.5)
         img = np.zeros((24, 200, 3), dtype=np.uint8)
         with patch(
             "picobot.vision.mapname._get_engine",
-            return_value=self._engine([self._box("Limina : 1-5", 0.9)]),
+            return_value=self._engine(("Limina : 1-5",), (0.9,)),
         ):
             self.assertEqual(reader.read(img), "Limina : 1-5")
 
@@ -61,7 +60,7 @@ class ReaderTests(unittest.TestCase):
         with patch(
             "picobot.vision.mapname._get_engine",
             return_value=self._engine(
-                [self._box("junk", 0.3), self._box("Real Name", 0.9)]
+                ("junk", "Real Name"), (0.3, 0.9)
             ),
         ):
             self.assertEqual(reader.read(img), "Real Name")
@@ -70,7 +69,8 @@ class ReaderTests(unittest.TestCase):
         reader = MapNameReader()
         img = np.zeros((24, 200, 3), dtype=np.uint8)
         with patch(
-            "picobot.vision.mapname._get_engine", return_value=self._engine(None)
+            "picobot.vision.mapname._get_engine",
+            return_value=self._engine(None),
         ):
             self.assertIsNone(reader.read(img))
 

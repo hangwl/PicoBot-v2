@@ -35,7 +35,7 @@ def _get_engine():
         if _engine is not None or _engine_failed:
             return _engine
         try:
-            from rapidocr_onnxruntime import RapidOCR
+            from rapidocr import RapidOCR
 
             _engine = RapidOCR()
         except Exception as exc:
@@ -88,15 +88,15 @@ class MapNameReader:
             return None
         prep = self._prepare(img)
         try:
-            result, _elapsed = engine(prep)
+            out = engine(prep)
         except Exception:
             logger.debug("map-name OCR failed", exc_info=True)
             return None
-        if not result:
+        txts = getattr(out, "txts", None)
+        if not txts:
             return None
-        texts = [
-            text for _box, text, conf in result if conf >= self.min_confidence
-        ]
+        scores = getattr(out, "scores", None) or (1.0,) * len(txts)
+        texts = [t for t, c in zip(txts, scores) if c >= self.min_confidence]
         name = " ".join(texts).strip()
         return name or None
 
