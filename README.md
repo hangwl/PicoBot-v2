@@ -64,13 +64,17 @@ spots) and legs (walk / flash-jump / climb steps between them), plus skill
 bindings. Map identity is read by **OCR**: the engine reads the map-name text
 the game draws above the minimap and matches it against `map_name` exactly —
 immune to translucent minimap backgrounds and look-alike layouts. A minimap
-ink fingerprint (`fingerprint`) is kept as fallback when OCR is unavailable:
+ink fingerprint (`fingerprint`) is kept as fallback when OCR is unavailable.
+`minimap_region` is the minimap layout remembered at calibration time — when
+the map is identified, the bot restores that region, so auto-detection drift
+can't accumulate on known maps (delete the key to force re-detection):
 
 ```json
 {
   "name": "limina_1f_east",
   "map_name": "Limina : 1-5 East",
   "fingerprint": "<hex>",
+  "minimap_region": [8, 56, 200, 150],
   "rotation": {
     "style": "loop",
     "position_jitter_px": 4,

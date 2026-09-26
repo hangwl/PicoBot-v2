@@ -193,6 +193,18 @@ class MinimapAnalyzer:
     def region(self) -> Optional[Region]:
         return self._region
 
+    def set_region(self, region: Region, *, explicit: bool = False) -> None:
+        """Install a known region — e.g. a remembered per-map layout.
+
+        Non-explicit regions stay resettable: the watchdog can still
+        drop them on a confirmed map change. Re-anchors the content
+        baseline so the region swap itself isn't mistaken for a change.
+        """
+        self._region = tuple(int(v) for v in region)
+        self._region_explicit = explicit
+        self._baseline_fp = None
+        self._fp_misses = 0
+
     def note_frame(self, minimap_img: np.ndarray) -> bool:
         """Watchdog: report True when a map change is confirmed.
 

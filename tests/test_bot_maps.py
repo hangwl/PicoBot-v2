@@ -170,6 +170,26 @@ class MapStoreTests(unittest.TestCase):
         self.assertEqual(data["map_name"], "Kerning : Square")
         self.assertEqual(MapEntry.from_dict(data).map_name, "Kerning : Square")
 
+    def test_minimap_region_roundtrip(self):
+        entry = MapEntry(name="m", minimap_region=(8, 40, 200, 150))
+        data = entry.to_dict()
+        self.assertEqual(data["minimap_region"], [8, 40, 200, 150])
+        self.assertEqual(
+            MapEntry.from_dict(data).minimap_region, (8, 40, 200, 150)
+        )
+
+    def test_minimap_region_malformed_dropped(self):
+        for bad in ([1, 2], "nope", {"x": 1}):
+            entry = MapEntry.from_dict(
+                {"name": "m", "minimap_region": bad}
+            )
+            self.assertIsNone(entry.minimap_region)
+
+    def test_minimap_region_absent(self):
+        entry = MapEntry.from_dict({"name": "m"})
+        self.assertIsNone(entry.minimap_region)
+        self.assertIsNone(entry.to_dict()["minimap_region"])
+
     def test_missing_dir_is_empty(self):
         store = MapStore("/nonexistent/dir")
         self.assertEqual(store.load_all(), [])

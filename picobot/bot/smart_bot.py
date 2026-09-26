@@ -312,6 +312,30 @@ class SmartBot(BotBase):
             self.skills = SkillBook(merged)
             self._anchor_idx = 0
             self._rotation_started = False
+        self._apply_stored_layout(entry)
+
+    def _apply_stored_layout(self, entry) -> None:
+        """Reinstall the map's remembered minimap region.
+
+        Corrects auto-detect drift on known maps: once a layout was
+        saved at calibration, identifying the map snaps the region back
+        to the known-good rect. Skipped when ``minimap_region`` is
+        pinned in the config or the map has none. Stored regions stay
+        resettable — a real map change still clears them via the
+        watchdog.
+        """
+        if entry is None or not entry.minimap_region:
+            return
+        if self.config.minimap_region:
+            return
+        try:
+            region = tuple(int(v) for v in entry.minimap_region)
+        except (TypeError, ValueError):
+            return
+        if len(region) != 4 or tuple(self.minimap.region or ()) == region:
+            return
+        self.minimap.set_region(region)
+        self.event("vision", f"layout restored: {list(region)}")
 
     def _region_wh(self) -> Tuple[int, int]:
         region = self.minimap.region

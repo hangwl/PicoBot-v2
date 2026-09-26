@@ -92,6 +92,13 @@ class TraceRecorderTests(unittest.TestCase):
         self.assertAlmostEqual(lo, 14.0, places=1)
         self.assertGreater(hi, lo)
 
+    def test_finish_carries_minimap_region(self):
+        r = self._recorder()
+        r.sample((50, 50), t=0.0)
+        r.mark(t=0.0)
+        entry = r.finish("m", minimap_region=(8, 40, 200, 150))
+        self.assertEqual(entry.minimap_region, (8, 40, 200, 150))
+
     def test_keys_attribute_to_previous_anchor(self):
         r = self._recorder()
         r.sample((50, 50), t=0.0)

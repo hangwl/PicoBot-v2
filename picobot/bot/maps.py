@@ -11,6 +11,7 @@ File shape::
       "name": "limina_1f_east",
       "map_name": "Limina : 1-5 East",   // OCR'd title text (optional)
       "fingerprint": "<hex from vision.minimap.fingerprint>",
+      "minimap_region": [x, y, w, h],    // remembered layout (optional)
       "rotation": { ...Rotation.to_dict()... },
       "skills":   { "fountain": {"key": "d", "cooldown": 57, "kind": "summon"} }
     }
@@ -18,6 +19,9 @@ File shape::
 ``map_name`` is the OCR-read title the game draws near the minimap;
 matching on it is exact and preferred. ``fingerprint`` is the fallback
 identity when OCR is unavailable or the strip can't be read.
+``minimap_region`` (client-area-relative) is the minimap layout captured
+at calibration time; once a map is identified the bot restores it, so
+auto-detection drift can't accumulate on known maps.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ class MapEntry:
     skills: Dict[str, Skill] = field(default_factory=dict)
     fingerprint: Optional[str] = None
     map_name: Optional[str] = None   # OCR'd title text, e.g. "Limina : 1-5"
+    minimap_region: Optional[tuple] = None  # remembered (x, y, w, h) layout
     path: Optional[Path] = None
 
     def to_dict(self) -> dict:
@@ -50,6 +55,9 @@ class MapEntry:
             "name": self.name,
             "map_name": self.map_name,
             "fingerprint": self.fingerprint,
+            "minimap_region": (
+                list(self.minimap_region) if self.minimap_region else None
+            ),
             "rotation": self.rotation.to_dict(),
             "skills": {n: s.to_dict() for n, s in self.skills.items()},
         }
@@ -62,12 +70,20 @@ class MapEntry:
             name: Skill.from_dict(name, spec)
             for name, spec in (data.get("skills") or {}).items()
         }
+        region = data.get("minimap_region")
+        try:
+            region = tuple(int(v) for v in region) if region else None
+        except (TypeError, ValueError):
+            region = None
+        if region is not None and len(region) != 4:
+            region = None
         return cls(
             name=str(data["name"]),
             rotation=Rotation.from_dict(data.get("rotation")),
             skills=skills,
             fingerprint=data.get("fingerprint"),
             map_name=data.get("map_name"),
+            minimap_region=region,
             path=path,
         )
 

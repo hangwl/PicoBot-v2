@@ -170,5 +170,34 @@ class MapChangeWatchdogTests(unittest.TestCase):
         self.assertFalse(a.note_frame(_vlines()))
 
 
+class SetRegionTests(unittest.TestCase):
+    def test_installs_region_and_reanchors_baseline(self):
+        a = MinimapAnalyzer()
+        a.note_frame(_hlines())                     # old baseline
+        a.set_region((10, 20, 200, 150))
+        self.assertEqual(a.region, (10, 20, 200, 150))
+        # The swap itself isn't a map change — baseline re-anchors.
+        self.assertFalse(a.note_frame(_vlines()))
+        self.assertFalse(a.note_frame(_vlines()))
+
+    def test_stored_region_stays_resettable(self):
+        a = MinimapAnalyzer()
+        a.set_region((10, 20, 200, 150))
+        a.note_frame(_hlines())
+        a.note_frame(_vlines())
+        a.note_frame(_vlines())
+        self.assertTrue(a.note_frame(_vlines()))
+        self.assertIsNone(a.region)                 # watchdog can still drop
+
+    def test_explicit_flag_respected(self):
+        a = MinimapAnalyzer()
+        a.set_region((0, 0, 100, 100), explicit=True)
+        a.note_frame(_hlines())
+        for _ in range(2):
+            a.note_frame(_vlines())
+        self.assertTrue(a.note_frame(_vlines()))
+        self.assertEqual(a.region, (0, 0, 100, 100))
+
+
 if __name__ == "__main__":
     unittest.main()

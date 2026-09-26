@@ -534,7 +534,10 @@ class BotHost:
                     self.bus.emit("cal", f"map name read: {map_name}")
         try:
             entry = self.calibrator.finish(
-                name, fingerprint=fp, map_name=map_name
+                name,
+                fingerprint=fp,
+                map_name=map_name,
+                minimap_region=feed.minimap.region if feed else None,
             )
             path = self.maps.save(entry)
             self.maps.reload()

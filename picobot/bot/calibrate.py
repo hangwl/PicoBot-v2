@@ -172,6 +172,7 @@ class TraceRecorder:
         name: str,
         fingerprint: Optional[str] = None,
         map_name: Optional[str] = None,
+        minimap_region=None,
     ) -> MapEntry:
         """Build the map entry: anchors, leg steps, observed skills."""
         from .rotation import Anchor
@@ -212,6 +213,7 @@ class TraceRecorder:
             skills=skills,
             fingerprint=fingerprint,
             map_name=map_name,
+            minimap_region=minimap_region,
         )
 
     # -- Internals ----------------------------------------------------------------
@@ -290,12 +292,18 @@ class CalibrationRunner:
         name: str,
         fingerprint: Optional[str] = None,
         map_name: Optional[str] = None,
+        minimap_region=None,
     ) -> MapEntry:
         recorder = self.recorder
         self.stop()
         if recorder is None:
             raise RuntimeError("no calibration in progress")
-        entry = recorder.finish(name, fingerprint=fingerprint, map_name=map_name)
+        entry = recorder.finish(
+            name,
+            fingerprint=fingerprint,
+            map_name=map_name,
+            minimap_region=minimap_region,
+        )
         self._emit("cal", f"saved map '{name}'")
         return entry
 
@@ -408,7 +416,12 @@ def main() -> None:
     finally:
         keyboard.unhook_all()
         screen.close()
-    entry = recorder.finish(args.name, fingerprint=fp, map_name=map_name)
+    entry = recorder.finish(
+        args.name,
+        fingerprint=fp,
+        map_name=map_name,
+        minimap_region=minimap.region,
+    )
     path = MapStore(args.maps_dir or bot_config.maps_dir).save(entry)
     print(f"Saved {len(entry.rotation.anchors)} anchors, "
           f"{len(entry.rotation.legs)} legs -> {path}")
