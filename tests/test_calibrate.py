@@ -127,6 +127,23 @@ class TraceRecorderTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self._recorder().mark()
 
+    def test_spammed_key_becomes_attack_skill(self):
+        r = self._recorder()
+        r.sample((50, 50), t=0.0)
+        r.mark(t=0.0)
+        for t in (1.0, 1.6, 2.2, 2.8):
+            r.record_key("a", t=t)   # attack spam in the arrival window
+        r.record_key("d", t=3.0)     # single press -> summon
+        r.sample((120, 50), t=30.0)
+        r.mark(t=30.0)
+        entry = r.finish("m")
+        self.assertEqual(entry.skills["key_a"].kind, "attack")
+        self.assertAlmostEqual(entry.skills["key_a"].cooldown, 0.6)
+        self.assertEqual(entry.skills["key_d"].kind, "summon")
+        self.assertEqual(
+            entry.rotation.anchors[0].on_arrive, ("key_a", "key_d")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,16 @@ def _dist(a: _Pt, b: _Pt) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
+def _key_groups(
+    events: List[Tuple[float, str]],
+) -> Dict[str, List[float]]:
+    """key -> sorted press times within one anchor's arrival window."""
+    groups: Dict[str, List[float]] = {}
+    for t, k in events:
+        groups.setdefault(k, []).append(t)
+    return groups
+
+
 def _simplify(points: List[_Pt], min_step: float) -> List[_Pt]:
     """Drop points closer than ``min_step`` px to the last kept one."""
     kept = [points[0]]
@@ -149,13 +159,15 @@ class TraceRecorder:
             anchor_idx = existing
         else:
             anchor_idx = len(self.anchors)
-            self.anchors.append({"pos": pos, "dwell": (8.0, 14.0), "keys": []})
+            self.anchors.append(
+                {"pos": pos, "dwell": (8.0, 14.0), "key_events": []}
+            )
         # Keys pressed within the arrival window after the *previous* mark
         # belong to that anchor (summons get dropped right on arrival).
         if self._leg_origin is not None and self._mark_time is not None:
             prev = self.anchors[self._leg_origin]
-            prev["keys"] = [
-                k for kt, k in self.keys
+            prev["key_events"] = [
+                (kt, k) for kt, k in self.keys
                 if self._mark_time <= kt < self._mark_time + 8.0
                 and k.lower() not in ("f9", "escape")
             ]
@@ -179,9 +191,9 @@ class TraceRecorder:
         # Attribute the arrival-window keys of the final anchor too.
         if self.anchors and self._leg_origin is not None and self._mark_time is not None:
             last = self.anchors[self._leg_origin]
-            if not last["keys"]:
-                last["keys"] = [
-                    k for kt, k in self.keys
+            if not last["key_events"]:
+                last["key_events"] = [
+                    (kt, k) for kt, k in self.keys
                     if self._mark_time <= kt < self._mark_time + 8.0
                     and k.lower() not in ("f9", "escape")
                 ]
@@ -192,7 +204,9 @@ class TraceRecorder:
                 x=a["pos"][0] / self.wh[0],
                 y=a["pos"][1] / self.wh[1],
                 dwell=a["dwell"],
-                on_arrive=tuple(f"key_{k}" for k in a["keys"]),
+                on_arrive=tuple(
+                    dict.fromkeys(f"key_{k}" for _, k in a["key_events"])
+                ),
             )
             for i, a in enumerate(self.anchors)
         ]
@@ -201,11 +215,23 @@ class TraceRecorder:
             steps = _trace_to_steps(trace, self.wh)
             if steps:
                 legs[ij] = steps
-        skills = {
-            f"key_{k}": Skill(f"key_{k}", k, 30.0, "summon")
-            for a in self.anchors
-            for k in a["keys"]
-        }
+        # A key pressed 3+ times in an arrival window is being spammed —
+        # that's an attack, not a summon. Use its observed cadence as the
+        # cooldown so the book spaces presses like the recording did.
+        skills: Dict[str, Skill] = {}
+        for a in self.anchors:
+            for k, times in _key_groups(a["key_events"]).items():
+                name = f"key_{k}"
+                if name in skills:
+                    continue
+                if len(times) >= 3:
+                    gaps = [b - t for t, b in zip(times, times[1:])]
+                    cd = sorted(gaps)[len(gaps) // 2]
+                    skills[name] = Skill(
+                        name, k, min(15.0, max(0.5, cd)), "attack"
+                    )
+                else:
+                    skills[name] = Skill(name, k, 30.0, "summon")
         return MapEntry(
             name=name,
             rotation=Rotation(anchors=anchors, legs=legs),
@@ -293,7 +319,15 @@ class CalibrationRunner:
     def mark(self) -> Optional[int]:
         if self.recorder is None:
             return None
-        idx = self.recorder.mark()
+        try:
+            idx = self.recorder.mark()
+        except RuntimeError:
+            self._emit(
+                "error",
+                "mark ignored — no player position yet "
+                "(check minimap tracking in the dashboard)",
+            )
+            return None
         self._emit("cal", f"anchor {idx} marked")
         return idx
 
@@ -313,6 +347,13 @@ class CalibrationRunner:
             minimap_region=minimap_region,
         )
         self._emit("cal", f"saved map '{name}'")
+        if not entry.rotation.anchors:
+            self._emit(
+                "error",
+                f"map '{name}' has no anchors — the rotation is inactive "
+                "and the bot will wander. Re-record and press F9 / "
+                "Mark anchor at each farming spot.",
+            )
         return entry
 
     def stop(self) -> None:
