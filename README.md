@@ -119,6 +119,10 @@ you verified in the dashboard carries over to the bot at Start:
   `summon` (fires at anchors listing it via `on_arrive`).
 - `wait_on_arrival`: seconds the bot waits at an anchor for a skill's cooldown
   before giving up — players wait a beat for their summon too.
+- During dwells the bot **weaves**: it flash-hops (or walks) back and
+  forth across the anchor's platform — bounds detected from platform ink,
+  falling back to `weave_range_px` — pressing the attack mid-hop. Set
+  `dwell_weave: false` to go back to standing still.
 
 ## Bot configuration
 
@@ -137,6 +141,9 @@ toggles, minimap colors/region, flash jump, map store:
     "stationary_seconds": 20,
     "wander_seconds": 15,
     "skill_gap_seconds": [0.5, 1.0],
+    "nav_threshold_px": 5,
+    "dwell_weave": true,
+    "weave_range_px": 24,
     "stationary_mode": true,
     "enable_random_wander": true,
     "stop_when_players_appear": true,

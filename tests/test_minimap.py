@@ -276,5 +276,44 @@ class PlatformYTests(unittest.TestCase):
         self.assertEqual(a.platform_y(img, 50, 55), 50)
 
 
+class PlatformExtentTests(unittest.TestCase):
+    def _img(self, w=200, h=120):
+        return np.zeros((h, w, 3), dtype=np.uint8)
+
+    def test_full_width_platform(self):
+        a = MinimapAnalyzer()
+        img = self._img()
+        img[80, :] = (228, 228, 228)
+        ext = a.platform_extent(img, 100, 80, max_half=150)
+        self.assertEqual(ext, (0, 199))
+
+    def test_bounded_run_stops_at_edge(self):
+        a = MinimapAnalyzer()
+        img = self._img()
+        img[80, 40:120] = (228, 228, 228)   # platform x∈[40,119]
+        self.assertEqual(a.platform_extent(img, 60, 80), (40, 119))
+
+    def test_dashed_line_bridges_gaps(self):
+        a = MinimapAnalyzer()
+        img = self._img()
+        img[80, 40:120] = (228, 228, 228)
+        img[80, 70:72] = 0                  # 2px dash gap (within gap tol)
+        ext = a.platform_extent(img, 60, 80)
+        self.assertEqual(ext, (40, 119))
+
+    def test_no_ink_near_column_returns_none(self):
+        a = MinimapAnalyzer()
+        img = self._img()
+        img[80, 40:60] = (228, 228, 228)    # platform far left of x=100
+        self.assertIsNone(a.platform_extent(img, 100, 80))
+
+    def test_max_half_bounds_wide_ink(self):
+        a = MinimapAnalyzer()
+        img = self._img()
+        img[80, :] = (228, 228, 228)
+        ext = a.platform_extent(img, 100, 80, max_half=30)
+        self.assertEqual(ext, (70, 130))
+
+
 if __name__ == "__main__":
     unittest.main()

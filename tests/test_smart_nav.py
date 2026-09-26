@@ -30,6 +30,7 @@ class FakeHid:
 
     def press(self, k, hold=None):
         self.presses.append(k)
+        return True
 
     def release_all(self):
         pass
@@ -189,6 +190,75 @@ class RopeLiftCooldownTests(unittest.TestCase):
         bot.should_continue = Mock(side_effect=stop_after)
         self.assertFalse(_drive(bot))           # stopped, not vert_stuck
         bot.up_jump.assert_called()             # kept retrying the skill
+
+
+class WeaveTests(unittest.TestCase):
+    """dwell_weave: hop across the anchor's platform, attack mid-air."""
+
+    def _bot(self, pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
+        bot = SmartBot.__new__(SmartBot)
+        bot.config = BotConfig()
+        bot.config.dwell_weave = True
+        bot.config.flash_jump_enabled = True
+        bot.config.jump_key = "space"
+        bot.hid = FakeHid()
+        bot.minimap = Mock()
+        bot.minimap.region = (0, 0, 200, 150)
+        bot.minimap.player_pos = Mock(return_value=pos)
+        bot.minimap.platform_extent = Mock(return_value=bounds)
+        bot.minimap_frame = Mock(return_value=object())
+        bot.is_window_focused = Mock(return_value=True)
+        bot._stop_event = threading.Event()
+        bot.sleep = Mock(return_value=False)
+        bot.log = Mock()
+        bot.event = Mock()
+        from picobot.bot.skills import Skill, SkillBook
+        bot.skills = SkillBook({"main": Skill("main", "a")})
+        bot._map = None
+        bot._anchor_idx = 0
+        bot._weave_dir = None
+        bot._weave_bounds = None
+        bot.viz = {"player": None, "target": None}
+        rot = Rotation(anchors=[Anchor("a0", *anchor_xy)])
+        bot.effective_rotation = Mock(return_value=rot)
+        return bot
+
+    def test_hop_weaves_attack_between_jumps(self):
+        bot = self._bot((50, 50))
+        bot.dwell_weave_tick = bot._weave_attack
+        bot._weave_attack()
+        # jump → attack mid-air → jump (FJ re-press), direction released.
+        presses = bot.hid.presses
+        self.assertEqual(presses.count("space"), 2)
+        self.assertIn("a", presses)
+        self.assertEqual(
+            presses.index("a"), presses.index("space") + 1
+        )  # attack lands between the two jump presses
+        self.assertTrue(bot.hid.downs)         # a direction was held
+        self.assertEqual(len(bot.hid.ups), len(bot.hid.downs))  # released
+
+    def test_edge_of_platform_flips_inward(self):
+        bot = self._bot((88, 50), bounds=(10, 90))  # at right edge
+        bot._weave_dir = "right"
+        bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "left")
+
+    def test_marks_attack_used_for_cooldowns(self):
+        from picobot.bot.skills import Skill, SkillBook
+        bot = self._bot((50, 50))
+        bot.skills = SkillBook({"burst": Skill("burst", "s", 30.0)})
+        bot._weave_attack()
+        self.assertFalse(bot.skills.ready("burst"))  # cooldown now tracked
+
+    def test_stationary_attack_marks_cooldown(self):
+        # Regression: _attack_cycle pressed without mark_used, so any
+        # cooldown>0 attack stayed permanently "ready".
+        from picobot.bot.skills import Skill, SkillBook
+        bot = self._bot((50, 50))
+        bot.config.dwell_weave = False
+        bot.skills = SkillBook({"burst": Skill("burst", "s", 30.0)})
+        bot._attack_cycle()
+        self.assertFalse(bot.skills.ready("burst"))
 
 
 class TargetSnapTests(unittest.TestCase):

@@ -45,9 +45,14 @@ class BotConfig:
     wander_seconds: float = 15.0          # how long a wander phase lasts
 
     # -- Navigation ------------------------------------------------------------
-    nav_threshold_px: int = 3             # minimap px tolerance for "arrived"
+    nav_threshold_px: int = 5             # minimap px tolerance for "arrived"
     nav_stuck_limit: int = 40             # identical polls before rope-escape
     wander_edge_margin_px: int = 20       # turn around this close to map edge
+
+    # -- Dwell weave -------------------------------------------------------------
+    dwell_weave: bool = True              # move + weave attacks at anchors
+    weave_range_px: int = 24              # fallback half-width around the anchor
+    weave_edge_margin_px: int = 4         # stay this far inside platform bounds
 
     # -- Vision ----------------------------------------------------------------
     minimap_colors: MinimapColors = field(default_factory=MinimapColors)
@@ -95,7 +100,7 @@ class BotConfig:
         bools = (
             "stationary_mode", "enable_random_wander",
             "stop_when_players_appear", "stop_when_rune_appears",
-            "pause_on_lie_detector",
+            "pause_on_lie_detector", "dwell_weave",
         )
         for name in bools:
             if name in data:
@@ -108,7 +113,7 @@ class BotConfig:
             if name in data:
                 setattr(cfg, name, float(data[name]))
         ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px",
-                "marker_inset_px")
+                "marker_inset_px", "weave_range_px", "weave_edge_margin_px")
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))

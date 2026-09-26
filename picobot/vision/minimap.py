@@ -443,6 +443,64 @@ class MinimapAnalyzer:
             return None
         return int(ys[i] + off)
 
+    def platform_extent(
+        self,
+        minimap_img: np.ndarray,
+        x: float,
+        y: float,
+        *,
+        band: int = 2,
+        gap: int = 2,
+        max_half: int = 80,
+        tolerance: int = 10,
+    ) -> Optional[Tuple[int, int]]:
+        """x-extent ``(x0, x1)`` of the platform ink run under ``(x, y)``.
+
+        Projects ink in a thin row band around ``y`` into a column mask,
+        seeds from the ink column nearest ``x``, and expands while gaps
+        stay within ``gap`` px (thin/dashed platform lines). ``max_half``
+        bounds the run so a long wall of ink can't return the whole map.
+        Returns None when no ink lies within ``gap`` of the column — the
+        point isn't on a platform line.
+        """
+        inner, off = self._interior(minimap_img)
+        h, w = inner.shape[:2]
+        xi, yi = int(round(x)) - off, int(round(y)) - off
+        y0 = max(0, yi - band)
+        y1 = min(h, yi + band + 1)
+        if y0 >= y1 or not (0 <= xi < w):
+            return None
+        ink = self.colors.ink or self.colors.border
+        cols = color_mask(inner[y0:y1], ink, tolerance).any(axis=0)
+        idx = np.nonzero(cols)[0]
+        if idx.size == 0 or int(np.abs(idx - xi).min()) > gap:
+            return None
+        seed = int(idx[np.abs(idx - xi).argmin()])
+        x0 = x1 = seed
+        miss = 0
+        while x0 > 0 and seed - x0 < max_half:
+            if cols[x0 - 1]:
+                x0 -= 1
+                miss = 0
+            elif miss < gap:
+                x0 -= 1
+                miss += 1
+            else:
+                break
+        x0 += miss  # stepped into the dead zone — walk back to ink
+        miss = 0
+        while x1 < w - 1 and x1 - seed < max_half:
+            if cols[x1 + 1]:
+                x1 += 1
+                miss = 0
+            elif miss < gap:
+                x1 += 1
+                miss += 1
+            else:
+                break
+        x1 -= miss
+        return (x0 + off, x1 + off)
+
 
 __all__ = [
     "MinimapAnalyzer",

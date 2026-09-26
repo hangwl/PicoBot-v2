@@ -79,6 +79,8 @@ class SmartBot(BotBase):
         self._minimap_warned = False
         self._map_warned = False
         self._last_up_skill = 0.0
+        self._weave_dir: Optional[str] = None
+        self._weave_bounds: Optional[Tuple[int, int]] = None
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
@@ -314,6 +316,8 @@ class SmartBot(BotBase):
             self.skills = SkillBook(merged)
             self._anchor_idx = 0
             self._rotation_started = False
+            self._weave_dir = None
+            self._weave_bounds = None
         self._apply_stored_layout(entry)
 
     def _apply_stored_layout(self, entry) -> None:
@@ -709,6 +713,8 @@ class SmartBot(BotBase):
         """Start a farming dwell at the current anchor (or legacy timer)."""
         rot = self.effective_rotation()
         now = time.time()
+        self._weave_dir = None
+        self._weave_bounds = None
         if rot.anchors and self._anchor_idx < len(rot.anchors):
             anchor = rot.anchors[self._anchor_idx]
             if anchor.face:
@@ -745,7 +751,81 @@ class SmartBot(BotBase):
                 self._arrive_pending.remove((skill, deadline))
             elif now > deadline:
                 self._arrive_pending.remove((skill, deadline))
-        self._attack_cycle()
+        for buff in self.skills.due_buffs():
+            if not self.should_continue():
+                break
+            if self._use_skill(buff):
+                self.sleep(jittered(0.6))
+        if self.config.dwell_weave:
+            self._weave_attack()
+        else:
+            self._attack_once()
+
+    def _weave_attack(self) -> None:
+        """Move while farming: bounce across the anchor's platform and
+        weave attack presses into the flash-hop — jump, attack mid-air,
+        jump again (the FJ re-press). Players don't stand still on a
+        farm; neither should the bot. The hop is bounded inside one tick
+        (keys released before return) so a hazard pause can't leave a
+        direction held."""
+        rot = self.effective_rotation()
+        if not rot.anchors or self._anchor_idx >= len(rot.anchors):
+            self._attack_once()
+            return
+        cfg = self.config
+        anchor = rot.anchors[self._anchor_idx]
+        ax, ay = self._rx(anchor.x), self._ry(anchor.y)
+        img = self.minimap_frame()
+        pos = self.minimap.player_pos(img) if img is not None else None
+        self.viz["player"] = pos
+        # Platform bounds: the contiguous ink run at the anchor's row,
+        # cached per dwell; ±weave_range fallback when ink reads empty.
+        if self._weave_bounds is None:
+            self._weave_bounds = (
+                self.minimap.platform_extent(img, ax, ay)
+                if img is not None else None
+            )
+        m = cfg.weave_edge_margin_px
+        lo, hi = ax - cfg.weave_range_px, ax + cfg.weave_range_px
+        if self._weave_bounds is not None:
+            blo, bhi = self._weave_bounds[0] + m, self._weave_bounds[1] - m
+            if blo < bhi:
+                lo, hi = blo, bhi
+        direction = self._weave_dir or random.choice(("left", "right"))
+        if pos is not None:
+            if pos[0] <= lo:
+                direction = "right"
+            elif pos[0] >= hi:
+                direction = "left"
+            elif random.random() < 0.06:
+                direction = "left" if direction == "right" else "right"
+        self._weave_dir = direction
+        skill = self._pick_attack()
+        self.hid.key_down(direction)
+        try:
+            if cfg.flash_jump_enabled:
+                self.hid.press(cfg.jump_key)
+                self.sleep(random.uniform(0.12, 0.22))
+                if skill is not None:
+                    self._use_skill(skill)
+                self.hid.press(cfg.jump_key)  # mid-air re-press = FJ
+                self.sleep(random.uniform(0.28, 0.45))
+            else:
+                if skill is not None:
+                    self._use_skill(skill)
+                self.sleep(random.uniform(0.3, 0.5))
+        finally:
+            self.hid.key_up(direction)
+
+    def _attack_once(self) -> None:
+        """Stationary single attack tick (legacy dwell path)."""
+        skill = self._pick_attack()
+        if skill is None:
+            self.sleep(0.2)
+            return
+        if self._use_skill(skill):
+            lo, hi = self.config.skill_gap_seconds
+            self.sleep(human_delay(random.uniform(lo, hi)))
 
     # -- Attacks & skills -----------------------------------------------------------
     def _use_skill(self, skill: Skill) -> bool:
@@ -771,13 +851,7 @@ class SmartBot(BotBase):
                 break
             if self._use_skill(buff):
                 self.sleep(jittered(0.6))
-        skill = self._pick_attack()
-        if skill is None:
-            self.sleep(0.2)
-            return
-        self.hid.press(skill.key, skill.hold)
-        lo, hi = self.config.skill_gap_seconds
-        self.sleep(human_delay(random.uniform(lo, hi)))
+        self._attack_once()
 
     def grind_once(self) -> None:
         """Legacy no-rotation tick: due buffs, then a randomized attack."""
