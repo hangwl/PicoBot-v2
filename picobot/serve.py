@@ -62,20 +62,22 @@ class _VisionFeed:
     def minimap_img(self):
         region = self.minimap.region
         if region is None:
-            l, t, r, b = self.window.rect()
+            l, t, r, b = self.window.client_rect()
             full = self.screen.capture((l, t, r - l, b - t))
             if full is None or self.minimap.locate(full) is None:
                 return None
             region = self.minimap.region
         x, y, w, h = region
-        img = self.screen.capture((self.window.left + x, self.window.top + y, w, h))
+        img = self.screen.capture(
+            (self.window.client_left + x, self.window.client_top + y, w, h)
+        )
         if img is not None and self.minimap.note_frame(img):
             if self._on_event:
                 self._on_event("vision", "map change detected — minimap relocated")
         return img
 
     def window_img(self):
-        l, t, r, b = self.window.rect()
+        l, t, r, b = self.window.client_rect()
         return self.screen.capture((l, t, r - l, b - t))
 
     def name_region(self):
@@ -94,7 +96,9 @@ class _VisionFeed:
         if region is None:
             return None
         x, y, w, h = region
-        return self.screen.capture((self.window.left + x, self.window.top + y, w, h))
+        return self.screen.capture(
+            (self.window.client_left + x, self.window.client_top + y, w, h)
+        )
 
     def close(self) -> None:
         self.screen.close()

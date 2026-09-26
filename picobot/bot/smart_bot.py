@@ -118,8 +118,8 @@ class SmartBot(BotBase):
 
     # -- Perception --------------------------------------------------------------
     def _window_capture(self):
-        """BGR capture of the whole game window, or None."""
-        l, t, r, b = self.window.rect()
+        """BGR capture of the game window's client area, or None."""
+        l, t, r, b = self.window.client_rect()
         return self.screen.capture((l, t, r - l, b - t))
 
     def minimap_frame(self):
@@ -128,7 +128,7 @@ class SmartBot(BotBase):
         if region is not None:
             x, y, w, h = region
             img = self.screen.capture(
-                (self.window.left + x, self.window.top + y, w, h)
+                (self.window.client_left + x, self.window.client_top + y, w, h)
             )
             if img is not None and self.minimap.note_frame(img):
                 self.event("vision", "map change detected — minimap relocated")
@@ -176,7 +176,7 @@ class SmartBot(BotBase):
             return None
         x, y, w, h = region
         return self.screen.capture(
-            (self.window.left + x, self.window.top + y, w, h)
+            (self.window.client_left + x, self.window.client_top + y, w, h)
         )
 
     def map_name(self, force: bool = False) -> Optional[str]:

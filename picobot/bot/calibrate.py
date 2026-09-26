@@ -340,13 +340,17 @@ def main() -> None:
         region = minimap.region
         if region is None:
             full = screen.capture(
-                (lambda r: (r[0], r[1], r[2] - r[0], r[3] - r[1]))(window.rect())
+                (lambda r: (r[0], r[1], r[2] - r[0], r[3] - r[1]))(
+                    window.client_rect()
+                )
             )
             if full is None or minimap.locate(full) is None:
                 return None
             region = minimap.region
         x, y, w, h = region
-        return screen.capture((window.left + x, window.top + y, w, h))
+        return screen.capture(
+            (window.client_left + x, window.client_top + y, w, h)
+        )
 
     first = frame()
     if first is None:
@@ -368,7 +372,9 @@ def main() -> None:
         minimap.region, bot_config.name_strip_height
     )
     nx, ny, nw, nh = name_reg
-    title_img = screen.capture((window.left + nx, window.top + ny, nw, nh))
+    title_img = screen.capture(
+        (window.client_left + nx, window.client_top + ny, nw, nh)
+    )
     if title_img is not None:
         map_name = MapNameReader().read(title_img)
         if map_name:

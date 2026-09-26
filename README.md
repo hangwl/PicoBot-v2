@@ -151,7 +151,9 @@ Notes:
 
 - Legacy `attack_keys`/`buff_keys` are synthesized into skills when no explicit
   `"skills"` map exists — new configs should use named skills.
-- `minimap_region` is `(x, y, w, h)` **relative to the game window**. Set it if
+- `minimap_region` is `(x, y, w, h)` **relative to the game window's client
+  area** (i.e. below the OS title bar — captures never include the title bar
+  or window borders). Set it if
   auto-detection fails on your client.
 - `minimap_colors.ink` is the platform/line color used to mask fingerprints —
   defaults to `border`. It matters on translucent minimaps: only ink pixels

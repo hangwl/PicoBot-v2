@@ -51,7 +51,8 @@ class BotConfig:
     # -- Vision ----------------------------------------------------------------
     minimap_colors: MinimapColors = field(default_factory=MinimapColors)
     minimap_region: Optional[Tuple[int, int, int, int]] = None
-    """Explicit (x, y, w, h) minimap rect relative to the window.
+    """Explicit (x, y, w, h) minimap rect relative to the window's
+    client area (excludes the OS title bar).
     Set this if border auto-detection fails on your client/resolution."""
 
     # -- Skills -----------------------------------------------------------------
@@ -77,7 +78,8 @@ class BotConfig:
     map_match_threshold: float = 15.0     # fingerprint distance bound (0-255)
     name_ocr: bool = True                 # OCR the map-name strip (preferred ID)
     minimap_name_region: Optional[Tuple[int, int, int, int]] = None
-    """Explicit (x, y, w, h) map-name strip relative to the window.
+    """Explicit (x, y, w, h) map-name strip relative to the window's
+    client area (excludes the OS title bar).
     None = scan the whole band above the minimap region."""
     name_strip_height: int = 26           # inner-strip fallback when minimap
                                           # is flush with the window top
