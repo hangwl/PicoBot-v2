@@ -219,7 +219,9 @@ class HostCommandTests(unittest.TestCase):
     def test_layout_save_writes_resolved_map(self):
         feed = Mock()
         feed.minimap.region = (8, 40, 200, 150)
+        feed.minimap_img.return_value = None
         self.host._feed = feed
+        self.host.bot_config.name_ocr = False
         self.host._active_map_override = "m1"
         with tempfile.TemporaryDirectory() as tmp:
             self.host.maps = MapStore(tmp)
@@ -237,6 +239,37 @@ class HostCommandTests(unittest.TestCase):
         self.host._handle_command("layout|save")
         kinds = [e["kind"] for e in self.host.bus.history()]
         self.assertIn("error", kinds)
+
+    def test_layout_save_no_maps_gives_clear_error(self):
+        feed = Mock()
+        feed.minimap.region = (8, 40, 200, 150)
+        feed.minimap_img.return_value = None
+        self.host._feed = feed
+        self.host._active_map_override = None
+        self.host.bot_config.name_ocr = False
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host._handle_command("layout|save")
+        msgs = [
+            e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
+        ]
+        self.assertTrue(any("no maps saved" in m for m in msgs))
+
+    def test_layout_save_backfills_map_name(self):
+        feed = Mock()
+        feed.minimap.region = (8, 40, 200, 150)
+        feed.minimap_img.return_value = None
+        self.host._feed = feed
+        self.host._name_reader = Mock(read=Mock(return_value="Lake X"))
+        self.host.bot_config.name_ocr = True
+        self.host._active_map_override = "m1"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.host._handle_command("layout|save")
+            e = MapStore(tmp).get("m1")
+            self.assertEqual(e.map_name, "Lake X")
+            self.assertEqual(e.minimap_region, (8, 40, 200, 150))
 
     def test_layout_clear_removes_stored(self):
         self.host._active_map_override = "m1"

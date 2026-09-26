@@ -353,14 +353,46 @@ class BotHost:
             return
         entry = self._resolved_map_entry()
         if entry is None:
-            self.bus.emit(
-                "error",
-                "no map resolved — pick a map or let OCR/fingerprint match",
-            )
+            if not self.maps.names():
+                self.bus.emit(
+                    "error", "no maps saved yet — Record a rotation first"
+                )
+            else:
+                title = self._idle_title()
+                hint = f" (title reads: {title})" if title else ""
+                self.bus.emit(
+                    "error",
+                    "no map resolved — pick one in the Map dropdown" + hint,
+                )
             return
         entry.minimap_region = tuple(int(v) for v in region)
+        # The save is explicit confirmation that the current screen is
+        # this map — backfill identity fields the entry is missing.
+        if not entry.map_name:
+            title = self._idle_title()
+            if title:
+                entry.map_name = title
+                self.bus.emit("map", f"map name stored: {title}")
+        if not entry.fingerprint:
+            img = (
+                bot.minimap_frame()
+                if bot is not None
+                else feed.minimap_img() if feed is not None else None
+            )
+            if img is not None:
+                from .vision.minimap import fingerprint
+
+                mm = bot.minimap if bot is not None else feed.minimap
+                c = mm.colors
+                entry.fingerprint = fingerprint(
+                    img,
+                    ignore_colors=(c.player, c.other_player, c.rune),
+                    include_colors=(c.ink or c.border,),
+                ) or entry.fingerprint
         self.maps.save(entry)
-        self.bus.emit("map", f"layout saved for {entry.name}: {list(entry.minimap_region)}")
+        self.bus.emit(
+            "map", f"layout saved for {entry.name}: {list(entry.minimap_region)}"
+        )
 
     def _layout_clear(self) -> None:
         entry = self._resolved_map_entry()
