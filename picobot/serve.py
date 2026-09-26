@@ -473,6 +473,9 @@ class BotHost:
                     and self.calibrator.running
                     and event.event_type == "down"
                 ):
+                    # F9 marks an anchor without leaving the game window.
+                    if event.name == "f9":
+                        self.calibrator.mark()
                     self.calibrator.record_key(event.name)
 
             keyboard.hook(on_press)
