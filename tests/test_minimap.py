@@ -194,12 +194,20 @@ class SetRegionTests(unittest.TestCase):
     def test_explicit_flag_respected(self):
         a = MinimapAnalyzer()
         a.set_region((0, 0, 100, 100), explicit=True)
-        self.assertEqual(a.region_source, "explicit")
+        self.assertEqual(a.region_source, "manual")
         a.note_frame(_hlines())
         for _ in range(2):
             a.note_frame(_vlines())
         self.assertTrue(a.note_frame(_vlines()))
         self.assertEqual(a.region, (0, 0, 100, 100))
+
+    def test_config_region_source_and_reset(self):
+        a = MinimapAnalyzer(region=(0, 0, 200, 150))
+        self.assertEqual(a.region_source, "config")
+        a.reset_region()
+        self.assertIsNone(a.region)
+        self.assertIsNone(a.region_source)
+        self.assertFalse(a._region_explicit)
 
 
 if __name__ == "__main__":

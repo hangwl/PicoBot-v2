@@ -426,6 +426,60 @@ class BotHost:
             "map", f"layout saved for {entry.name}: {list(entry.minimap_region)}"
         )
 
+    def _analyzers(self):
+        """Live MinimapAnalyzers: the bot's (if running) and the feed's."""
+        if self.bot is not None:
+            yield self.bot.minimap
+        if self._feed is not None:
+            yield self._feed.minimap
+
+    def _layout_reset(self) -> None:
+        """Drop the live region on all analyzers -> next frame re-detects."""
+        touched = False
+        for mm in self._analyzers():
+            mm.reset_region()
+            touched = True
+        self.bus.emit(
+            "vision",
+            "minimap layout reset — re-detecting"
+            if touched else "no minimap to reset",
+        )
+
+    def _layout_set_region(self, msg: str) -> None:
+        """layout|region|minimap|x,y,w,h — hand-drawn rect from Window view.
+
+        Manual rects are treated as trusted (watchdog won't drop them),
+        persisted to config.json, and can additionally be committed to
+        the map file via Save layout.
+        """
+        parts = msg.split("|", 3)
+        if len(parts) != 4:
+            return
+        which, payload = parts[2], parts[3]
+        try:
+            rect = tuple(int(float(v)) for v in payload.split(","))
+        except (TypeError, ValueError):
+            return
+        if len(rect) != 4 or rect[2] < 10 or rect[3] < 10:
+            return
+        bot_cfg = getattr(self.config, "bot", None) or {}
+        if which == "minimap":
+            for mm in self._analyzers():
+                mm.set_region(rect, explicit=True)
+            self.bot_config.minimap_region = rect
+            bot_cfg["minimap_region"] = list(rect)
+            self.bus.emit("vision", f"minimap region set: {list(rect)}")
+        elif which == "title":
+            if self._feed is not None:
+                self._feed._name_region = rect
+            self.bot_config.minimap_name_region = rect
+            bot_cfg["minimap_name_region"] = list(rect)
+            self.bus.emit("vision", f"title region set: {list(rect)}")
+        else:
+            return
+        self.config.bot = bot_cfg
+        save_config(self.config)
+
     def _layout_clear(self) -> None:
         entry = self._resolved_map_entry()
         if entry is None or not entry.minimap_region:
@@ -517,6 +571,10 @@ class BotHost:
             self._layout_save()
         elif msg == "layout|clear":
             self._layout_clear()
+        elif msg == "layout|reset":
+            self._layout_reset()
+        elif msg.startswith("layout|region|"):
+            self._layout_set_region(msg)
         elif msg == "events|history":
             self._send_history()
         elif msg == "config|get":

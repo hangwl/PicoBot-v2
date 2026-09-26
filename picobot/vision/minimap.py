@@ -183,7 +183,7 @@ class MinimapAnalyzer:
         self.colors = colors or MinimapColors()
         self._region = region
         self._region_explicit = region is not None
-        self._region_source = "explicit" if region is not None else None
+        self._region_source = "config" if region is not None else None
         self._border_tolerance = border_tolerance
         self._map_change_threshold = map_change_threshold
         self._map_change_frames = map_change_frames
@@ -196,13 +196,15 @@ class MinimapAnalyzer:
 
     @property
     def region_source(self) -> Optional[str]:
-        """Where the current region came from: ``explicit`` (config),
+        """Where the current region came from: ``config`` (pinned in
+        config.json), ``manual`` (hand-drawn in the dashboard),
         ``stored`` (a map file's remembered layout), ``auto`` (live
         border detection), or None when unknown."""
         return self._region_source
 
     def set_region(self, region: Region, *, explicit: bool = False) -> None:
-        """Install a known region — e.g. a remembered per-map layout.
+        """Install a known region — e.g. a remembered per-map layout or
+        a hand-drawn rect (``explicit``).
 
         Non-explicit regions stay resettable: the watchdog can still
         drop them on a confirmed map change. Re-anchors the content
@@ -210,7 +212,17 @@ class MinimapAnalyzer:
         """
         self._region = tuple(int(v) for v in region)
         self._region_explicit = explicit
-        self._region_source = "explicit" if explicit else "stored"
+        self._region_source = "manual" if explicit else "stored"
+        self._baseline_fp = None
+        self._fp_misses = 0
+
+    def reset_region(self) -> None:
+        """Drop the current region (any source) so ``locate`` re-runs on
+        the next capture. The user asked for re-detection — also clears
+        the explicit flag so the watchdog manages the fresh result."""
+        self._region = None
+        self._region_explicit = False
+        self._region_source = None
         self._baseline_fp = None
         self._fp_misses = 0
 

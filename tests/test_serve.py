@@ -319,6 +319,49 @@ class HostCommandTests(unittest.TestCase):
             snap = self.host._provide_frame("minimap")
             self.assertFalse(snap["no_rotation"])
 
+    def test_layout_reset_drops_region(self):
+        feed = Mock()
+        self.host._feed = feed
+        self.assertTrue(self.host._handle_command("layout|reset"))
+        feed.minimap.reset_region.assert_called_once()
+
+    def test_layout_region_minimap_sets_and_persists(self):
+        feed = Mock()
+        self.host._feed = feed
+        self.assertTrue(
+            self.host._handle_command("layout|region|minimap|10,20,100,80")
+        )
+        feed.minimap.set_region.assert_called_once_with(
+            (10, 20, 100, 80), explicit=True
+        )
+        self.assertEqual(
+            self.host.bot_config.minimap_region, (10, 20, 100, 80)
+        )
+        self.assertEqual(
+            self.host.config.bot["minimap_region"], [10, 20, 100, 80]
+        )
+        self.save_mock.assert_called()
+
+    def test_layout_region_title_sets_name_region(self):
+        feed = Mock()
+        feed._name_region = None
+        self.host._feed = feed
+        self.assertTrue(
+            self.host._handle_command("layout|region|title|5,8,300,40")
+        )
+        self.assertEqual(feed._name_region, (5, 8, 300, 40))
+        self.assertEqual(
+            self.host.bot_config.minimap_name_region, (5, 8, 300, 40)
+        )
+        self.save_mock.assert_called()
+
+    def test_layout_region_rejects_bad_payloads(self):
+        feed = Mock()
+        self.host._feed = feed
+        self.host._handle_command("layout|region|minimap|a,b,c,d")
+        self.host._handle_command("layout|region|minimap|1,2,3,4")  # too small
+        feed.minimap.set_region.assert_not_called()
+
     def test_layout_source_reports_provenance(self):
         feed = Mock()
         feed.minimap.region = (0, 0, 100, 100)

@@ -38,7 +38,9 @@
   canvas#view {
     display: block; background: #000; border-radius: 4px;
     image-rendering: pixelated; width: 400px; max-width: 100%; height: auto;
+    touch-action: none;
   }
+  button.armed { border-color: var(--warn); color: var(--warn); }
   select, input { max-width: 100%; min-width: 0; }
   @media (max-width: 640px) {
     main { padding: 8px; gap: 8px; }
@@ -111,7 +113,12 @@
       <div class="row" style="margin-top:8px">
         <button id="layoutSave">Save layout</button>
         <button id="layoutClear">Forget</button>
-        <label>remember this minimap layout for the resolved map</label>
+        <button id="layoutReset">Re-detect</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="drawMinimap">Draw minimap</button>
+        <button id="drawTitle">Draw title</button>
+        <label>drag a rect on the Window view</label>
       </div>
     </div>
     <div class="panel">
@@ -211,6 +218,7 @@ ws.onmessage = e => {
       c.getContext("2d").drawImage(img, 0, 0);
     };
     img.src = "data:image/jpeg;base64," + p.jpeg;
+    lastImg = img;
     if (p.state) chip("state", "state: " + p.state,
       p.state === "PAUSE" ? "warn" : "");
     if (p.map !== undefined || p.no_rotation !== undefined)
@@ -290,6 +298,54 @@ $("vWin").onclick = () => send("dash|view|window");
 $("vTitle").onclick = () => send("dash|view|title");
 $("layoutSave").onclick = () => send("layout|save");
 $("layoutClear").onclick = () => send("layout|clear");
+$("layoutReset").onclick = () => send("layout|reset");
+
+// --- Drag-to-draw regions on the Window view ---------------------------
+let drawMode = null, drawStart = null, lastImg = null;
+const viewEl = $("view");
+
+function armDraw(mode) {
+  drawMode = drawMode === mode ? null : mode;  // click again to cancel
+  if (drawMode) send("dash|view|window");
+  $("drawMinimap").className = drawMode === "minimap" ? "armed" : "";
+  $("drawTitle").className = drawMode === "title" ? "armed" : "";
+}
+$("drawMinimap").onclick = () => armDraw("minimap");
+$("drawTitle").onclick = () => armDraw("title");
+
+const viewXY = e => {
+  const r = viewEl.getBoundingClientRect();
+  return [
+    (e.clientX - r.left) * viewEl.width / r.width,
+    (e.clientY - r.top) * viewEl.height / r.height,
+  ];
+};
+viewEl.addEventListener("pointerdown", e => {
+  if (!drawMode) return;
+  drawStart = viewXY(e);
+  viewEl.setPointerCapture(e.pointerId);
+});
+viewEl.addEventListener("pointermove", e => {
+  if (!drawStart || !lastImg) return;
+  const ctx = viewEl.getContext("2d");
+  ctx.drawImage(lastImg, 0, 0);
+  const [x, y] = viewXY(e);
+  ctx.strokeStyle = drawMode === "title" ? "#4ec9b0" : "#d9a13b";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(drawStart[0], drawStart[1], x - drawStart[0], y - drawStart[1]);
+});
+viewEl.addEventListener("pointerup", e => {
+  if (!drawStart) return;
+  const [ex, ey] = viewXY(e);
+  const x = Math.round(Math.min(drawStart[0], ex));
+  const y = Math.round(Math.min(drawStart[1], ey));
+  const w = Math.round(Math.abs(ex - drawStart[0]));
+  const h = Math.round(Math.abs(ey - drawStart[1]));
+  drawStart = null;
+  if (w >= 10 && h >= 10)
+    send(`layout|region|${drawMode}|${x},${y},${w},${h}`);
+  armDraw(drawMode);  // toggles off
+});
 $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.target.value); };
 $("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target.value); };
 $("portAuto").onclick = () => send("host|serial|auto");
