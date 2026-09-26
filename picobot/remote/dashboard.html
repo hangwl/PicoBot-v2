@@ -70,6 +70,7 @@
   <span id="ws" class="chip">ws: connecting…</span>
   <span id="serial" class="chip">serial: –</span>
   <span id="win" class="chip">win: –</span>
+  <span id="title" class="chip">title: –</span>
   <span id="bot" class="chip">bot: ?</span>
   <span id="state" class="chip">state: –</span>
   <span id="map" class="chip">map: –</span>
@@ -204,6 +205,7 @@ ws.onmessage = e => {
     if (p.state) chip("state", "state: " + p.state,
       p.state === "PAUSE" ? "warn" : "");
     if (p.map !== undefined) chip("map", "map: " + (p.map || "–"));
+    chip("title", "title: " + (p.title || "–"));
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
   } else if (p.event === "evt") {
     log(p.kind, p.msg);

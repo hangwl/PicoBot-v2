@@ -45,9 +45,25 @@ def _cross(img: np.ndarray, cx: int, cy: int, r: int, color) -> None:
             img[y, cx] = color
 
 
+def _rect(img: np.ndarray, x: int, y: int, w: int, h: int, color) -> None:
+    ih, iw = img.shape[:2]
+    x0, x1 = max(0, x), min(iw, x + w)
+    y0, y1 = max(0, y), min(ih, y + h)
+    if x1 <= x0 or y1 <= y0:
+        return
+    img[y0, x0:x1] = color
+    img[y1 - 1, x0:x1] = color
+    img[y0:y1, x0] = color
+    img[y0:y1, x1 - 1] = color
+
+
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
+    rect = meta.get("name_rect")
+    if rect:
+        x, y, w, h = (int(v) for v in rect)
+        _rect(out, x, y, w, h, (255, 255, 0))             # cyan name strip
     for x, y in meta.get("anchors") or []:
         _box(out, int(x), int(y), 3, (255, 128, 0))      # blue anchors
     pos = meta.get("player")
@@ -118,7 +134,9 @@ class FrameStreamer:
                 snap = self.provider(self.mode) or {}
                 img = snap.get("img")
                 if img is not None:
-                    frame = annotate(img, snap) if self.mode == "minimap" else img
+                    # annotate is a no-op for snaps carrying no markers —
+                    # window mode only ever sets name_rect.
+                    frame = annotate(img, snap)
                     payload = {
                         "event": "frame",
                         "mode": self.mode,
@@ -126,7 +144,7 @@ class FrameStreamer:
                         "h": int(frame.shape[0]),
                         "jpeg": encode_jpeg(frame, self.quality),
                     }
-                    for key in ("state", "map", "hazard", "player"):
+                    for key in ("state", "map", "hazard", "player", "title"):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]
                     self.send("dash|" + json.dumps(payload))

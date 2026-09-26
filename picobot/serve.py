@@ -14,6 +14,7 @@ import json
 import logging
 import ssl
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -77,13 +78,19 @@ class _VisionFeed:
         l, t, r, b = self.window.rect()
         return self.screen.capture((l, t, r - l, b - t))
 
-    def name_img(self):
-        """BGR capture of the map-name strip (above the minimap)."""
-        region = self._name_region
-        if region is None and self.minimap.region is not None:
+    def name_region(self):
+        """Window-relative (x, y, w, h) of the map-name strip, if known."""
+        if self._name_region is not None:
+            return self._name_region
+        if self.minimap.region is not None:
             from .vision.mapname import name_strip_region
 
-            region = name_strip_region(self.minimap.region, self._name_h)
+            return name_strip_region(self.minimap.region, self._name_h)
+        return None
+
+    def name_img(self):
+        """BGR capture of the map-name strip (above the minimap)."""
+        region = self.name_region()
         if region is None:
             return None
         x, y, w, h = region
@@ -121,6 +128,7 @@ class BotHost:
         self.bot_thread: Optional[threading.Thread] = None
         self.calibrator: Optional[CalibrationRunner] = None
         self._name_reader = None
+        self._title_cache = (0.0, None)
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -271,14 +279,45 @@ class BotHost:
                     return None
             return self._feed
 
+    def _reader(self):
+        if self._name_reader is None:
+            from .vision.mapname import MapNameReader
+
+            self._name_reader = MapNameReader()
+        return self._name_reader
+
+    def _idle_title(self):
+        """OCR'd map name for the idle feed, refreshed every ~5s."""
+        now = time.time()
+        ts, cached = self._title_cache
+        if now - ts < 5.0:
+            return cached
+        name = None
+        if self.bot_config.name_ocr:
+            feed = self._get_feed()
+            if feed is not None:
+                name = self._reader().read(feed.name_img())
+        self._title_cache = (now, name)
+        if name and name != cached:
+            self.bus.emit("vision", f"map name: {name}")
+        return name
+
     def _provide_frame(self, mode: str):
         bot = self.bot
         if mode == "window":
             if bot is not None:
                 img = bot._window_capture()
-                return {"img": img} if img is not None else None
+                if img is None:
+                    return None
+                return {"img": img, "name_rect": bot._name_region()}
             feed = self._get_feed()
-            return {"img": feed.window_img()} if feed else None
+            if feed is None:
+                return None
+            return {
+                "img": feed.window_img(),
+                "name_rect": feed.name_region(),
+                "title": self._idle_title(),
+            }
         if bot is not None:
             return bot.viz_snapshot()
         feed = self._get_feed()
@@ -291,6 +330,7 @@ class BotHost:
             "img": img,
             "player": feed.minimap.player_pos(img),
             "state": "IDLE",
+            "title": self._idle_title(),
         }
 
     # -- Dashboard commands ------------------------------------------------------
@@ -477,11 +517,7 @@ class BotHost:
                 ) or None
             title_img = feed.name_img()
             if title_img is not None:
-                if self._name_reader is None:
-                    from .vision.mapname import MapNameReader
-
-                    self._name_reader = MapNameReader()
-                map_name = self._name_reader.read(title_img)
+                map_name = self._reader().read(title_img)
                 if map_name:
                     self.bus.emit("cal", f"map name read: {map_name}")
         try:

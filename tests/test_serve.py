@@ -59,6 +59,14 @@ class AnnotateTests(unittest.TestCase):
         # original untouched
         self.assertFalse(img.any())
 
+    def test_draws_name_rect(self):
+        img = np.zeros((100, 160, 3), dtype=np.uint8)
+        out = annotate(img, {"name_rect": (20, 30, 60, 20)})
+        cyan = (255, 255, 0)
+        self.assertTrue((out[30, 20] == cyan).all())   # top-left corner
+        self.assertTrue((out[49, 79] == cyan).all())   # bottom-right
+        self.assertFalse((out[40, 40] == cyan).all())  # interior untouched
+
     def test_encode_jpeg_roundtrip(self):
         img = np.full((40, 60, 3), (10, 200, 90), dtype=np.uint8)
         data = encode_jpeg(img, quality=60)
