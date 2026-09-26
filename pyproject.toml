@@ -14,7 +14,14 @@ dependencies = [
     "pyserial>=3.5",
     "requests>=2.32.5",
     "websockets>=15.0.1",
+    # Smart bot (python -m picobot.bot / SMART button)
+    "mss>=9.0.2",
+    "numpy>=1.26",
 ]
+
+[project.optional-dependencies]
+# Template matching used by planned detectors (e.g. lie-detector prompts).
+cv = ["opencv-python-headless>=4.8"]
 
 [tool.setuptools.packages.find]
 where = ["."]

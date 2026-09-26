@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,8 @@ class AppConfig:
     # Target window lock
     window_lock_enabled: bool = False
     window_lock_title: str = ""
+    # Smart-bot tuning — see picobot.bot.config.BotConfig for the schema.
+    bot: dict = field(default_factory=dict)
 
 
 def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
@@ -100,6 +102,8 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
     data["window_lock_title"] = str(
         raw.get("window_lock_title", defaults.window_lock_title)
     )
+    if isinstance(raw.get("bot"), dict):
+        data["bot"] = raw["bot"]
 
     return AppConfig(**data)
 

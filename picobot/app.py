@@ -50,7 +50,11 @@ class MacroControllerApp:
 
         # --- State Variables ---
         self.is_playing = False
+        self.is_smart = False
         self.macro_thread = None
+        self.smart_thread = None
+        self.smart_bot = None
+        self._smart_serial = None
         self.keys_currently_down = set()
         self.remote_server = None
         self.remote_status_var = tk.StringVar(value="Remote: Stopped")
@@ -415,6 +419,17 @@ class MacroControllerApp:
         )
         self.start_button.pack(side=tk.LEFT, fill="x", expand=True)
 
+        self.smart_button = tk.Button(
+            self.control_frame,
+            text="SMART",
+            command=self.toggle_smart,
+            font=("Helvetica", 12, "bold"),
+            bg="#3F51B5",
+            fg="white",
+            state=tk.NORMAL,
+        )
+        self.smart_button.pack(side=tk.LEFT, fill="x", expand=True, padx=(8, 0))
+
     def create_status_bars(self):
         """Creates the UI elements for status bars."""
         self.status_bar = tk.Label(
@@ -541,6 +556,12 @@ class MacroControllerApp:
             and int(self.countdown_seconds_var.get()) > 0
         )
 
+        if self.is_smart:
+            messagebox.showerror(
+                "Error", "The smart bot is running. Stop it before starting a macro."
+            )
+            return
+
         if not self.is_playing:
             port = self.selected_port.get()
             window_title = self.selected_window.get()
@@ -638,6 +659,96 @@ class MacroControllerApp:
             except Exception:
                 pass
         print("GUI updated. Macro has fully stopped.")
+
+    # -- Smart bot ---------------------------------------------------------------
+    def toggle_smart(self):
+        """Toggle the perception-driven smart bot (FSM + minimap nav)."""
+        if self.is_smart:
+            self.stop_smart()
+        else:
+            self.start_smart()
+
+    def _build_smart_controller(self):
+        """HID controller reusing the remote serial session when available."""
+        from .bot import HidController
+
+        if self.remote_server and self.remote_server.serial_manager.is_open:
+            return HidController.from_remote_server(self.remote_server)
+
+        from .transport import SerialManager
+
+        port = self.selected_port.get()
+        if not port or "No COM" in port:
+            raise RuntimeError("Select a Pico DATA port first.")
+        manager = SerialManager(port)
+        manager.open()
+        if not manager.wait_for_ready(timeout=12.0):
+            manager.close()
+            raise RuntimeError(f"Pico on {port} did not signal PICO_READY")
+        self._smart_serial = manager
+        return HidController.from_serial_manager(manager)
+
+    def _smart_thread_entry(self, window_title: str):
+        # Deferred imports keep the GUI usable if numpy/mss aren't installed.
+        from .bot import BotConfig, SmartBot
+
+        try:
+            controller = self._build_smart_controller()
+            config = BotConfig.from_dict(getattr(self.config, "bot", None))
+            self.smart_bot = SmartBot(
+                controller,
+                window_title,
+                config,
+                log_callback=self.log_remote,
+                notify_callback=lambda msg: self.telegram.send_message(msg),
+            )
+            self.smart_bot.start()
+        except Exception as exc:
+            logging.error("Smart bot failed: %s", exc)
+            self.log_remote(f"Smart bot error: {exc}")
+        finally:
+            if self._smart_serial is not None:
+                try:
+                    self._smart_serial.close()
+                except Exception:
+                    pass
+                self._smart_serial = None
+            self.smart_bot = None
+            self.root.after(0, self.on_smart_thread_exit)
+
+    def start_smart(self):
+        """Start the smart bot on a daemon thread."""
+        if self.is_playing:
+            messagebox.showerror(
+                "Error", "A macro is playing. Stop it before starting the smart bot."
+            )
+            return
+        window_title = self.selected_window.get()
+        if not window_title or "No windows" in window_title:
+            messagebox.showerror("Error", "Please select a target window.")
+            return
+        self.is_smart = True
+        self.smart_button.config(text="STOP SMART", bg="#B53F3F")
+        self.status_text.set("Status: Smart bot running...")
+        self.smart_thread = threading.Thread(
+            target=self._smart_thread_entry,
+            args=(window_title,),
+            daemon=True,
+            name="SmartBot",
+        )
+        self.smart_thread.start()
+
+    def stop_smart(self):
+        """Signal the smart bot to stop and wait briefly for its thread."""
+        if self.smart_bot is not None:
+            self.smart_bot.stop()
+        if self.smart_thread and self.smart_thread.is_alive():
+            self.smart_thread.join(timeout=3)
+
+    def on_smart_thread_exit(self):
+        self.is_smart = False
+        self.smart_button.config(text="SMART", bg="#3F51B5")
+        self.status_text.set("Status: Smart bot stopped.")
 
     def refresh_ports(self):
         """Refresh the available COM ports using the port service."""

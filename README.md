@@ -95,6 +95,62 @@ picobot/
 
 ---
 
+## Smart Bot (experimental)
+
+In addition to blind macro playback, `picobot.bot` runs a perception-driven
+bot: it watches the game window's minimap, keeps position via
+goal-directed navigation (`move_to_point`), and composes behaviors with a
+finite state machine (`GRIND` / `WANDER` / `PAUSE`) instead of replaying
+recorded key sequences.
+
+- **GUI**: select a COM port + target window as usual, then click **SMART**.
+  If the remote server is running, the bot reuses its serial session.
+- **Headless**: `python -m picobot.bot --port COM3 --window "Eluna (x64)"`
+- **Config**: a `"bot"` object in `config.json`. All keys are optional:
+
+```json
+{
+  "bot": {
+    "attack_keys": ["a", "s"],
+    "buff_keys": ["shift"],
+    "buff_interval_seconds": 60,
+    "jump_key": "alt",
+    "up_jump_skill_key": null,
+    "stationary_seconds": 20,
+    "wander_seconds": 15,
+    "skill_gap_seconds": [0.5, 1.0],
+    "stationary_mode": true,
+    "enable_random_wander": true,
+    "stop_when_players_appear": true,
+    "stop_when_rune_appears": true,
+    "pause_on_lie_detector": false,
+    "minimap_region": [x, y, w, h],
+    "minimap_colors": {
+      "player": [12, 240, 239],
+      "other_player": [118, 45, 253],
+      "rune": [255, 102, 221],
+      "border": [228, 228, 228]
+    }
+  }
+}
+```
+
+Notes:
+
+- `minimap_region` is `(x, y, w, h)` **relative to the game window**. Set it
+  if auto-detection fails on your client — marker/frame colors (BGR) may
+  also differ between clients, hence `minimap_colors`.
+- Safety: losing window focus, a rune marker, or other players on the
+  minimap pause the bot (and fire a Telegram alert if configured). The
+  original auto-solve-rune flow is intentionally not ported yet.
+- `pause_on_lie_detector` is a **seam, not a feature**: the check is a
+  documented stub (`SmartBot.check_lie_detector`) pending template images
+  for the verification prompt. Enable only once those exist.
+- Key timing is humanized host-side (lognormal gaps, ~60-140ms holds);
+  the Pico firmware relays raw down/up events and is unchanged.
+
+---
+
 ## PicoBot Controller (Flutter App)
 
 The mobile/desktop controller UI lives under `picobot_controller/`.
