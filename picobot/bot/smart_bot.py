@@ -46,6 +46,7 @@ class SmartBot(BotBase):
         *,
         log_callback=None,
         notify_callback=None,
+        event_bus=None,
     ) -> None:
         config = config or BotConfig()
         window = GameWindow(window_title)
@@ -58,6 +59,7 @@ class SmartBot(BotBase):
         super().__init__(
             controller, window, screen, minimap, config,
             log_callback=log_callback, notify_callback=notify_callback,
+            event_bus=event_bus,
         )
         self.skills = SkillBook(config.skills)
         self.maps = MapStore(config.maps_dir)

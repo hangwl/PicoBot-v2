@@ -142,6 +142,18 @@ class ConnectSerialTests(unittest.TestCase):
             self.assertIn(prefix, DASHBOARD_PREFIXES)
 
 
+class SmartBotSignatureTests(unittest.TestCase):
+    def test_accepts_event_bus_kwarg(self):
+        """serve._bot_entry passes event_bus=; SmartBot must forward it."""
+        import inspect
+
+        from picobot.bot.smart_bot import SmartBot
+
+        self.assertIn(
+            "event_bus", inspect.signature(SmartBot.__init__).parameters
+        )
+
+
 class HostCommandTests(unittest.TestCase):
     def setUp(self):
         self.save_patch = patch("picobot.serve.save_config")
