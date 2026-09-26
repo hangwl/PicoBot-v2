@@ -323,9 +323,25 @@ class BotHost:
         else:
             entry = self._resolved_map_cached()
             rot = entry.rotation if entry else self.bot_config.rotation
+        walls = None
+        if entry is not None and entry.walls:
+            region = None
+            if bot is not None:
+                region = bot.minimap.region
+            if region is None:
+                feed = self._get_feed()
+                region = feed.minimap.region if feed is not None else None
+            w = region[2] if region else 0
+            if w:
+                walls = [
+                    int(min(max(float(v), 0.0), 1.0) * w)
+                    for v in (entry.walls.get("left"), entry.walls.get("right"))
+                    if isinstance(v, (int, float))
+                ] or None
         return {
             "map": entry.name if entry else None,
             "no_rotation": not bool(rot.anchors),
+            "walls": walls,
         }
 
     def _live_fingerprint(self, feed=None) -> Optional[str]:
@@ -475,25 +491,74 @@ class BotHost:
         self._send_maps()
         self.bus.emit("map", f"layout cleared for {entry.name}")
 
+    def _layout_set_wall(self, msg: str) -> None:
+        """layout|wall|left|right|clear[|<name>] — per-map wall bounds.
+
+        ``left``/``right`` pin a wall boundary at the player's current
+        minimap x (normalized fraction of region width); inside it the
+        weave facing is forced inward. ``clear`` removes both. Unlike
+        the global ``wall_zone_px`` edge margins, these work on maps
+        whose play area doesn't span the minimap edge-to-edge.
+        """
+        parts = msg.split("|", 3)
+        side = parts[2] if len(parts) > 2 else ""
+        name = parts[3].strip() if len(parts) > 3 else ""
+        if side not in ("left", "right", "clear"):
+            return
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        if side == "clear":
+            entry.walls = None
+            self.maps.save(entry)
+            self.maps.reload()
+            self._send_maps()
+            self.bus.emit("map", f"walls cleared for {entry.name}")
+            return
+        pos = region = None
+        bot = self.bot
+        if bot is not None:
+            pos = bot.player_pos()
+            region = bot.minimap.region
+        feed = self._get_feed()
+        if pos is None and feed is not None:
+            img = feed.minimap_img()
+            pos = feed.minimap.player_pos(img) if img is not None else None
+        if not region and feed is not None:
+            region = feed.minimap.region
+        if pos is None or not region or not region[2]:
+            self.bus.emit(
+                "error", "no player position — can't place a wall"
+            )
+            return
+        walls = dict(entry.walls or {})
+        walls[side] = round(max(0.0, min(1.0, pos[0] / region[2])), 4)
+        entry.walls = walls
+        self.maps.save(entry)
+        self.maps.reload()
+        self._send_maps()
+        self.bus.emit(
+            "map", f"{side} wall set at x={pos[0]} for {entry.name}"
+        )
+
     def _provide_frame(self, mode: str):
         bot = self.bot
         if mode == "window":
+            meta = self._map_meta()
+            meta.pop("walls", None)   # minimap-relative — meaningless here
             if bot is not None:
                 img = bot._window_capture()
                 if img is None:
                     return None
-                return {
-                    "img": img,
-                    "layout": self._layout_source(),
-                    **self._map_meta(),
-                }
+                return {"img": img, "layout": self._layout_source(), **meta}
             feed = self._get_feed()
             if feed is None:
                 return None
             return {
                 "img": feed.window_img(),
                 "layout": self._layout_source(),
-                **self._map_meta(),
+                **meta,
             }
         if bot is not None:
             snap = bot.viz_snapshot() or {}
@@ -540,6 +605,8 @@ class BotHost:
             self._layout_save(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg == "layout|clear" or msg.startswith("layout|clear|"):
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
+        elif msg.startswith("layout|wall|"):
+            self._layout_set_wall(msg)
         elif msg == "layout|reset":
             self._layout_reset()
         elif msg.startswith("layout|region|"):

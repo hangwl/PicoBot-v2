@@ -57,9 +57,18 @@ def _rect(img: np.ndarray, x: int, y: int, w: int, h: int, color) -> None:
     img[y0:y1, x1 - 1] = color
 
 
+def _vline(img: np.ndarray, x: int, color) -> None:
+    """Dashed vertical line — wall boundaries."""
+    h, w = img.shape[:2]
+    if 0 <= x < w:
+        img[::3, x] = color
+
+
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
+    for x in meta.get("walls") or []:
+        _vline(out, int(x), (60, 60, 255))                   # dashed red walls
     for x, y in meta.get("anchors") or []:
         _box(out, int(x), int(y), 3, (255, 128, 0))      # blue anchors
     pos = meta.get("player")

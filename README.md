@@ -125,6 +125,11 @@ you verified in the dashboard carries over to the bot at Start:
   flash-jump re-press fires (an earlier press eats the FJ input window).
   `wall_zone_px` forces an inward facing near the map's left/right edges
   so weave can't wall-bang. Set `dwell_weave: false` to stand still.
+- **Per-map walls**: on maps whose play area doesn't span the minimap,
+  stand at the left/right wall and press **L wall** / **R wall** in the
+  View panel — the boundary is stored on that map (normalized x), drawn
+  as a dashed red line, and overrides `wall_zone_px` on that side.
+  **Clear** removes both; the map field targets a different map.
 
 ## Bot configuration
 

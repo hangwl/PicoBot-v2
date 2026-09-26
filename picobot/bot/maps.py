@@ -47,6 +47,10 @@ class MapEntry:
     fingerprint: Optional[str] = None
     map_name: Optional[str] = None   # optional label (legacy OCR field)
     minimap_region: Optional[tuple] = None  # remembered (x, y, w, h) layout
+    # Optional per-map walls (normalized x fractions): player left of
+    # "left" must face right, right of "right" must face left — for maps
+    # whose play area doesn't span the minimap edge-to-edge.
+    walls: Optional[dict] = None
     path: Optional[Path] = None
 
     def to_dict(self) -> dict:
@@ -57,6 +61,7 @@ class MapEntry:
             "minimap_region": (
                 list(self.minimap_region) if self.minimap_region else None
             ),
+            "walls": dict(self.walls) if self.walls else None,
             "rotation": self.rotation.to_dict(),
             "skills": {n: s.to_dict() for n, s in self.skills.items()},
         }
@@ -76,6 +81,15 @@ class MapEntry:
             region = None
         if region is not None and len(region) != 4:
             region = None
+        walls = None
+        raw_walls = data.get("walls")
+        if isinstance(raw_walls, dict):
+            walls = {}
+            for side in ("left", "right"):
+                v = raw_walls.get(side)
+                if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.5:
+                    walls[side] = float(v)
+            walls = walls or None
         return cls(
             name=str(data["name"]),
             rotation=Rotation.from_dict(data.get("rotation")),
@@ -83,6 +97,7 @@ class MapEntry:
             fingerprint=data.get("fingerprint"),
             map_name=data.get("map_name"),
             minimap_region=region,
+            walls=walls,
             path=path,
         )
 

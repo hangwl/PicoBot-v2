@@ -132,6 +132,12 @@
         <button id="drawMinimap">Draw minimap</button>
         <label>drag a rect on the Window view</label>
       </div>
+      <div class="row" style="margin-top:8px">
+        <button id="wallL" title="stand at the left wall, then click — player left of it always faces right">L wall</button>
+        <button id="wallR" title="stand at the right wall, then click — player right of it always faces left">R wall</button>
+        <button id="wallClear" title="remove both walls for this map">Clear</button>
+        <label>walls at player x (uses map field)</label>
+      </div>
     </div>
     <div class="panel">
       <h3>Bot</h3>
@@ -455,6 +461,9 @@ const layTarget = () => {
 $("layoutSave").onclick = () => send("layout|save" + layTarget());
 $("layoutClear").onclick = () => send("layout|clear" + layTarget());
 $("layoutReset").onclick = () => send("layout|reset");
+$("wallL").onclick = () => send("layout|wall|left" + layTarget());
+$("wallR").onclick = () => send("layout|wall|right" + layTarget());
+$("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 
 // --- Drag-to-draw regions on the Window view ---------------------------
 let drawMode = null, drawStart = null, lastImg = null;

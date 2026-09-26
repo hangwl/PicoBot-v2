@@ -793,14 +793,25 @@ class SmartBot(BotBase):
                 lo, hi = blo, bhi
         direction = self._weave_dir or random.choice(("left", "right"))
         if pos is not None:
-            # Wall zones: inside the map's left/right edge margins the
-            # only sane facing is inward — overrides platform bounds and
-            # prevents wall-banging at the region edges.
-            z = cfg.wall_zone_px
+            # Wall zones: inside a left/right wall boundary the only sane
+            # facing is inward — overrides platform bounds and prevents
+            # wall-banging. Per-map walls (absolute x) replace the global
+            # edge margins; absent sides fall back to wall_zone_px.
+            walls = self._map.walls if self._map is not None else None
             map_w = self._region_wh()[0]
-            if pos[0] <= z:
+            left_wall = (
+                self._rx(walls["left"])
+                if walls and walls.get("left") is not None
+                else cfg.wall_zone_px
+            )
+            right_wall = (
+                self._rx(walls["right"])
+                if walls and walls.get("right") is not None
+                else map_w - cfg.wall_zone_px
+            )
+            if pos[0] <= left_wall:
                 direction = "right"
-            elif pos[0] >= map_w - z:
+            elif pos[0] >= right_wall:
                 direction = "left"
             elif pos[0] <= lo:
                 direction = "right"

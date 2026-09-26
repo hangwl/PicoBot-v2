@@ -169,6 +169,25 @@ class MapStoreTests(unittest.TestCase):
         self.assertIsNone(entry.minimap_region)
         self.assertIsNone(entry.to_dict()["minimap_region"])
 
+    def test_walls_roundtrip(self):
+        entry = MapEntry(name="m", walls={"left": 0.25, "right": 0.8})
+        data = entry.to_dict()
+        self.assertEqual(data["walls"], {"left": 0.25, "right": 0.8})
+        self.assertEqual(
+            MapEntry.from_dict(data).walls, {"left": 0.25, "right": 0.8}
+        )
+
+    def test_walls_partial_and_malformed(self):
+        entry = MapEntry.from_dict(
+            {"name": "m", "walls": {"left": 0.1, "right": "nope", "up": 0.5}}
+        )
+        self.assertEqual(entry.walls, {"left": 0.1})
+        entry = MapEntry.from_dict({"name": "m", "walls": {"left": 9}})
+        self.assertIsNone(entry.walls)
+        entry = MapEntry.from_dict({"name": "m"})
+        self.assertIsNone(entry.walls)
+        self.assertIsNone(entry.to_dict()["walls"])
+
     def test_missing_dir_is_empty(self):
         store = MapStore("/nonexistent/dir")
         self.assertEqual(store.load_all(), [])

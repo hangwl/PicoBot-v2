@@ -261,6 +261,38 @@ class WeaveTests(unittest.TestCase):
             bot._weave_attack()
         self.assertEqual(bot._weave_dir, "left")
 
+    def test_per_map_walls_override_edge_zones(self):
+        # Map walls are absolute x positions — for maps whose play area
+        # doesn't span the minimap, the edge zone is never reached.
+        from picobot.bot.maps import MapEntry
+
+        # Left wall at x=60 (0.3 * 200): pos x=55 is outside the global
+        # 16px edge zone but inside the wall — must face right.
+        bot = self._bot((55, 50), bounds=(0, 150))
+        bot._map = MapEntry(name="m", walls={"left": 0.3})
+        bot._weave_dir = "left"
+        with patch("random.random", return_value=0.5):
+            bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "right")
+        # Inside the wall on the right side: normal platform logic.
+        bot = self._bot((80, 50), bounds=(0, 150))
+        bot._map = MapEntry(name="m", walls={"left": 0.3})
+        bot._weave_dir = "right"
+        with patch("random.random", return_value=0.5):
+            bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "right")
+
+    def test_per_map_right_wall(self):
+        from picobot.bot.maps import MapEntry
+
+        # Right wall at x=150 (0.75 * 200): pos x=160 must face left.
+        bot = self._bot((160, 50), bounds=(0, 199))
+        bot._map = MapEntry(name="m", walls={"right": 0.75})
+        bot._weave_dir = "right"
+        with patch("random.random", return_value=0.5):
+            bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "left")
+
     def test_marks_attack_used_for_cooldowns(self):
         from picobot.bot.skills import Skill, SkillBook
         bot = self._bot((50, 50))

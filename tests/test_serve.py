@@ -242,6 +242,77 @@ class HostCommandTests(unittest.TestCase):
         ]
         self.assertTrue(any("no map verified" in m for m in msgs))
 
+    def test_wall_set_at_player_x_via_feed(self):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        feed.minimap.player_pos.return_value = (50, 40)
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.assertTrue(
+                self.host._handle_command("layout|wall|left|m1")
+            )
+            saved = MapStore(tmp).get("m1")
+            self.assertEqual(saved.walls, {"left": 0.25})
+            self.assertTrue(
+                self.host._handle_command("layout|wall|right|m1")
+            )
+            saved = MapStore(tmp).get("m1")
+            self.assertEqual(
+                saved.walls, {"left": 0.25, "right": 0.25}
+            )
+            self.assertTrue(
+                self.host._handle_command("layout|wall|clear|m1")
+            )
+            self.assertIsNone(MapStore(tmp).get("m1").walls)
+
+    def test_wall_set_via_running_bot(self):
+        bot = Mock()
+        bot.player_pos.return_value = (160, 40)
+        bot.minimap.region = (0, 0, 200, 150)
+        self.host.bot = bot
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.assertTrue(
+                self.host._handle_command("layout|wall|right|m1")
+            )
+            saved = MapStore(tmp).get("m1")
+            self.assertEqual(saved.walls, {"right": 0.8})
+
+    def test_wall_set_without_player_pos_errors(self):
+        feed = Mock()
+        feed.minimap_img.return_value = None
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.host._handle_command("layout|wall|left|m1")
+            self.assertIsNone(MapStore(tmp).get("m1").walls)
+        msgs = [
+            e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
+        ]
+        self.assertTrue(any("no player position" in m for m in msgs))
+
+    def test_wall_set_verifies_map_identity_when_blank(self):
+        # Blank name must still verify — a stale pin must not write
+        # walls into the wrong map file.
+        feed = Mock()
+        feed.minimap_img.return_value = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed.minimap.player_pos.return_value = (50, 40)
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        self.host._live_fingerprint = Mock(return_value="aa")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1", fingerprint="ff" * 512))
+            self.host._handle_command("layout|wall|left")
+            self.assertIsNone(MapStore(tmp).get("m1").walls)
+
     def test_layout_save_verifies_fingerprint_match(self):
         # Auto path succeeds when the stored fingerprint matches live.
         feed = Mock()
