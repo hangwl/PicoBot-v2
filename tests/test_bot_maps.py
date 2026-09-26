@@ -149,6 +149,21 @@ class MapStoreTests(unittest.TestCase):
             self.assertIsNone(store.match_name(""))
             self.assertIsNone(store.match_name(None))
 
+    def test_match_name_containment_longest_wins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            short = MapEntry(name="a", map_name="Limina")
+            long_ = MapEntry(name="b", map_name="Limina : 1-5 East")
+            store.save(short)
+            store.save(long_)
+            # OCR text with extra neighbouring UI text still resolves.
+            self.assertIs(
+                store.match_name("Area 51 Limina 1-5 East ch2"),
+                store.get("b"),
+            )
+            # Stored name longer than the read text -> no match.
+            self.assertIs(store.match_name("limina"), store.get("a"))
+
     def test_map_name_roundtrip(self):
         entry = MapEntry(name="m", map_name="Kerning : Square")
         data = entry.to_dict()

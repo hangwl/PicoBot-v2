@@ -78,8 +78,9 @@ class BotConfig:
     name_ocr: bool = True                 # OCR the map-name strip (preferred ID)
     minimap_name_region: Optional[Tuple[int, int, int, int]] = None
     """Explicit (x, y, w, h) map-name strip relative to the window.
-    None = derive a strip directly above the minimap region."""
-    name_strip_height: int = 26           # px height of the derived strip
+    None = scan the whole band above the minimap region."""
+    name_strip_height: int = 26           # inner-strip fallback when minimap
+                                          # is flush with the window top
 
     def __post_init__(self) -> None:
         if not self.skills:

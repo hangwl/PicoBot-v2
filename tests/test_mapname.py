@@ -22,16 +22,22 @@ class NormalizeTests(unittest.TestCase):
 
 
 class NameStripRegionTests(unittest.TestCase):
-    def test_strip_above_minimap(self):
+    def test_everything_above_minimap(self):
         self.assertEqual(
-            name_strip_region((100, 200, 300, 150), height=26),
-            (100, 174, 300, 26),
+            name_strip_region((100, 200, 300, 150)),
+            (100, 0, 300, 200),
         )
 
-    def test_clamped_to_window_top(self):
+    def test_short_gap_uses_full_gap(self):
         self.assertEqual(
-            name_strip_region((100, 10, 300, 150), height=26),
+            name_strip_region((100, 10, 300, 150)),
             (100, 0, 300, 10),
+        )
+
+    def test_flush_top_falls_back_to_inner_strip(self):
+        self.assertEqual(
+            name_strip_region((100, 0, 300, 150), height=26),
+            (100, 0, 300, 26),
         )
 
 

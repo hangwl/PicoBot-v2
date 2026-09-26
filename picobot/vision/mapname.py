@@ -63,14 +63,20 @@ def normalize_name(text: Optional[str]) -> str:
 
 
 def name_strip_region(minimap_region: Region, height: int = 26) -> Region:
-    """Strip directly above the minimap panel, same width.
+    """Everything above the minimap: same width, from the window's top
+    edge down to the minimap's top edge.
 
-    ``minimap_region`` is window-relative; the strip is clamped to the
-    window's top edge.
+    The minimap always sits top-left, so the area above it is where the
+    client draws the area/map name — scanning the whole band avoids
+    guessing the title's exact offset. When the minimap is flush with
+    the top edge (y == 0) there is no band: fall back to a
+    ``height``-tall strip inside the minimap's top edge, where clients
+    that embed the title in the panel header put it.
     """
-    x, y, w, _h = minimap_region
-    top = max(0, y - height)
-    return (x, top, w, y - top)
+    x, y, w, h = minimap_region
+    if y > 0:
+        return (x, 0, w, y)
+    return (x, y, w, min(height, h))
 
 
 class MapNameReader:
