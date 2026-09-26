@@ -61,11 +61,15 @@ override the remembered values and are persisted the same way.
 
 Each map is a JSON file in `maps/` holding a rotation graph — anchors (farming
 spots) and legs (walk / flash-jump / climb steps between them), plus skill
-bindings and a minimap fingerprint for auto-selection:
+bindings. Map identity is read by **OCR**: the engine reads the map-name text
+the game draws above the minimap and matches it against `map_name` exactly —
+immune to translucent minimap backgrounds and look-alike layouts. A minimap
+ink fingerprint (`fingerprint`) is kept as fallback when OCR is unavailable:
 
 ```json
 {
   "name": "limina_1f_east",
+  "map_name": "Limina : 1-5 East",
   "fingerprint": "<hex>",
   "rotation": {
     "style": "loop",
@@ -135,7 +139,10 @@ toggles, minimap colors/region, flash jump, map store:
     "maps_dir": "maps",
     "active_map": null,
     "auto_select_map": true,
-    "map_match_threshold": 15.0
+    "map_match_threshold": 15.0,
+    "name_ocr": true,
+    "minimap_name_region": null,
+    "name_strip_height": 26
   }
 }
 ```
@@ -151,6 +158,12 @@ Notes:
   feed the fingerprint, so scene pixels showing through the background can't
   drift map matching as the character moves. Set it to your client's minimap
   line color if that differs from the border color.
+- `name_ocr` reads the map-name text above the minimap via RapidOCR (bundled
+  ONNX models, no extra install). `minimap_name_region` overrides where the
+  strip is read from — default is a `name_strip_height`-tall strip directly
+  above the minimap. Calibration writes the read text as the file's
+  `map_name`; matching is exact after normalization, so fix the stored
+  `map_name` if OCR misreads it on your client.
 - Safety: losing window focus, a rune marker, other players on the minimap, or
   an unexpected map change mid-leg pauses the bot (and fires a Telegram alert
   if configured). Solve the check via the dashboard's remote input pad.

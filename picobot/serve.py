@@ -40,6 +40,8 @@ class _VisionFeed:
         region,
         on_event=None,
         map_change_threshold: float = 15.0,
+        name_region=None,
+        name_strip_height: int = 26,
     ) -> None:
         from .vision.game_window import GameWindow
         from .vision.minimap import MinimapAnalyzer
@@ -53,6 +55,8 @@ class _VisionFeed:
             map_change_threshold=map_change_threshold,
         )
         self._on_event = on_event
+        self._name_region = name_region
+        self._name_h = name_strip_height
 
     def minimap_img(self):
         region = self.minimap.region
@@ -72,6 +76,18 @@ class _VisionFeed:
     def window_img(self):
         l, t, r, b = self.window.rect()
         return self.screen.capture((l, t, r - l, b - t))
+
+    def name_img(self):
+        """BGR capture of the map-name strip (above the minimap)."""
+        region = self._name_region
+        if region is None and self.minimap.region is not None:
+            from .vision.mapname import name_strip_region
+
+            region = name_strip_region(self.minimap.region, self._name_h)
+        if region is None:
+            return None
+        x, y, w, h = region
+        return self.screen.capture((self.window.left + x, self.window.top + y, w, h))
 
     def close(self) -> None:
         self.screen.close()
@@ -104,6 +120,7 @@ class BotHost:
         self.bot = None
         self.bot_thread: Optional[threading.Thread] = None
         self.calibrator: Optional[CalibrationRunner] = None
+        self._name_reader = None
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -246,6 +263,8 @@ class BotHost:
                         self.bot_config.minimap_region,
                         on_event=self.bus.emit,
                         map_change_threshold=self.bot_config.map_match_threshold,
+                        name_region=self.bot_config.minimap_name_region,
+                        name_strip_height=self.bot_config.name_strip_height,
                     )
                 except Exception as exc:
                     logger.warning("vision feed unavailable: %s", exc)
@@ -444,6 +463,7 @@ class BotHost:
             return
         feed = self._get_feed()
         fp = None
+        map_name = None
         if feed is not None:
             img = feed.minimap_img()
             if img is not None:
@@ -455,8 +475,19 @@ class BotHost:
                     ignore_colors=(c.player, c.other_player, c.rune),
                     include_colors=(c.ink or c.border,),
                 ) or None
+            title_img = feed.name_img()
+            if title_img is not None:
+                if self._name_reader is None:
+                    from .vision.mapname import MapNameReader
+
+                    self._name_reader = MapNameReader()
+                map_name = self._name_reader.read(title_img)
+                if map_name:
+                    self.bus.emit("cal", f"map name read: {map_name}")
         try:
-            entry = self.calibrator.finish(name, fingerprint=fp)
+            entry = self.calibrator.finish(
+                name, fingerprint=fp, map_name=map_name
+            )
             path = self.maps.save(entry)
             self.maps.reload()
             self.bus.emit("cal", f"map saved: {path}")

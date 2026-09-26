@@ -75,6 +75,11 @@ class BotConfig:
     auto_select_map: bool = True
     active_map: Optional[str] = None      # force a map by name (skip auto-match)
     map_match_threshold: float = 15.0     # fingerprint distance bound (0-255)
+    name_ocr: bool = True                 # OCR the map-name strip (preferred ID)
+    minimap_name_region: Optional[Tuple[int, int, int, int]] = None
+    """Explicit (x, y, w, h) map-name strip relative to the window.
+    None = derive a strip directly above the minimap region."""
+    name_strip_height: int = 26           # px height of the derived strip
 
     def __post_init__(self) -> None:
         if not self.skills:
@@ -149,6 +154,15 @@ class BotConfig:
             cfg.auto_select_map = bool(data["auto_select_map"])
         if "map_match_threshold" in data:
             cfg.map_match_threshold = float(data["map_match_threshold"])
+        if "name_ocr" in data:
+            cfg.name_ocr = bool(data["name_ocr"])
+        if "minimap_name_region" in data and data["minimap_name_region"]:
+            r = data["minimap_name_region"]
+            if len(r) != 4:
+                raise ValueError("minimap_name_region must be [x, y, w, h]")
+            cfg.minimap_name_region = tuple(int(v) for v in r)
+        if "name_strip_height" in data:
+            cfg.name_strip_height = int(data["name_strip_height"])
         if not (isinstance(data.get("skills"), dict) and data["skills"]):
             # No explicit skills map: rebuild from the (possibly overridden)
             # legacy key lists.

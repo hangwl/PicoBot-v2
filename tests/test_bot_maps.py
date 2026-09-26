@@ -132,6 +132,29 @@ class MapStoreTests(unittest.TestCase):
             self.assertIs(store2.match(fp), store2.get("farm_1"))
             self.assertIsNone(store2.match(fingerprint(_img(9)), threshold=5))
 
+    def test_match_name_normalized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            entry = MapEntry(
+                name="farm_1",
+                map_name="Limina : 1-5 East",
+            )
+            store.save(entry)
+            # OCR spacing/punctuation noise must not break the match.
+            self.assertIs(
+                store.match_name("Limina: 1-5 east"), store.get("farm_1")
+            )
+            self.assertIs(store.match_name("limina15east"), store.get("farm_1"))
+            self.assertIsNone(store.match_name("Other Map"))
+            self.assertIsNone(store.match_name(""))
+            self.assertIsNone(store.match_name(None))
+
+    def test_map_name_roundtrip(self):
+        entry = MapEntry(name="m", map_name="Kerning : Square")
+        data = entry.to_dict()
+        self.assertEqual(data["map_name"], "Kerning : Square")
+        self.assertEqual(MapEntry.from_dict(data).map_name, "Kerning : Square")
+
     def test_missing_dir_is_empty(self):
         store = MapStore("/nonexistent/dir")
         self.assertEqual(store.load_all(), [])

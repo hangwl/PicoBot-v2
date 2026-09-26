@@ -9,10 +9,15 @@ File shape::
 
     {
       "name": "limina_1f_east",
+      "map_name": "Limina : 1-5 East",   // OCR'd title text (optional)
       "fingerprint": "<hex from vision.minimap.fingerprint>",
       "rotation": { ...Rotation.to_dict()... },
       "skills":   { "fountain": {"key": "d", "cooldown": 57, "kind": "summon"} }
     }
+
+``map_name`` is the OCR-read title the game draws near the minimap;
+matching on it is exact and preferred. ``fingerprint`` is the fallback
+identity when OCR is unavailable or the strip can't be read.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..vision.mapname import normalize_name
 from ..vision.minimap import fingerprint_distance
 from .rotation import Rotation
 from .skills import Skill
@@ -36,11 +42,13 @@ class MapEntry:
     rotation: Rotation = field(default_factory=Rotation)
     skills: Dict[str, Skill] = field(default_factory=dict)
     fingerprint: Optional[str] = None
+    map_name: Optional[str] = None   # OCR'd title text, e.g. "Limina : 1-5"
     path: Optional[Path] = None
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "map_name": self.map_name,
             "fingerprint": self.fingerprint,
             "rotation": self.rotation.to_dict(),
             "skills": {n: s.to_dict() for n, s in self.skills.items()},
@@ -59,6 +67,7 @@ class MapEntry:
             rotation=Rotation.from_dict(data.get("rotation")),
             skills=skills,
             fingerprint=data.get("fingerprint"),
+            map_name=data.get("map_name"),
             path=path,
         )
 
@@ -107,6 +116,16 @@ class MapStore:
             if dist < best_dist:
                 best, best_dist = entry, dist
         return best
+
+    def match_name(self, ocr_text: Optional[str]) -> Optional[MapEntry]:
+        """Exact match on the OCR'd map title (normalized), else None."""
+        norm = normalize_name(ocr_text)
+        if not norm:
+            return None
+        for entry in self.load_all():
+            if normalize_name(entry.map_name) == norm:
+                return entry
+        return None
 
     def save(self, entry: MapEntry) -> Path:
         """Write the map file; returns its path."""

@@ -167,7 +167,12 @@ class TraceRecorder:
         self._mark_time = t
         return anchor_idx
 
-    def finish(self, name: str, fingerprint: Optional[str] = None) -> MapEntry:
+    def finish(
+        self,
+        name: str,
+        fingerprint: Optional[str] = None,
+        map_name: Optional[str] = None,
+    ) -> MapEntry:
         """Build the map entry: anchors, leg steps, observed skills."""
         from .rotation import Anchor
 
@@ -206,6 +211,7 @@ class TraceRecorder:
             rotation=Rotation(anchors=anchors, legs=legs),
             skills=skills,
             fingerprint=fingerprint,
+            map_name=map_name,
         )
 
     # -- Internals ----------------------------------------------------------------
@@ -279,12 +285,17 @@ class CalibrationRunner:
         self._emit("cal", f"anchor {idx} marked")
         return idx
 
-    def finish(self, name: str, fingerprint: Optional[str] = None) -> MapEntry:
+    def finish(
+        self,
+        name: str,
+        fingerprint: Optional[str] = None,
+        map_name: Optional[str] = None,
+    ) -> MapEntry:
         recorder = self.recorder
         self.stop()
         if recorder is None:
             raise RuntimeError("no calibration in progress")
-        entry = recorder.finish(name, fingerprint=fingerprint)
+        entry = recorder.finish(name, fingerprint=fingerprint, map_name=map_name)
         self._emit("cal", f"saved map '{name}'")
         return entry
 
@@ -302,6 +313,7 @@ def main() -> None:
     from ..config import load_config
     from ..settings import configure_logging
     from ..vision.game_window import GameWindow
+    from ..vision.mapname import MapNameReader, name_strip_region
     from ..vision.minimap import MinimapAnalyzer, fingerprint
     from ..vision.screen import ScreenGrabber
     from .config import BotConfig
@@ -351,6 +363,16 @@ def main() -> None:
         ),
         include_colors=(minimap.colors.ink or minimap.colors.border,),
     ) or None
+    map_name = None
+    name_reg = bot_config.minimap_name_region or name_strip_region(
+        minimap.region, bot_config.name_strip_height
+    )
+    nx, ny, nw, nh = name_reg
+    title_img = screen.capture((window.left + nx, window.top + ny, nw, nh))
+    if title_img is not None:
+        map_name = MapNameReader().read(title_img)
+        if map_name:
+            print(f"Read map name: {map_name}")
     done = {"flag": False}
     keyboard.on_press_key(
         args.mark_key, lambda e: print(f"anchor {recorder.mark()}")
@@ -380,7 +402,7 @@ def main() -> None:
     finally:
         keyboard.unhook_all()
         screen.close()
-    entry = recorder.finish(args.name, fingerprint=fp)
+    entry = recorder.finish(args.name, fingerprint=fp, map_name=map_name)
     path = MapStore(args.maps_dir or bot_config.maps_dir).save(entry)
     print(f"Saved {len(entry.rotation.anchors)} anchors, "
           f"{len(entry.rotation.legs)} legs -> {path}")
