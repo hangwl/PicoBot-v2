@@ -238,5 +238,37 @@ class LargestBlobTests(unittest.TestCase):
         self.assertTrue(abs(pos[0] - 30) <= 2 and abs(pos[1] - 40) <= 2)
 
 
+class PlatformYTests(unittest.TestCase):
+    def _img(self, rows=(80,), w=200, h=120):
+        img = _blank(w, h)
+        for y in rows:
+            img[y, :] = (228, 228, 228)  # platform ink = border color
+        return img
+
+    def test_snaps_point_below_floor_up_onto_platform(self):
+        a = MinimapAnalyzer()
+        # Target recorded beneath the lowest platform (y=95 < ink at 80)
+        self.assertEqual(a.platform_y(self._img(), 50, 95), 80)
+
+    def test_nearest_row_wins(self):
+        a = MinimapAnalyzer()
+        img = self._img(rows=(20, 80))
+        self.assertEqual(a.platform_y(img, 50, 70), 80)
+        self.assertEqual(a.platform_y(img, 50, 40), 20)
+
+    def test_column_without_ink_returns_none(self):
+        a = MinimapAnalyzer()
+        img = self._img()
+        img[:, 100:110] = 0  # carve an ink-free column
+        self.assertIsNone(a.platform_y(img, 105, 80))
+
+    def test_inset_rim_ignored(self):
+        a = MinimapAnalyzer(marker_inset=4)
+        img = _blank(100, 80)
+        img[2, :] = (228, 228, 228)   # frame rim only
+        img[50, :] = (228, 228, 228)  # real platform
+        self.assertEqual(a.platform_y(img, 50, 60), 50)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -401,6 +401,38 @@ class MinimapAnalyzer:
         mask = erode3(color_mask(inner, self.colors.other_player, tolerance))
         return bool(mask.any())
 
+    def platform_y(
+        self,
+        minimap_img: np.ndarray,
+        x: float,
+        y: float,
+        *,
+        column: int = 2,
+        tolerance: int = 10,
+    ) -> Optional[int]:
+        """Platform surface (nearest ink row) around column ``x`` at ``y``.
+
+        Scans a narrow x-column of the minimap interior for platform/rope
+        ink and returns the ink row closest to ``y``, minimap-relative.
+        Used to project recorded or replayed targets onto real geometry:
+        a point beneath the lowest platform (mid-air mark, marker jitter)
+        snaps up onto the floor instead of becoming an unreachable
+        coordinate. Returns None when the column carries no ink.
+        """
+        inner, off = self._interior(minimap_img)
+        h, w = inner.shape[:2]
+        xi = int(round(x)) - off
+        x0 = max(0, xi - column)
+        x1 = min(w, xi + column + 1)
+        if x0 >= x1:
+            return None
+        ink = self.colors.ink or self.colors.border
+        mask = color_mask(inner[:, x0:x1], ink, tolerance)
+        ys = np.nonzero(mask)[0]
+        if ys.size == 0:
+            return None
+        return int(ys[np.abs(ys - (y - off)).argmin()] + off)
+
 
 __all__ = [
     "MinimapAnalyzer",
@@ -411,4 +443,5 @@ __all__ = [
     "erode3",
     "fingerprint",
     "fingerprint_distance",
+    "largest_blob_centroid",
 ]

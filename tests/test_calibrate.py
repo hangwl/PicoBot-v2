@@ -185,5 +185,55 @@ class TraceRecorderTests(unittest.TestCase):
         self.assertNotIn("down_jump", kinds)
 
 
+class CalibrationRunnerSnapTests(unittest.TestCase):
+    """Off-platform anchor handling in CalibrationRunner (no threads —
+    recorder/last_img are set directly)."""
+
+    def _runner(self, snap_fn, pos=(50, 95)):
+        from picobot.bot.calibrate import CalibrationRunner
+
+        self.events = []
+        runner = CalibrationRunner(
+            frame_fn=lambda: None,
+            pos_fn=lambda img: None,
+            event=lambda k, m, d=None: self.events.append((k, m)),
+            snap_fn=snap_fn,
+        )
+        runner.recorder = TraceRecorder((200, 150))
+        runner.recorder.sample(pos)
+        runner.last_img = object()
+        runner.last_pos = pos
+        return runner
+
+    def test_off_platform_mark_warns(self):
+        runner = self._runner(snap_fn=lambda img, x, y: None)
+        runner.mark()
+        self.assertTrue(
+            any("off-platform" in m for k, m in self.events),
+            self.events,
+        )
+
+    def test_on_platform_mark_stays_quiet(self):
+        runner = self._runner(snap_fn=lambda img, x, y: 92)
+        runner.mark()
+        self.assertFalse(
+            any("off-platform" in m for k, m in self.events),
+            self.events,
+        )
+
+    def test_finish_snaps_anchor_onto_platform(self):
+        # Anchor recorded at y=95 but nearest platform ink is y=80 —
+        # the saved anchor must land on the floor.
+        runner = self._runner(snap_fn=lambda img, x, y: 80)
+        runner.mark()
+        entry = runner.finish("m")
+        self.assertAlmostEqual(
+            entry.rotation.anchors[0].y * 150, 80.0, places=1
+        )
+        self.assertTrue(
+            any("snapped" in m for k, m in self.events), self.events
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

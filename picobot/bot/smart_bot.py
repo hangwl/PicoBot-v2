@@ -416,6 +416,21 @@ class SmartBot(BotBase):
         held_dir = None
         last_vert_jump = 0.0
         escapes = 0
+        snapped = False
+        vert_ref = None      # y at the previous vertical jump attempt
+        vert_fails = 0       # consecutive jumps that produced no y change
+
+        def vert_stuck(verb: str) -> bool:
+            """Verdict when vertical jumps stop making progress."""
+            if abs(dx) <= start_band:
+                self.log(
+                    f"Vertically blocked ({verb}) — horizontally aligned, "
+                    "accepting position"
+                )
+                self.viz["target"] = None
+                return True
+            self.log(f"Vertically blocked ({verb}) — aborting leg")
+            return False
 
         def sync_dir(new_dir):
             nonlocal held_dir
@@ -444,6 +459,18 @@ class SmartBot(BotBase):
                     self.sleep(0.5)
                     continue
                 cx, cy = pos
+                if not snapped:
+                    # Project the target onto platform ink — a target
+                    # recorded beneath the lowest platform is unreachable,
+                    # so snap to the nearest real floor instead.
+                    snapped = True
+                    py = self.minimap.platform_y(img, target_x, target_y)
+                    if py is not None and py != target_y:
+                        self.log(
+                            f"Target snapped to platform: y {target_y}→{py}"
+                        )
+                        target_y = py
+                        self.viz["target"] = (target_x, target_y)
                 dx, dy = target_x - cx, target_y - cy
                 if abs(dx) <= threshold and abs(dy) <= threshold:
                     self.log("Navigation target reached")
@@ -462,10 +489,26 @@ class SmartBot(BotBase):
                     # Rate-limit vertical jumps — spamming them never helps.
                     now = time.time()
                     if dy < -threshold and now - last_vert_jump >= 0.9:
+                        vert_fails = (
+                            vert_fails + 1
+                            if vert_ref is not None and cy >= vert_ref - 1
+                            else 0
+                        )
+                        vert_ref = cy
                         last_vert_jump = now
+                        if vert_fails >= 2:
+                            return vert_stuck("ascend")
                         self.up_jump()
                     elif dy > threshold and now - last_vert_jump >= 0.9:
+                        vert_fails = (
+                            vert_fails + 1
+                            if vert_ref is not None and cy <= vert_ref + 1
+                            else 0
+                        )
+                        vert_ref = cy
                         last_vert_jump = now
+                        if vert_fails >= 2:
+                            return vert_stuck("descend")
                         self.down_jump()
                     else:
                         self.sleep(0.05)

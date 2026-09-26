@@ -760,6 +760,7 @@ class BotHost:
             feed.minimap_img,
             feed.minimap.player_pos,
             event=lambda k, m, d=None: self.bus.emit(k, m, d),
+            snap_fn=feed.minimap.platform_y,
         )
         img = feed.minimap_img()
         wh = (img.shape[1], img.shape[0]) if img is not None else (200, 150)

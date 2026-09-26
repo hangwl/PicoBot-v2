@@ -4,7 +4,7 @@ GameWindow/ScreenGrabber (Windows-only) is needed."""
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -48,6 +48,7 @@ def _bot(positions, target=(50, 50), threshold=4, stuck_limit=40):
     bot.minimap.player_pos = Mock(
         side_effect=lambda img: seq.pop(0) if len(seq) > 1 else seq[0]
     )
+    bot.minimap.platform_y = Mock(return_value=None)  # no ink by default
     img = object()
     bot.minimap_frame = Mock(return_value=img)
     bot._img_hazard = Mock(return_value=None)
@@ -93,6 +94,62 @@ class NavHysteresisTests(unittest.TestCase):
         self.assertFalse(_drive(bot))
         self.assertEqual(bot.up_jump.call_count, 1)   # one sidestep
         self.assertNotIn("down", bot.hid.downs)        # no 3s down-hold
+
+
+class VerticalStuckTests(unittest.TestCase):
+    """Targets recorded beyond reachable geometry must not loop forever.
+
+    The 0.9s jump rate-limit uses real ``time.time()``, so these tests
+    step a fake clock (+1s per call) — otherwise a fast test loop never
+    issues a second jump.
+    """
+
+    def _clocked(self):
+        return patch("time.time", side_effect=iter(range(1, 10000)))
+
+    def test_floor_below_target_accepts_when_aligned(self):
+        # Player pinned at y=40, target 10px below (recorded under the
+        # floor). Two no-progress down_jumps → accept, aligned in x.
+        bot = _bot([(20, 40)] * 10, target=(20, 50))
+        with self._clocked():
+            self.assertTrue(_drive(bot))
+        self.assertEqual(bot.down_jump.call_count, 2)
+
+    def test_floor_below_target_aborts_when_misaligned(self):
+        # dx=10 > start_band(6) — can't descend and can't just arrive.
+        bot = _bot([(20, 40)] * 10, target=(30, 50))
+        with self._clocked():
+            self.assertFalse(_drive(bot))
+        self.assertEqual(bot.down_jump.call_count, 2)
+
+    def test_descent_progress_resets_fail_counter(self):
+        # Two jumps make progress, then the floor stops it — the verdict
+        # must come only after consecutive failures.
+        bot = _bot(
+            [(20, 40), (20, 42), (20, 44)] + [(20, 44)] * 10,
+            target=(20, 50),
+        )
+        with self._clocked():
+            self.assertTrue(_drive(bot))
+        self.assertEqual(bot.down_jump.call_count, 4)  # 3 tried + verdict
+
+    def test_ceiling_blocks_upward_same_way(self):
+        # Target above, can't climb — aligned in x → accept.
+        bot = _bot([(20, 60)] * 10, target=(20, 50))
+        with self._clocked():
+            self.assertTrue(_drive(bot))
+        self.assertEqual(bot.up_jump.call_count, 2)
+
+
+class TargetSnapTests(unittest.TestCase):
+    def test_target_snapped_to_platform_ink(self):
+        bot = _bot([(20, 49), (20, 50)], target=(20, 60))
+        bot.minimap.platform_y = Mock(return_value=50)
+        self.assertTrue(_drive(bot))  # would loop on unreachable y=60 else
+        bot.minimap.platform_y.assert_called_once()
+        args = bot.minimap.platform_y.call_args[0]
+        self.assertEqual(args[1:], (20, 60))
+        self.assertIsNone(bot.viz["target"])  # cleared on arrival
 
 
 class ResolveRegionTests(unittest.TestCase):

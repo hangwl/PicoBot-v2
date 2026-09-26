@@ -51,7 +51,9 @@ override the remembered values and are persisted the same way.
 - **Calibrate** — Record → walk your rotation pressing *Mark anchor* at each
   farming spot → Save. The recorder derives walk/climb legs from your position
   trace, dwell ranges from how long you stood, and candidate skills from the
-  keys you pressed at each anchor. Headless alternative:
+  keys you pressed at each anchor. Marks taken mid-air or off a platform
+  warn immediately, and saved anchors are snapped onto the nearest
+  platform ink so replayed targets stay reachable. Headless alternative:
   `python -m picobot.bot.calibrate --window "Eluna (x64)" --name my_map`
   (F9 = mark, ESC = save).
 - **Remote input** — arrow pad + key buttons for rune solving or nudges from a
@@ -165,6 +167,10 @@ Notes:
   before marker (player/rune/other-player) detection — frame and panel-chrome
   pixels can't register as markers, and marker positions are the centroid of
   the largest matching blob, not a global mean.
+- Navigation targets are snapped onto the nearest platform ink row before
+  travel, and vertical jumps that produce no progress twice in a row end
+  the leg (aligned in x = "arrived"; misaligned = abort) — a target
+  recorded beneath the lowest platform can no longer loop the bot forever.
 - `minimap_colors.ink` is the platform/line color used to mask fingerprints —
   defaults to `border`. It matters on translucent minimaps: only ink pixels
   feed the fingerprint, so scene pixels showing through the background can't

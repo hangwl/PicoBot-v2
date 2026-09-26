@@ -289,13 +289,24 @@ class CalibrationRunner:
     should be routed through :meth:`record_key`.
     """
 
-    def __init__(self, frame_fn, pos_fn, event=None, hz: float = 15.0) -> None:
+    def __init__(
+        self,
+        frame_fn,
+        pos_fn,
+        event=None,
+        hz: float = 15.0,
+        snap_fn=None,
+    ) -> None:
         self._frame_fn = frame_fn
         self._pos_fn = pos_fn
+        # Optional: MinimapAnalyzer.platform_y — maps (img, x, y) to the
+        # nearest platform ink row, for off-platform warnings + anchor snap.
+        self._snap_fn = snap_fn
         self._emit = event or (lambda kind, msg, data=None: None)
         self._period = 1.0 / max(1.0, hz)
         self.recorder: Optional[TraceRecorder] = None
         self.last_pos: Optional[_Pt] = None
+        self.last_img = None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._t0 = 0.0
@@ -321,6 +332,7 @@ class CalibrationRunner:
             try:
                 img = self._frame_fn()
                 if img is not None:
+                    self.last_img = img
                     pos = self._pos_fn(img)
                     if pos is not None:
                         self.last_pos = pos
@@ -356,6 +368,27 @@ class CalibrationRunner:
             )
             return None
         self._emit("cal", f"anchor {idx} marked")
+        # Off-platform sanity check: a mark taken mid-air or while the
+        # marker glitched lands off the platform ink, and the bot can't
+        # physically reach it later. Warn now so the user can re-mark.
+        if (
+            self._snap_fn is not None
+            and self.last_img is not None
+            and self.last_pos is not None
+        ):
+            try:
+                py = self._snap_fn(
+                    self.last_img, self.last_pos[0], self.last_pos[1]
+                )
+            except Exception:
+                py = None
+            if py is None or abs(py - self.last_pos[1]) > 8:
+                self._emit(
+                    "error",
+                    f"anchor {idx} marked off-platform — the marker may not "
+                    "be standing on a floor; re-mark while standing still "
+                    "or it will be snapped at save",
+                )
         return idx
 
     def finish(
@@ -366,9 +399,26 @@ class CalibrationRunner:
         key_map: Optional[Dict[str, Skill]] = None,
     ) -> MapEntry:
         recorder = self.recorder
+        img = self.last_img
         self.stop()
         if recorder is None:
             raise RuntimeError("no calibration in progress")
+        # Snap each anchor's y onto platform ink — marks taken mid-fall or
+        # dragged a few px below the floor are unreachable as-is.
+        if img is not None and self._snap_fn is not None:
+            snapped = 0
+            for a in recorder.anchors:
+                try:
+                    py = self._snap_fn(img, a["pos"][0], a["pos"][1])
+                except Exception:
+                    py = None
+                if py is not None and py != int(round(a["pos"][1])):
+                    a["pos"] = (a["pos"][0], float(py))
+                    snapped += 1
+            if snapped:
+                self._emit(
+                    "cal", f"snapped {snapped} anchor(s) onto platform ink"
+                )
         entry = recorder.finish(
             name,
             fingerprint=fingerprint,
