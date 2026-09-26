@@ -140,6 +140,16 @@
       <div style="margin-top:4px"><label>walk your farming route in-game; press F9 (or Mark) at each farming spot; Save writes the map file</label></div>
     </div>
     <div class="panel">
+      <h3>Movement keys</h3>
+      <div class="row">
+        <label>jump</label><input id="mkJump" size="6" placeholder="space">
+        <label>rope lift</label><input id="mkRope" size="6" placeholder="(combo)">
+        <label>flash jump</label><input id="mkFj" size="6" placeholder="(jump)">
+        <label><input id="mkFjOn" type="checkbox"> FJ on</label>
+      </div>
+      <div style="margin-top:6px"><label>jump = jump/down-jump key · rope lift = up-jump skill (blank = jump+up+jump combo) · flash jump = FJ key (blank = jump key). Saves instantly.</label></div>
+    </div>
+    <div class="panel">
       <h3>Skills</h3>
       <div id="skillRows"></div>
       <div class="row" style="margin-top:8px">
@@ -273,8 +283,30 @@ ws.onmessage = e => {
     chip("win", "win: " + (p.window || "–"));
   } else if (p.event === "skills") {
     renderSkills(p.skills || {});
+  } else if (p.event === "config") {
+    const c = p.config || {};
+    if (document.activeElement !== $("mkJump"))
+      $("mkJump").value = c.jump_key || "";
+    if (document.activeElement !== $("mkRope"))
+      $("mkRope").value = c.up_jump_skill_key || "";
+    if (document.activeElement !== $("mkFj"))
+      $("mkFj").value = c.flash_jump_key || "";
+    $("mkFjOn").checked = c.flash_jump_enabled !== false;
   }
 };
+
+// --- Movement keys -------------------------------------------------------
+function sendMoveKeys() {
+  send("movekeys|set|" + JSON.stringify({
+    jump_key: $("mkJump").value.trim(),
+    up_jump_skill_key: $("mkRope").value.trim(),
+    flash_jump_key: $("mkFj").value.trim(),
+    flash_jump_enabled: $("mkFjOn").checked,
+  }));
+}
+["mkJump", "mkRope", "mkFj"].forEach(id =>
+  $(id).addEventListener("change", sendMoveKeys));
+$("mkFjOn").addEventListener("change", sendMoveKeys);
 
 const esc = s => String(s).replace(/[&<>"']/g,
   c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

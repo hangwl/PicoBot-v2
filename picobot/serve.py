@@ -493,6 +493,8 @@ class BotHost:
             self._skills_set(msg.split("|", 2)[2])
         elif msg.startswith("skills|del|"):
             self._skills_del(msg.split("|", 2)[2])
+        elif msg.startswith("movekeys|set|"):
+            self._movekeys_set(msg.split("|", 2)[2])
         elif msg == "events|history":
             self._send_history()
         elif msg == "config|get":
@@ -673,6 +675,51 @@ class BotHost:
             bot.skills.skills.clear()
             bot.skills.skills.update(merged)
         self._send_skills()
+
+    def _movekeys_set(self, payload: str) -> None:
+        """movekeys|set|{json} — movement keybinds (jump/rope-lift/flash)."""
+        try:
+            spec = json.loads(payload)
+        except json.JSONDecodeError:
+            return
+        cfg = self.bot_config
+        changed = {}
+        if "jump_key" in spec:
+            cfg.jump_key = str(spec["jump_key"] or "space").strip().lower()
+            changed["jump_key"] = cfg.jump_key
+        if "up_jump_skill_key" in spec:
+            v = spec["up_jump_skill_key"]
+            cfg.up_jump_skill_key = str(v).strip().lower() if v else None
+            changed["up_jump_skill_key"] = cfg.up_jump_skill_key
+        if "flash_jump_key" in spec:
+            v = spec["flash_jump_key"]
+            cfg.flash_jump_key = str(v).strip().lower() if v else None
+            changed["flash_jump"] = {"key": cfg.flash_jump_key}
+        if "flash_jump_enabled" in spec:
+            cfg.flash_jump_enabled = bool(spec["flash_jump_enabled"])
+            changed.setdefault("flash_jump", {})[
+                "enabled"] = cfg.flash_jump_enabled
+        if not changed:
+            return
+        # bot.config is the same BotConfig — live fields, nothing else to do.
+        bot_cfg = getattr(self.config, "bot", None) or {}
+        if "jump_key" in changed:
+            bot_cfg["jump_key"] = cfg.jump_key
+        if "up_jump_skill_key" in changed:
+            bot_cfg["up_jump_skill_key"] = cfg.up_jump_skill_key
+        if "flash_jump" in changed:
+            fj = dict(bot_cfg.get("flash_jump") or {})
+            fj.update(changed["flash_jump"])
+            bot_cfg["flash_jump"] = fj
+        self.config.bot = bot_cfg
+        save_config(self.config)
+        self.bus.emit(
+            "bot",
+            "movement keys: " + ", ".join(
+                f"{k}={v}" for k, v in changed.items()
+            ),
+        )
+        self._send_config()
 
     # -- Calibration -------------------------------------------------------------
     def _cal_start(self) -> None:

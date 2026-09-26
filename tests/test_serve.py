@@ -129,7 +129,7 @@ class ConnectSerialTests(unittest.TestCase):
     def test_dashboard_prefixes_cover_all_commands(self):
         for prefix in (
             "bot|", "map|", "cal|", "dash|", "host|",
-            "events|", "config|", "layout|", "skills|",
+            "events|", "config|", "layout|", "skills|", "movekeys|",
         ):
             self.assertIn(prefix, DASHBOARD_PREFIXES)
 
@@ -334,6 +334,28 @@ class HostCommandTests(unittest.TestCase):
         self.host._handle_command("skills|del|main")
         kinds = [e["kind"] for e in self.host.bus.history()]
         self.assertIn("error", kinds)
+
+    def test_movekeys_set_persists(self):
+        self.assertTrue(self.host._handle_command(
+            'movekeys|set|{"jump_key":"space","up_jump_skill_key":"alt",'
+            '"flash_jump_key":"","flash_jump_enabled":true}'))
+        cfg = self.host.bot_config
+        self.assertEqual(cfg.jump_key, "space")
+        self.assertEqual(cfg.up_jump_skill_key, "alt")
+        self.assertIsNone(cfg.flash_jump_key)
+        self.assertTrue(cfg.flash_jump_enabled)
+        bot_cfg = self.host.config.bot
+        self.assertEqual(bot_cfg["jump_key"], "space")
+        self.assertEqual(bot_cfg["up_jump_skill_key"], "alt")
+        self.assertIsNone(bot_cfg["flash_jump"]["key"])
+        self.save_mock.assert_called()
+
+    def test_movekeys_set_blank_rope_restores_combo(self):
+        self.host.bot_config.up_jump_skill_key = "alt"
+        self.host._handle_command(
+            'movekeys|set|{"up_jump_skill_key":""}')
+        self.assertIsNone(self.host.bot_config.up_jump_skill_key)
+        self.assertIsNone(self.host.config.bot["up_jump_skill_key"])
 
     def test_skills_commit_updates_running_bot_live(self):
         from picobot.bot.skills import Skill, SkillBook
