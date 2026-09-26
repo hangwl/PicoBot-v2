@@ -184,9 +184,23 @@ class TraceRecorder:
         name: str,
         fingerprint: Optional[str] = None,
         minimap_region=None,
+        key_map: Optional[Dict[str, Skill]] = None,
     ) -> MapEntry:
-        """Build the map entry: anchors, leg steps, observed skills."""
+        """Build the map entry: anchors, leg steps, observed skills.
+
+        ``key_map`` binds raw key names to configured skills (key ->
+        Skill). Recorded presses of a bound key are credited to that
+        skill's real name in ``on_arrive``; ``movement``-kind bindings
+        are dropped entirely, and bound keys never get auto-generated
+        ``key_*`` skills.
+        """
         from .rotation import Anchor
+
+        key_map = key_map or {}
+
+        def bound(k: str) -> Optional[Skill]:
+            s = key_map.get(k)
+            return s if s is not None and s.kind != "movement" else None
 
         # Attribute the arrival-window keys of the final anchor too.
         if self.anchors and self._leg_origin is not None and self._mark_time is not None:
@@ -205,7 +219,12 @@ class TraceRecorder:
                 y=a["pos"][1] / self.wh[1],
                 dwell=a["dwell"],
                 on_arrive=tuple(
-                    dict.fromkeys(f"key_{k}" for _, k in a["key_events"])
+                    dict.fromkeys(
+                        s.name if (s := bound(k)) is not None else f"key_{k}"
+                        for _, k in a["key_events"]
+                        if key_map.get(k) is None
+                        or key_map[k].kind != "movement"
+                    )
                 ),
             )
             for i, a in enumerate(self.anchors)
@@ -221,6 +240,8 @@ class TraceRecorder:
         skills: Dict[str, Skill] = {}
         for a in self.anchors:
             for k, times in _key_groups(a["key_events"]).items():
+                if k in key_map:
+                    continue  # bound in config — its kind/cooldown apply
                 name = f"key_{k}"
                 if name in skills:
                     continue
@@ -336,6 +357,7 @@ class CalibrationRunner:
         name: str,
         fingerprint: Optional[str] = None,
         minimap_region=None,
+        key_map: Optional[Dict[str, Skill]] = None,
     ) -> MapEntry:
         recorder = self.recorder
         self.stop()
@@ -345,6 +367,7 @@ class CalibrationRunner:
             name,
             fingerprint=fingerprint,
             minimap_region=minimap_region,
+            key_map=key_map,
         )
         self._emit("cal", f"saved map '{name}'")
         if not entry.rotation.anchors:
@@ -456,6 +479,7 @@ def main() -> None:
         args.name,
         fingerprint=fp,
         minimap_region=minimap.region,
+        key_map={s.key: s for s in bot_config.skills.values()},
     )
     path = MapStore(args.maps_dir or bot_config.maps_dir).save(entry)
     print(f"Saved {len(entry.rotation.anchors)} anchors, "

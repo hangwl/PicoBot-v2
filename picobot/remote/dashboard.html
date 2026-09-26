@@ -140,6 +140,22 @@
       <div style="margin-top:4px"><label>walk your farming route in-game; press F9 (or Mark) at each farming spot; Save writes the map file</label></div>
     </div>
     <div class="panel">
+      <h3>Skills</h3>
+      <div id="skillRows"></div>
+      <div class="row" style="margin-top:8px">
+        <input id="skName" placeholder="name" size="7">
+        <input id="skKey" placeholder="key" size="4">
+        <select id="skKind">
+          <option>attack</option><option>summon</option>
+          <option>buff</option><option>movement</option>
+        </select>
+        <input id="skCd" type="number" min="0" step="0.1" placeholder="cd" title="cooldown (s)" style="width:58px">
+        <input id="skWait" type="number" min="0" step="0.1" placeholder="wait" title="wait on arrival (s)" style="width:58px">
+        <button id="skAdd">Add</button>
+      </div>
+      <div style="margin-top:6px"><label>attack = used during dwell · summon = fired at anchors · buff = on cooldown · movement = keybind only, ignored in combat (e.g. flash jump). Edits save instantly and apply to a running bot.</label></div>
+    </div>
+    <div class="panel">
       <h3>Remote input</h3>
       <div class="row">
         <div class="pad">
@@ -195,6 +211,7 @@ ws.onopen = () => {
   ws.send("events|history");
   ws.send("bot|query");
   ws.send("config|get");
+  ws.send("skills|list");
   ws.send("host|state");
 };
 ws.onclose = () => chip("ws", "ws: closed", "bad");
@@ -254,7 +271,63 @@ ws.onmessage = e => {
     chip("serial", "serial: " + (p.serial || "–"),
       p.serial_open ? "on" : (p.serial ? "warn" : ""));
     chip("win", "win: " + (p.window || "–"));
+  } else if (p.event === "skills") {
+    renderSkills(p.skills || {});
   }
+};
+
+const esc = s => String(s).replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// --- Skills panel -------------------------------------------------------
+const SKILL_KINDS = ["attack", "summon", "buff", "movement"];
+
+function renderSkills(skills) {
+  const wrap = $("skillRows");
+  wrap.innerHTML = "";
+  const names = Object.keys(skills);
+  if (!names.length) {
+    wrap.innerHTML = "<label>no skills configured — attack won't fire without one</label>";
+    return;
+  }
+  names.forEach(name => {
+    const s = skills[name];
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "6px";
+    row.innerHTML =
+      `<b style="min-width:80px;overflow:hidden;text-overflow:ellipsis">${esc(name)}</b>` +
+      `<input class="sk-key" value="${esc(s.key)}" size="4" title="key">` +
+      `<select class="sk-kind">${SKILL_KINDS.map(k =>
+        `<option${k === s.kind ? " selected" : ""}>${k}</option>`).join("")}</select>` +
+      `<input class="sk-cd" type="number" min="0" step="0.1" value="${s.cooldown || 0}" title="cooldown (s)" style="width:58px">` +
+      `<input class="sk-wait" type="number" min="0" step="0.1" value="${s.wait_on_arrival || 0}" title="wait on arrival (s)" style="width:58px">` +
+      `<button class="sk-del">✕</button>`;
+    const spec = () => JSON.stringify({
+      name,
+      key: row.querySelector(".sk-key").value.trim(),
+      kind: row.querySelector(".sk-kind").value,
+      cooldown: parseFloat(row.querySelector(".sk-cd").value) || 0,
+      wait_on_arrival: parseFloat(row.querySelector(".sk-wait").value) || 0,
+    });
+    row.querySelectorAll("input,select").forEach(el =>
+      el.addEventListener("change", () => send("skills|set|" + spec())));
+    row.querySelector(".sk-del").onclick = () => send("skills|del|" + name);
+    wrap.appendChild(row);
+  });
+}
+
+$("skAdd").onclick = () => {
+  const name = $("skName").value.trim();
+  const key = $("skKey").value.trim();
+  if (!name || !key) return;
+  send("skills|set|" + JSON.stringify({
+    name, key,
+    kind: $("skKind").value,
+    cooldown: parseFloat($("skCd").value) || 0,
+    wait_on_arrival: parseFloat($("skWait").value) || 0,
+  }));
+  $("skName").value = $("skKey").value = "";
 };
 
 // Populate a <select>; keep the current value as an option even if it

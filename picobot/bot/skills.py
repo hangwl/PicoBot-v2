@@ -19,6 +19,8 @@ Configuration shape (inside ``config.json["bot"]`` or a map file)::
 the skill may fire: ``attack`` skills are picked by the attack loop,
 ``buff`` skills fire whenever ready, ``summon`` skills only fire at
 anchors that list them in ``on_arrive`` (they're positional).
+``movement`` skills never auto-fire — they document traversal keybinds
+(flash jump & co.) and calibration ignores presses bound to them.
 
 When no explicit ``skills`` map is given, the legacy ``attack_keys`` /
 ``buff_keys`` + ``buff_interval_seconds`` fields are synthesised into
@@ -31,7 +33,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-VALID_KINDS = ("attack", "buff", "summon")
+VALID_KINDS = ("attack", "buff", "summon", "movement")
 
 
 @dataclass
@@ -39,7 +41,7 @@ class Skill:
     name: str
     key: str
     cooldown: float = 0.0        # seconds; 0 = always ready
-    kind: str = "attack"         # attack | buff | summon
+    kind: str = "attack"         # attack | buff | summon | movement
     wait_on_arrival: float = 0.0  # max s to wait for CD after reaching an anchor
     hold: Optional[float] = None  # key-hold override (None = humanized tap)
 

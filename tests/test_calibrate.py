@@ -144,6 +144,30 @@ class TraceRecorderTests(unittest.TestCase):
             entry.rotation.anchors[0].on_arrive, ("key_a", "key_d")
         )
 
+    def test_key_map_resolves_bound_and_movement_keys(self):
+        from picobot.bot.skills import Skill
+
+        r = self._recorder()
+        r.sample((50, 50), t=0.0)
+        r.mark(t=0.0)
+        r.record_key("d", t=1.0)    # bound summon -> real skill name
+        for t in (2.0, 2.5, 3.0, 3.5):
+            r.record_key("a", t=t)  # bound attack -> real name, no dup skill
+        for t in (4.0, 4.5, 5.0, 5.5):
+            r.record_key("alt", t=t)  # movement -> dropped entirely
+        r.sample((120, 50), t=30.0)
+        r.mark(t=30.0)
+        key_map = {
+            "d": Skill("fountain", "d", 57.0, "summon"),
+            "a": Skill("main", "a", 0.0, "attack"),
+            "alt": Skill("fj", "alt", 0.0, "movement"),
+        }
+        entry = r.finish("m", key_map=key_map)
+        self.assertEqual(
+            entry.rotation.anchors[0].on_arrive, ("fountain", "main")
+        )
+        self.assertEqual(entry.skills, {})  # everything bound in config
+
 
 if __name__ == "__main__":
     unittest.main()

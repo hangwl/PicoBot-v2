@@ -129,7 +129,7 @@ class ConnectSerialTests(unittest.TestCase):
     def test_dashboard_prefixes_cover_all_commands(self):
         for prefix in (
             "bot|", "map|", "cal|", "dash|", "host|",
-            "events|", "config|", "layout|",
+            "events|", "config|", "layout|", "skills|",
         ):
             self.assertIn(prefix, DASHBOARD_PREFIXES)
 
@@ -299,6 +299,53 @@ class HostCommandTests(unittest.TestCase):
         self.host._handle_command("layout|region|title|5,8,300,40")
         feed.minimap.set_region.assert_not_called()
         self.save_mock.assert_not_called()
+
+    def test_skills_set_persists_and_broadcasts(self):
+        self.assertTrue(self.host._handle_command(
+            'skills|set|{"name":"main","key":"a","kind":"attack",'
+            '"cooldown":0}'))
+        s = self.host.bot_config.skills["main"]
+        self.assertEqual((s.key, s.kind, s.cooldown), ("a", "attack", 0.0))
+        self.assertEqual(
+            self.host.config.bot["skills"]["main"],
+            {"key": "a", "kind": "attack"},
+        )
+        self.save_mock.assert_called()
+        skills_msgs = [
+            json.loads(m[len("dash|"):]) for m in self.sent
+            if '"event": "skills"' in m
+        ]
+        self.assertTrue(skills_msgs)
+        self.assertIn("main", skills_msgs[-1]["skills"])
+
+    def test_skills_set_rejects_bad_spec(self):
+        self.host._handle_command('skills|set|{"name":"x"}')  # no key
+        self.assertNotIn("x", self.host.bot_config.skills)
+        kinds = [e["kind"] for e in self.host.bus.history()]
+        self.assertIn("error", kinds)
+
+    def test_skills_del(self):
+        from picobot.bot.skills import Skill
+
+        self.host.bot_config.skills["main"] = Skill("main", "a")
+        self.assertTrue(self.host._handle_command("skills|del|main"))
+        self.assertNotIn("main", self.host.bot_config.skills)
+        self.assertNotIn("main", self.host.config.bot["skills"])
+        self.host._handle_command("skills|del|main")
+        kinds = [e["kind"] for e in self.host.bus.history()]
+        self.assertIn("error", kinds)
+
+    def test_skills_commit_updates_running_bot_live(self):
+        from picobot.bot.skills import Skill, SkillBook
+
+        bot = Mock()
+        bot._map = None
+        bot.skills = SkillBook({"old": Skill("old", "z")})
+        self.host.bot = bot
+        self.host._handle_command(
+            'skills|set|{"name":"main","key":"a","kind":"attack"}')
+        self.assertIn("main", bot.skills.skills)
+        self.assertNotIn("old", bot.skills.skills)
 
     def test_layout_source_reports_provenance(self):
         feed = Mock()

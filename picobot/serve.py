@@ -487,6 +487,12 @@ class BotHost:
             self._layout_reset()
         elif msg.startswith("layout|region|"):
             self._layout_set_region(msg)
+        elif msg == "skills|list":
+            self._send_skills()
+        elif msg.startswith("skills|set|"):
+            self._skills_set(msg.split("|", 2)[2])
+        elif msg.startswith("skills|del|"):
+            self._skills_del(msg.split("|", 2)[2])
         elif msg == "events|history":
             self._send_history()
         elif msg == "config|get":
@@ -615,6 +621,59 @@ class BotHost:
         payload = {"event": "config", "config": data}
         self.remote.broadcast("dash|" + json.dumps(payload))
 
+    # -- Skills editor -------------------------------------------------------------
+    def _send_skills(self) -> None:
+        payload = {
+            "event": "skills",
+            "skills": {
+                n: s.to_dict() for n, s in self.bot_config.skills.items()
+            },
+        }
+        self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _skills_set(self, payload: str) -> None:
+        from .bot.skills import Skill
+
+        try:
+            spec = json.loads(payload)
+            skill = Skill.from_dict(str(spec["name"]), spec)
+        except (ValueError, KeyError, TypeError,
+                json.JSONDecodeError) as exc:
+            self.bus.emit("error", f"invalid skill spec: {exc}")
+            return
+        self.bot_config.skills[skill.name] = skill
+        self._skills_commit()
+        self.bus.emit(
+            "skill", f"skill saved: {skill.name} ({skill.kind}, {skill.key})"
+        )
+
+    def _skills_del(self, name: str) -> None:
+        if not self.bot_config.skills.pop(name, None):
+            self.bus.emit("error", f"no such skill: {name}")
+            return
+        self._skills_commit()
+        self.bus.emit("skill", f"skill removed: {name}")
+
+    def _skills_commit(self) -> None:
+        """Persist skills to config.json and update a running bot live."""
+        bot_cfg = getattr(self.config, "bot", None) or {}
+        # Materialize the full effective set so a legacy attack_keys config
+        # doesn't lose its synthesized skills on the first UI edit.
+        bot_cfg["skills"] = {
+            n: s.to_dict() for n, s in self.bot_config.skills.items()
+        }
+        self.config.bot = bot_cfg
+        save_config(self.config)
+        bot = self.bot
+        if bot is not None:
+            merged = dict(self.bot_config.skills)
+            if bot._map is not None:
+                merged.update(bot._map.skills)
+            # Mutate in place so cooldown timestamps survive the edit.
+            bot.skills.skills.clear()
+            bot.skills.skills.update(merged)
+        self._send_skills()
+
     # -- Calibration -------------------------------------------------------------
     def _cal_start(self) -> None:
         feed = self._get_feed()
@@ -658,6 +717,9 @@ class BotHost:
                 name,
                 fingerprint=fp,
                 minimap_region=feed.minimap.region if feed else None,
+                key_map={
+                    s.key: s for s in self.bot_config.skills.values()
+                },
             )
             path = self.maps.save(entry)
             self.maps.reload()
