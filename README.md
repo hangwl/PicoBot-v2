@@ -43,9 +43,11 @@ override the remembered values and are persisted the same way.
 - **Connection** — pick the Pico DATA serial port (or *Auto*-detect) and the
   game window title. Selections persist to `config.json`.
 - **View** — live annotated minimap feed (player dot, anchors, nav target,
-  hazard markers) or the full game window on demand.
+  hazard markers) or the full game window on demand. The fps selector sets
+  the stream rate (persisted as `"view_fps"` in `config.json`, default 10;
+  1–30 allowed — higher rates cost more CPU on captures + JPEG encode).
+  Layout controls: *Save layout* / *Forget* / *Re-detect* / *Draw minimap*.
 - **Bot** — Start/Stop the smart bot.
-- **Map** — pick the active rotation map, or leave on auto (fingerprint match).
 - **Calibrate** — Record → walk your rotation pressing *Mark anchor* at each
   farming spot → Save. The recorder derives walk/climb legs from your position
   trace, dwell ranges from how long you stood, and candidate skills from the

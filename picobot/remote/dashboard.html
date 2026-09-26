@@ -113,6 +113,13 @@
       <div class="row" style="margin-top:8px">
         <button id="vMin">Minimap</button>
         <button id="vWin">Window</button>
+        <select id="fpsSel" title="stream rate">
+          <option value="3">3 fps</option>
+          <option value="6">6 fps</option>
+          <option value="10">10 fps</option>
+          <option value="15">15 fps</option>
+          <option value="24">24 fps</option>
+        </select>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="layoutSave">Save layout</button>
@@ -320,6 +327,8 @@ ws.onmessage = e => {
     if (document.activeElement !== $("mkFj"))
       $("mkFj").value = c.flash_jump_key || "";
     $("mkFjOn").checked = c.flash_jump_enabled !== false;
+    if (c.view_fps != null && document.activeElement !== $("fpsSel"))
+      $("fpsSel").value = String(Math.round(c.view_fps));
   }
 };
 
@@ -424,6 +433,7 @@ $("startBot").onclick = () => send("bot|start");
 $("stopBot").onclick = () => send("bot|stop");
 $("vMin").onclick = () => send("dash|view|minimap");
 $("vWin").onclick = () => send("dash|view|window");
+$("fpsSel").onchange = () => send("dash|fps|" + $("fpsSel").value);
 $("layoutSave").onclick = () => send("layout|save");
 $("layoutClear").onclick = () => send("layout|clear");
 $("layoutReset").onclick = () => send("layout|reset");

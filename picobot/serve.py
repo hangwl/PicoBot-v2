@@ -138,7 +138,9 @@ class BotHost:
             serial_optional=True,
         )
         self.streamer = FrameStreamer(
-            self._provide_frame, self.remote.broadcast, interval=0.35
+            self._provide_frame,
+            self.remote.broadcast,
+            interval=1.0 / max(1.0, float(self.config.view_fps)),
         )
         self.bus.subscribe(self._forward_event)
 
@@ -487,6 +489,8 @@ class BotHost:
                 self.bus.emit("cal", "recording cancelled")
         elif msg.startswith("dash|view|"):
             self.streamer.set_mode(msg.split("|", 2)[2])
+        elif msg.startswith("dash|fps|"):
+            self._fps_set(msg.split("|", 2)[2])
         elif msg == "layout|save":
             self._layout_save()
         elif msg == "layout|clear":
@@ -628,8 +632,23 @@ class BotHost:
         data["skills"] = {n: s.to_dict() for n, s in self.bot_config.skills.items()}
         data["rotation"] = self.bot_config.rotation.to_dict()
         data["minimap_colors"] = asdict(self.bot_config.minimap_colors)
+        data["view_fps"] = self.config.view_fps
         payload = {"event": "config", "config": data}
         self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _fps_set(self, payload: str) -> None:
+        """dash|fps|<float> — live stream rate, clamped 1–30 fps."""
+        try:
+            fps = float(payload)
+        except ValueError:
+            self.bus.emit("error", f"invalid fps: {payload!r}")
+            return
+        fps = min(30.0, max(1.0, fps))
+        self.streamer.interval = 1.0 / fps
+        self.config.view_fps = fps
+        save_config(self.config)
+        self.bus.emit("host", f"view fps: {fps:g}")
+        self._send_config()
 
     # -- Skills editor -------------------------------------------------------------
     def _send_skills(self) -> None:

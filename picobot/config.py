@@ -28,6 +28,13 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class AppConfig:
     # Default target window to prefer on startup/refresh when unlocked
@@ -40,6 +47,8 @@ class AppConfig:
     serial_port: str = ""
     ws_port: int = 8765
     http_port: int = 8000
+    # Dashboard minimap/window stream rate
+    view_fps: float = 10.0
     # TLS for WebSocket server
     ws_tls: bool = False
     ws_certfile: str = ""
@@ -95,6 +104,13 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
     data["serial_port"] = str(raw.get("serial_port", data["serial_port"]))
     data["ws_port"] = _coerce_int(raw.get("ws_port"), defaults.ws_port)
     data["http_port"] = _coerce_int(raw.get("http_port"), defaults.http_port)
+    data["view_fps"] = min(
+        30.0,
+        max(
+            1.0,
+            _coerce_float(raw.get("view_fps"), defaults.view_fps),
+        ),
+    )
     data["ws_tls"] = bool(raw.get("ws_tls", defaults.ws_tls))
     data["ws_certfile"] = str(raw.get("ws_certfile", defaults.ws_certfile))
     data["ws_keyfile"] = str(raw.get("ws_keyfile", defaults.ws_keyfile))

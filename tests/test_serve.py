@@ -357,6 +357,27 @@ class HostCommandTests(unittest.TestCase):
         self.assertIsNone(self.host.bot_config.up_jump_skill_key)
         self.assertIsNone(self.host.config.bot["up_jump_skill_key"])
 
+    def test_fps_command_updates_streamer_and_persists(self):
+        self.assertTrue(self.host._handle_command("dash|fps|15"))
+        self.assertAlmostEqual(self.host.streamer.interval, 1.0 / 15.0)
+        self.assertEqual(self.host.config.view_fps, 15.0)
+        self.save_mock.assert_called()
+        cfg_msgs = [
+            json.loads(m[len("dash|"):]) for m in self.sent
+            if m.startswith("dash|")
+        ]
+        self.assertIn(
+            15.0,
+            [m.get("config", {}).get("view_fps") for m in cfg_msgs],
+        )
+
+    def test_fps_command_clamps(self):
+        self.host._handle_command("dash|fps|999")
+        self.assertEqual(self.host.config.view_fps, 30.0)
+        self.host._handle_command("dash|fps|bogus")
+        kinds = [e["kind"] for e in self.host.bus.history()]
+        self.assertIn("error", kinds)
+
     def test_skills_commit_updates_running_bot_live(self):
         from picobot.bot.skills import Skill, SkillBook
 
