@@ -65,6 +65,37 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(fingerprint_distance("", "aa"), float("inf"))
         self.assertEqual(fingerprint_distance("zz", "zz"), float("inf"))
 
+    def test_include_colors_ignores_transparent_background(self):
+        """Translucent minimap: scene pixels behind it must not perturb fp."""
+        ink = (200, 200, 200)
+
+        def map_img(seed):
+            # arbitrary "scene" showing through the transparent background
+            img = np.random.default_rng(seed).integers(
+                0, 160, (150, 200, 3), dtype=np.uint8
+            )
+            img[30, :] = ink       # platform lines
+            img[80, 40:160] = ink
+            img[:, 150] = ink
+            return img
+
+        a = fingerprint(map_img(1), include_colors=[ink])
+        b = fingerprint(map_img(2), include_colors=[ink])
+        self.assertEqual(a, b)
+        # A genuinely different platform layout must still differ.
+        c_img = np.random.default_rng(5).integers(
+            0, 160, (150, 200, 3), dtype=np.uint8
+        )
+        c_img[:, ::20] = ink  # vertical stripes instead of the a/b layout
+        c = fingerprint(c_img, include_colors=[ink])
+        self.assertGreater(fingerprint_distance(a, c), 15)
+
+    def test_include_colors_blank_frame_returns_empty(self):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)  # loading screen
+        self.assertEqual(
+            fingerprint(img, include_colors=[(200, 200, 200)]), ""
+        )
+
 
 class MapEntryTests(unittest.TestCase):
     def test_from_dict(self):

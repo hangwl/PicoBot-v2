@@ -127,7 +127,8 @@ toggles, minimap colors/region, flash jump, map store:
       "player": [12, 240, 239],
       "other_player": [118, 45, 253],
       "rune": [255, 102, 221],
-      "border": [228, 228, 228]
+      "border": [228, 228, 228],
+      "ink": null
     },
     "flash_jump": {"enabled": true, "key": "alt"},
     "travel_style": "mixed",
@@ -145,6 +146,11 @@ Notes:
   `"skills"` map exists — new configs should use named skills.
 - `minimap_region` is `(x, y, w, h)` **relative to the game window**. Set it if
   auto-detection fails on your client.
+- `minimap_colors.ink` is the platform/line color used to mask fingerprints —
+  defaults to `border`. It matters on translucent minimaps: only ink pixels
+  feed the fingerprint, so scene pixels showing through the background can't
+  drift map matching as the character moves. Set it to your client's minimap
+  line color if that differs from the border color.
 - Safety: losing window focus, a rune marker, other players on the minimap, or
   an unexpected map change mid-leg pauses the bot (and fires a Telegram alert
   if configured). Solve the check via the dashboard's remote input pad.

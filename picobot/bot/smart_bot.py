@@ -153,12 +153,20 @@ class SmartBot(BotBase):
         c = self.minimap.colors
         return (c.player, c.other_player, c.rune)
 
+    def _fp_ink_colors(self):
+        c = self.minimap.colors
+        return (c.ink or c.border,)
+
     def minimap_fingerprint(self, img=None) -> Optional[str]:
         if img is None:
             img = self.minimap_frame()
         if img is None:
             return None
-        return fingerprint(img, ignore_colors=self._fp_ignored_colors())
+        return fingerprint(
+            img,
+            ignore_colors=self._fp_ignored_colors(),
+            include_colors=self._fp_ink_colors(),
+        ) or None
 
     def player_pos(self, img=None) -> Optional[Tuple[int, int]]:
         if img is None:
@@ -214,7 +222,11 @@ class SmartBot(BotBase):
         elif cfg.stop_when_players_appear and self.minimap.has_other_players(img):
             reason = "other players"
         elif self._leg_fp:
-            fp = fingerprint(img, ignore_colors=self._fp_ignored_colors())
+            fp = fingerprint(
+                img,
+                ignore_colors=self._fp_ignored_colors(),
+                include_colors=self._fp_ink_colors(),
+            )
             if fingerprint_distance(fp, self._leg_fp) > cfg.map_match_threshold:
                 reason = "map changed unexpectedly (portal?)"
         if reason != self.viz["hazard"] and reason is not None:

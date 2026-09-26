@@ -349,7 +349,8 @@ def main() -> None:
             minimap.colors.other_player,
             minimap.colors.rune,
         ),
-    )
+        include_colors=(minimap.colors.ink or minimap.colors.border,),
+    ) or None
     done = {"flag": False}
     keyboard.on_press_key(
         args.mark_key, lambda e: print(f"anchor {recorder.mark()}")

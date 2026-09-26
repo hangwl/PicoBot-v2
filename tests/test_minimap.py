@@ -114,15 +114,18 @@ class MinimapAnalyzerTests(unittest.TestCase):
             MinimapColors.from_dict({"player": [1, 2]})
 
 
+_BORDER = (228, 228, 228)  # default MinimapColors.border — the "ink"
+
+
 def _hlines(w=200, h=150):
     img = np.zeros((h, w, 3), dtype=np.uint8)
-    img[::15, :] = 200
+    img[::15, :] = _BORDER
     return img
 
 
 def _vlines(w=200, h=150):
     img = np.zeros((h, w, 3), dtype=np.uint8)
-    img[:, ::15] = 200
+    img[:, ::15] = _BORDER
     return img
 
 

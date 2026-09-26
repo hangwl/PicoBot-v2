@@ -451,8 +451,10 @@ class BotHost:
 
                 c = feed.minimap.colors
                 fp = fingerprint(
-                    img, ignore_colors=(c.player, c.other_player, c.rune)
-                )
+                    img,
+                    ignore_colors=(c.player, c.other_player, c.rune),
+                    include_colors=(c.ink or c.border,),
+                ) or None
         try:
             entry = self.calibrator.finish(name, fingerprint=fp)
             path = self.maps.save(entry)

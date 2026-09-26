@@ -27,13 +27,15 @@ class MinimapColors:
     other_player: Tuple[int, int, int] = (118, 45, 253)  # pink/red dots
     rune: Tuple[int, int, int] = (255, 102, 221)         # purple rune
     border: Tuple[int, int, int] = (228, 228, 228)       # minimap frame
+    # Platform/line color used to mask fingerprints. None -> reuse `border`.
+    ink: Optional[Tuple[int, int, int]] = None
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "MinimapColors":
         if not data:
             return cls()
         kwargs = {}
-        for name in ("player", "other_player", "rune", "border"):
+        for name in ("player", "other_player", "rune", "border", "ink"):
             value = data.get(name)
             if value is None:
                 continue
@@ -89,6 +91,7 @@ def blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
 def fingerprint(
     img: np.ndarray,
     ignore_colors: Optional[Iterable[Tuple[int, int, int]]] = None,
+    include_colors: Optional[Iterable[Tuple[int, int, int]]] = None,
     tolerance: int = 10,
     size: int = 16,
 ) -> str:
@@ -99,19 +102,33 @@ def fingerprint(
     channel preserves thin platform lines that mean-pooling would wash
     out. Pixels matching ``ignore_colors`` (e.g. the roaming marker dots)
     are excluded, so markers don't perturb the hash of a static minimap.
+
+    ``include_colors`` inverts the selection: only pixels matching those
+    colors (the minimap's platform/border "ink") contribute — crucial on
+    translucent minimaps where the live scene shows through the background
+    and would otherwise drift the hash as the character moves. Returns ""
+    when too few pixels qualify (blank/transition frames), which never
+    matches anything in :func:`fingerprint_distance`.
     """
     h, w = img.shape[:2]
     bh, bw = max(1, h // size), max(1, w // size)
     crop = img[: bh * size, : bw * size].astype(np.float32)
+    excluded = np.zeros(crop.shape[:2], dtype=bool)
+    if include_colors:
+        included = np.zeros(crop.shape[:2], dtype=bool)
+        for bgr in include_colors:
+            included |= color_mask(crop.astype(np.uint8), bgr, tolerance)
+        excluded |= ~included
     if ignore_colors:
-        ignore = np.zeros(crop.shape[:2], dtype=bool)
         for bgr in ignore_colors:
-            ignore |= color_mask(crop.astype(np.uint8), bgr, tolerance)
-        weights = (~ignore).astype(np.float32)
-        masked = np.where(ignore, -1.0, 0.0)
+            excluded |= color_mask(crop.astype(np.uint8), bgr, tolerance)
+    if include_colors or ignore_colors:
+        weights = (~excluded).astype(np.float32)
     else:
         weights = np.ones(crop.shape[:2], dtype=np.float32)
-        masked = np.zeros(crop.shape[:2], dtype=np.float32)
+    if weights.sum() < 8:
+        # Not enough signal to identify a map — treat as no fingerprint.
+        return ""
     gray = (
         0.114 * crop[:, :, 0] + 0.587 * crop[:, :, 1] + 0.299 * crop[:, :, 2]
     )
@@ -119,7 +136,7 @@ def fingerprint(
     den = weights.reshape(size, bh, size, bw).sum(axis=(1, 3))
     means = np.where(den > 0, num / np.maximum(den, 1), 127.0)
     # Excluded pixels get -1 so they never win the per-cell max.
-    maxes = (gray + masked).reshape(size, bh, size, bw).max(axis=(1, 3))
+    maxes = np.where(excluded, -1.0, gray).reshape(size, bh, size, bw).max(axis=(1, 3))
     maxes = np.where(maxes >= 0, maxes, 127.0)
     cells = np.concatenate([means, maxes]).astype(np.uint8)
     return cells.tobytes().hex()
@@ -190,7 +207,11 @@ class MinimapAnalyzer:
             ignore_colors=(
                 self.colors.player, self.colors.other_player, self.colors.rune
             ),
+            include_colors=(self.colors.ink or self.colors.border,),
         )
+        if not fp:
+            # Blank/transition frame — no signal; neither match nor miss.
+            return False
         if self._baseline_fp is None:
             self._baseline_fp = fp
             return False
