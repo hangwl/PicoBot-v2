@@ -1,9 +1,11 @@
 import json
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
 
+from picobot.bot.maps import MapEntry, MapStore
 from picobot.config import AppConfig
 from picobot.events import EventBus
 from picobot.remote.control import (
@@ -133,7 +135,8 @@ class ConnectSerialTests(unittest.TestCase):
 
     def test_dashboard_prefixes_cover_all_commands(self):
         for prefix in (
-            "bot|", "map|", "cal|", "dash|", "host|", "events|", "config|"
+            "bot|", "map|", "cal|", "dash|", "host|",
+            "events|", "config|", "layout|",
         ):
             self.assertIn(prefix, DASHBOARD_PREFIXES)
 
@@ -212,6 +215,45 @@ class HostCommandTests(unittest.TestCase):
         self.assertIn("ports", payload)
         self.assertIn("windows", payload)
         self.assertIn("serial_open", payload)
+
+    def test_layout_save_writes_resolved_map(self):
+        feed = Mock()
+        feed.minimap.region = (8, 40, 200, 150)
+        self.host._feed = feed
+        self.host._active_map_override = "m1"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.assertTrue(self.host._handle_command("layout|save"))
+            self.assertEqual(
+                MapStore(tmp).get("m1").minimap_region,
+                (8, 40, 200, 150),
+            )
+
+    def test_layout_save_without_region_errors(self):
+        feed = Mock()
+        feed.minimap.region = None
+        self.host._feed = feed
+        self.host._handle_command("layout|save")
+        kinds = [e["kind"] for e in self.host.bus.history()]
+        self.assertIn("error", kinds)
+
+    def test_layout_clear_removes_stored(self):
+        self.host._active_map_override = "m1"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(
+                MapEntry(name="m1", minimap_region=(1, 2, 3, 4))
+            )
+            self.host._handle_command("layout|clear")
+            self.assertIsNone(MapStore(tmp).get("m1").minimap_region)
+
+    def test_layout_source_reports_provenance(self):
+        feed = Mock()
+        feed.minimap.region = (0, 0, 100, 100)
+        feed.minimap.region_source = "stored"
+        self.host._feed = feed
+        self.assertEqual(self.host._layout_source(), "stored")
 
     def test_serial_auto_probes_then_connects(self):
         done = []

@@ -183,6 +183,7 @@ class MinimapAnalyzer:
         self.colors = colors or MinimapColors()
         self._region = region
         self._region_explicit = region is not None
+        self._region_source = "explicit" if region is not None else None
         self._border_tolerance = border_tolerance
         self._map_change_threshold = map_change_threshold
         self._map_change_frames = map_change_frames
@@ -193,6 +194,13 @@ class MinimapAnalyzer:
     def region(self) -> Optional[Region]:
         return self._region
 
+    @property
+    def region_source(self) -> Optional[str]:
+        """Where the current region came from: ``explicit`` (config),
+        ``stored`` (a map file's remembered layout), ``auto`` (live
+        border detection), or None when unknown."""
+        return self._region_source
+
     def set_region(self, region: Region, *, explicit: bool = False) -> None:
         """Install a known region — e.g. a remembered per-map layout.
 
@@ -202,6 +210,7 @@ class MinimapAnalyzer:
         """
         self._region = tuple(int(v) for v in region)
         self._region_explicit = explicit
+        self._region_source = "explicit" if explicit else "stored"
         self._baseline_fp = None
         self._fp_misses = 0
 
@@ -240,6 +249,7 @@ class MinimapAnalyzer:
         self._baseline_fp = None
         if not self._region_explicit:
             self._region = None
+            self._region_source = None
         return True
 
     def locate(self, window_img: np.ndarray) -> Optional[Region]:
@@ -274,6 +284,7 @@ class MinimapAnalyzer:
             return None
 
         self._region = (left, top, width, height)
+        self._region_source = "auto"
         return self._region
 
     def crop(self, window_img: np.ndarray) -> Optional[np.ndarray]:

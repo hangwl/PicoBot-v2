@@ -306,6 +306,71 @@ class BotHost:
             self.bus.emit("vision", f"map name: {name}")
         return name
 
+    def _layout_source(self):
+        """Provenance of the live minimap region: explicit/stored/auto."""
+        bot = self.bot
+        mm = bot.minimap if bot is not None else (
+            self._feed.minimap if self._feed is not None else None
+        )
+        if mm is None or mm.region is None:
+            return None
+        return mm.region_source
+
+    def _resolved_map_entry(self):
+        """The map this session currently believes we're on."""
+        if self.bot is not None and self.bot._map is not None:
+            return self.bot._map
+        if self._active_map_override:
+            return self.maps.get(self._active_map_override)
+        entry = self.maps.match_name(self._idle_title())
+        if entry is None:
+            feed = self._get_feed()
+            img = feed.minimap_img() if feed is not None else None
+            if img is not None:
+                from .vision.minimap import fingerprint
+
+                c = feed.minimap.colors
+                fp = fingerprint(
+                    img,
+                    ignore_colors=(c.player, c.other_player, c.rune),
+                    include_colors=(c.ink or c.border,),
+                )
+                entry = self.maps.match(
+                    fp, self.bot_config.map_match_threshold
+                )
+        return entry
+
+    def _layout_save(self) -> None:
+        bot = self.bot
+        feed = self._get_feed()
+        region = None
+        if bot is not None:
+            region = bot.minimap.region
+        if region is None and feed is not None:
+            region = feed.minimap.region
+        if not region:
+            self.bus.emit("error", "no minimap layout detected to save")
+            return
+        entry = self._resolved_map_entry()
+        if entry is None:
+            self.bus.emit(
+                "error",
+                "no map resolved — pick a map or let OCR/fingerprint match",
+            )
+            return
+        entry.minimap_region = tuple(int(v) for v in region)
+        self.maps.save(entry)
+        self.bus.emit("map", f"layout saved for {entry.name}: {list(entry.minimap_region)}")
+
+    def _layout_clear(self) -> None:
+        entry = self._resolved_map_entry()
+        if entry is None or not entry.minimap_region:
+            self.bus.emit("error", "resolved map has no stored layout")
+            return
+        entry.minimap_region = None
+        self.maps.save(entry)
+        self.bus.emit("map", f"layout cleared for {entry.name}")
+
     def _provide_frame(self, mode: str):
         bot = self.bot
         if mode == "title":
@@ -317,13 +382,21 @@ class BotHost:
             img = feed.name_img()
             if img is None:
                 return {"state": "IDLE"}
-            return {"img": img, "title": self._idle_title()}
+            return {
+                "img": img,
+                "title": self._idle_title(),
+                "layout": self._layout_source(),
+            }
         if mode == "window":
             if bot is not None:
                 img = bot._window_capture()
                 if img is None:
                     return None
-                return {"img": img, "name_rect": bot._name_region()}
+                return {
+                    "img": img,
+                    "name_rect": bot._name_region(),
+                    "layout": self._layout_source(),
+                }
             feed = self._get_feed()
             if feed is None:
                 return None
@@ -331,9 +404,12 @@ class BotHost:
                 "img": feed.window_img(),
                 "name_rect": feed.name_region(),
                 "title": self._idle_title(),
+                "layout": self._layout_source(),
             }
         if bot is not None:
-            return bot.viz_snapshot()
+            snap = bot.viz_snapshot() or {}
+            snap["layout"] = self._layout_source()
+            return snap
         feed = self._get_feed()
         if feed is None:
             return None
@@ -345,6 +421,7 @@ class BotHost:
             "player": feed.minimap.player_pos(img),
             "state": "IDLE",
             "title": self._idle_title(),
+            "layout": self._layout_source(),
         }
 
     # -- Dashboard commands ------------------------------------------------------
@@ -366,6 +443,10 @@ class BotHost:
                 self.calibrator.stop()
         elif msg.startswith("dash|view|"):
             self.streamer.set_mode(msg.split("|", 2)[2])
+        elif msg == "layout|save":
+            self._layout_save()
+        elif msg == "layout|clear":
+            self._layout_clear()
         elif msg == "events|history":
             self._send_history()
         elif msg == "config|get":

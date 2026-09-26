@@ -71,6 +71,7 @@
   <span id="serial" class="chip">serial: –</span>
   <span id="win" class="chip">win: –</span>
   <span id="title" class="chip">title: –</span>
+  <span id="layout" class="chip">layout: –</span>
   <span id="bot" class="chip">bot: ?</span>
   <span id="state" class="chip">state: –</span>
   <span id="map" class="chip">map: –</span>
@@ -97,6 +98,11 @@
         <button id="vMin">Minimap</button>
         <button id="vWin">Window</button>
         <button id="vTitle">Title</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="layoutSave">Save layout</button>
+        <button id="layoutClear">Forget</button>
+        <label>remember this minimap layout for the resolved map</label>
       </div>
     </div>
     <div class="panel">
@@ -207,6 +213,9 @@ ws.onmessage = e => {
       p.state === "PAUSE" ? "warn" : "");
     if (p.map !== undefined) chip("map", "map: " + (p.map || "–"));
     chip("title", "title: " + (p.title || "–"));
+    if (p.layout !== undefined)
+      chip("layout", "layout: " + (p.layout || "–"),
+        p.layout === "auto" ? "warn" : "");
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
   } else if (p.event === "evt") {
     log(p.kind, p.msg);
@@ -264,6 +273,8 @@ $("stopBot").onclick = () => send("bot|stop");
 $("vMin").onclick = () => send("dash|view|minimap");
 $("vWin").onclick = () => send("dash|view|window");
 $("vTitle").onclick = () => send("dash|view|title");
+$("layoutSave").onclick = () => send("layout|save");
+$("layoutClear").onclick = () => send("layout|clear");
 $("mapSel").onchange = e => send("map|set|" + e.target.value);
 $("mapRefresh").onclick = () => send("map|list");
 $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.target.value); };

@@ -176,6 +176,7 @@ class SetRegionTests(unittest.TestCase):
         a.note_frame(_hlines())                     # old baseline
         a.set_region((10, 20, 200, 150))
         self.assertEqual(a.region, (10, 20, 200, 150))
+        self.assertEqual(a.region_source, "stored")
         # The swap itself isn't a map change — baseline re-anchors.
         self.assertFalse(a.note_frame(_vlines()))
         self.assertFalse(a.note_frame(_vlines()))
@@ -188,10 +189,12 @@ class SetRegionTests(unittest.TestCase):
         a.note_frame(_vlines())
         self.assertTrue(a.note_frame(_vlines()))
         self.assertIsNone(a.region)                 # watchdog can still drop
+        self.assertIsNone(a.region_source)
 
     def test_explicit_flag_respected(self):
         a = MinimapAnalyzer()
         a.set_region((0, 0, 100, 100), explicit=True)
+        self.assertEqual(a.region_source, "explicit")
         a.note_frame(_hlines())
         for _ in range(2):
             a.note_frame(_vlines())

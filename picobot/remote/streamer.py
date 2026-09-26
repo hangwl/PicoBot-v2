@@ -144,7 +144,9 @@ class FrameStreamer:
                         "h": int(frame.shape[0]),
                         "jpeg": encode_jpeg(frame, self.quality),
                     }
-                    for key in ("state", "map", "hazard", "player", "title"):
+                    for key in (
+                        "state", "map", "hazard", "player", "title", "layout"
+                    ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]
                     self.send("dash|" + json.dumps(payload))
