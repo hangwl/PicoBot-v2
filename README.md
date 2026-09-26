@@ -121,8 +121,10 @@ you verified in the dashboard carries over to the bot at Start:
   before giving up — players wait a beat for their summon too.
 - During dwells the bot **weaves**: it flash-hops (or walks) back and
   forth across the anchor's platform — bounds detected from platform ink,
-  falling back to `weave_range_px` — pressing the attack mid-hop. Set
-  `dwell_weave: false` to go back to standing still.
+  falling back to `weave_range_px` — pressing the attack *after* the
+  flash-jump re-press fires (an earlier press eats the FJ input window).
+  `wall_zone_px` forces an inward facing near the map's left/right edges
+  so weave can't wall-bang. Set `dwell_weave: false` to stand still.
 
 ## Bot configuration
 
@@ -144,6 +146,7 @@ toggles, minimap colors/region, flash jump, map store:
     "nav_threshold_px": 5,
     "dwell_weave": true,
     "weave_range_px": 24,
+    "wall_zone_px": 16,
     "stationary_mode": true,
     "enable_random_wander": true,
     "stop_when_players_appear": true,

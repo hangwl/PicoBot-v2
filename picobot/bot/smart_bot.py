@@ -793,7 +793,16 @@ class SmartBot(BotBase):
                 lo, hi = blo, bhi
         direction = self._weave_dir or random.choice(("left", "right"))
         if pos is not None:
-            if pos[0] <= lo:
+            # Wall zones: inside the map's left/right edge margins the
+            # only sane facing is inward — overrides platform bounds and
+            # prevents wall-banging at the region edges.
+            z = cfg.wall_zone_px
+            map_w = self._region_wh()[0]
+            if pos[0] <= z:
+                direction = "right"
+            elif pos[0] >= map_w - z:
+                direction = "left"
+            elif pos[0] <= lo:
                 direction = "right"
             elif pos[0] >= hi:
                 direction = "left"
@@ -806,9 +815,12 @@ class SmartBot(BotBase):
             if cfg.flash_jump_enabled:
                 self.hid.press(cfg.jump_key)
                 self.sleep(random.uniform(0.12, 0.22))
+                self.hid.press(cfg.jump_key)  # mid-air re-press = FJ
+                self.sleep(random.uniform(0.06, 0.12))
+                # Attack AFTER the FJ triggers — an early press eats the
+                # second jump's input window and the flash never fires.
                 if skill is not None:
                     self._use_skill(skill)
-                self.hid.press(cfg.jump_key)  # mid-air re-press = FJ
                 self.sleep(random.uniform(0.28, 0.45))
             else:
                 if skill is not None:

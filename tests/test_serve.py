@@ -403,6 +403,10 @@ class HostCommandTests(unittest.TestCase):
         self.host._handle_command(
             'movekeys|set|{"nav_threshold_px":99}')  # clamped
         self.assertEqual(self.host.bot_config.nav_threshold_px, 15)
+        self.host._handle_command(
+            'movekeys|set|{"wall_zone_px":20}')
+        self.assertEqual(self.host.bot_config.wall_zone_px, 20)
+        self.assertEqual(self.host.config.bot["wall_zone_px"], 20)
 
     def test_movekeys_set_blank_rope_restores_combo(self):
         self.host.bot_config.up_jump_skill_key = "alt"

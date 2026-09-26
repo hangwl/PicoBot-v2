@@ -774,6 +774,9 @@ class BotHost:
         if "nav_threshold_px" in spec and spec["nav_threshold_px"] is not None:
             cfg.nav_threshold_px = min(15, max(2, int(spec["nav_threshold_px"])))
             changed["nav_threshold_px"] = cfg.nav_threshold_px
+        if "wall_zone_px" in spec and spec["wall_zone_px"] is not None:
+            cfg.wall_zone_px = min(60, max(0, int(spec["wall_zone_px"])))
+            changed["wall_zone_px"] = cfg.wall_zone_px
         if "dwell_weave" in spec:
             cfg.dwell_weave = bool(spec["dwell_weave"])
             changed["dwell_weave"] = cfg.dwell_weave
@@ -789,7 +792,7 @@ class BotHost:
             fj = dict(bot_cfg.get("flash_jump") or {})
             fj.update(changed["flash_jump"])
             bot_cfg["flash_jump"] = fj
-        for k in ("nav_threshold_px", "dwell_weave"):
+        for k in ("nav_threshold_px", "wall_zone_px", "dwell_weave"):
             if k in changed:
                 bot_cfg[k] = changed[k]
         self.config.bot = bot_cfg

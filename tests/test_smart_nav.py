@@ -223,17 +223,13 @@ class WeaveTests(unittest.TestCase):
         bot.effective_rotation = Mock(return_value=rot)
         return bot
 
-    def test_hop_weaves_attack_between_jumps(self):
+    def test_hop_weaves_attack_after_flash_jump(self):
         bot = self._bot((50, 50))
-        bot.dwell_weave_tick = bot._weave_attack
         bot._weave_attack()
-        # jump → attack mid-air → jump (FJ re-press), direction released.
+        # jump → jump (FJ triggers) → attack. An attack between the two
+        # jump presses eats the FJ input window.
         presses = bot.hid.presses
-        self.assertEqual(presses.count("space"), 2)
-        self.assertIn("a", presses)
-        self.assertEqual(
-            presses.index("a"), presses.index("space") + 1
-        )  # attack lands between the two jump presses
+        self.assertEqual(presses, ["space", "space", "a"])
         self.assertTrue(bot.hid.downs)         # a direction was held
         self.assertEqual(len(bot.hid.ups), len(bot.hid.downs))  # released
 
@@ -241,6 +237,28 @@ class WeaveTests(unittest.TestCase):
         bot = self._bot((88, 50), bounds=(10, 90))  # at right edge
         bot._weave_dir = "right"
         bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "left")
+
+    def test_wall_zone_forces_inward_facing(self):
+        bot = self._bot((8, 50), bounds=(10, 90))   # inside left wall zone
+        bot._weave_dir = "left"
+        bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "right")
+        self.assertEqual(bot.hid.downs, ["right"])
+        # right edge — even if platform bounds say "right is fine"
+        bot = self._bot((195, 50), bounds=(10, 199))
+        bot._weave_dir = "right"
+        bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "left")
+
+    def test_wall_zone_disabled_at_zero(self):
+        # x=12 would be inside the default 16px zone — with it disabled,
+        # direction stays on the platform-bounds/random logic only.
+        bot = self._bot((12, 50), bounds=(0, 100))
+        bot.config.wall_zone_px = 0
+        bot._weave_dir = "left"
+        with patch("random.random", return_value=0.5):
+            bot._weave_attack()
         self.assertEqual(bot._weave_dir, "left")
 
     def test_marks_attack_used_for_cooldowns(self):

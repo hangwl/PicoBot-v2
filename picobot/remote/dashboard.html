@@ -183,9 +183,10 @@
       </div>
       <div class="row">
         <label>nav radius</label><input id="mkNavR" type="number" min="2" max="15" step="1" style="width:52px">
+        <label>wall zone</label><input id="mkWallZ" type="number" min="0" max="60" step="1" style="width:52px">
         <label><input id="mkWeave" type="checkbox"> weave at anchors</label>
       </div>
-      <div style="margin-top:6px"><label>jump = jump/down-jump key · rope lift = up-jump skill, 3s cooldown (blank = jump+up+jump combo) · FJ on = flash-jump with the jump key (press jump again mid-air) · nav radius = px tolerance for "arrived" · weave = keep moving + attacking at anchors instead of standing still. Saves instantly.</label></div>
+      <div style="margin-top:6px"><label>jump = jump/down-jump key · rope lift = up-jump skill, 3s cooldown (blank = jump+up+jump combo) · FJ on = flash-jump with the jump key (press jump again mid-air) · nav radius = px tolerance for "arrived" · wall zone = px margin at map edges that forces an inward facing (no wall-banging) · weave = keep moving + attacking at anchors instead of standing still. Saves instantly.</label></div>
     </details>
     <details class="panel">
       <summary>Skills</summary>
@@ -332,6 +333,8 @@ ws.onmessage = e => {
     $("mkFjOn").checked = c.flash_jump_enabled !== false;
     if (document.activeElement !== $("mkNavR"))
       $("mkNavR").value = c.nav_threshold_px ?? "";
+    if (document.activeElement !== $("mkWallZ"))
+      $("mkWallZ").value = c.wall_zone_px ?? "";
     $("mkWeave").checked = c.dwell_weave !== false;
     if (c.view_fps != null && document.activeElement !== $("fpsSel"))
       $("fpsSel").value = String(Math.round(c.view_fps));
@@ -347,10 +350,11 @@ function sendMoveKeys() {
     flash_jump_key: "",
     flash_jump_enabled: $("mkFjOn").checked,
     nav_threshold_px: parseInt($("mkNavR").value, 10) || undefined,
+    wall_zone_px: parseInt($("mkWallZ").value, 10) ?? undefined,
     dwell_weave: $("mkWeave").checked,
   }));
 }
-["mkJump", "mkRope", "mkNavR"].forEach(id =>
+["mkJump", "mkRope", "mkNavR", "mkWallZ"].forEach(id =>
   $(id).addEventListener("change", sendMoveKeys));
 ["mkFjOn", "mkWeave"].forEach(id =>
   $(id).addEventListener("change", sendMoveKeys));

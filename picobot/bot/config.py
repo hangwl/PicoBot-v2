@@ -53,6 +53,7 @@ class BotConfig:
     dwell_weave: bool = True              # move + weave attacks at anchors
     weave_range_px: int = 24              # fallback half-width around the anchor
     weave_edge_margin_px: int = 4         # stay this far inside platform bounds
+    wall_zone_px: int = 16                # force inward dir inside this edge zone
 
     # -- Vision ----------------------------------------------------------------
     minimap_colors: MinimapColors = field(default_factory=MinimapColors)
@@ -113,7 +114,8 @@ class BotConfig:
             if name in data:
                 setattr(cfg, name, float(data[name]))
         ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px",
-                "marker_inset_px", "weave_range_px", "weave_edge_margin_px")
+                "marker_inset_px", "weave_range_px", "weave_edge_margin_px",
+                "wall_zone_px")
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))
