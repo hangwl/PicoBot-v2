@@ -288,6 +288,34 @@ class HostCommandTests(unittest.TestCase):
         self.host._feed = feed
         self.assertEqual(self.host._layout_source(), "stored")
 
+    def test_cal_finish_blank_name_uses_resolved_map(self):
+        cal = Mock()
+        cal.finish = Mock(side_effect=lambda n, **kw: MapEntry(name=n))
+        self.host.calibrator = cal
+        feed = Mock()
+        feed.minimap_img.return_value = None
+        feed.name_img.return_value = None
+        feed.minimap.region = (0, 0, 100, 100)
+        self.host._feed = feed
+        self.host._active_map_override = "detected_map"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="detected_map"))
+            self.host._cal_finish("")
+            self.assertEqual(MapStore(tmp).names(), ["detected_map"])
+        self.assertEqual(cal.finish.call_args[0][0], "detected_map")
+
+    def test_cal_finish_explicit_name_wins(self):
+        cal = Mock()
+        cal.finish = Mock(side_effect=lambda n, **kw: MapEntry(name=n))
+        self.host.calibrator = cal
+        self.host._get_feed = Mock(return_value=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host._cal_finish("my_map")
+            self.assertEqual(MapStore(tmp).names(), ["my_map"])
+        self.assertEqual(cal.finish.call_args[0][0], "my_map")
+
     def test_serial_auto_probes_then_connects(self):
         done = []
         with patch(

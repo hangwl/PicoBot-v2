@@ -468,8 +468,8 @@ class BotHost:
             if self.calibrator:
                 self.calibrator.mark()
         elif msg.startswith("cal|finish"):
-            name = msg.split("|", 2)[2] if msg.count("|") >= 2 else "unnamed"
-            self._cal_finish(name or "unnamed")
+            name = msg.split("|", 2)[2] if msg.count("|") >= 2 else ""
+            self._cal_finish(name)
         elif msg == "cal|cancel":
             if self.calibrator:
                 self.calibrator.stop()
@@ -626,6 +626,16 @@ class BotHost:
     def _cal_finish(self, name: str) -> None:
         if not self.calibrator:
             return
+        if not name:
+            # Blank = save onto the currently resolved map; fall back to
+            # the OCR'd title, then 'unnamed'.
+            resolved = self._resolved_map_entry()
+            name = (
+                resolved.name
+                if resolved is not None
+                else (self._idle_title() or "unnamed")
+            )
+            self.bus.emit("cal", f"auto-named map: {name}")
         feed = self._get_feed()
         fp = None
         map_name = None

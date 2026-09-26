@@ -122,7 +122,7 @@
     <div class="panel">
       <h3>Calibrate</h3>
       <div class="row">
-        <input id="calName" placeholder="map name" size="12">
+        <input id="calName" placeholder="map name (blank = auto)" size="16">
       </div>
       <div class="row" style="margin-top:8px">
         <button id="calStart">Record</button>
@@ -284,7 +284,7 @@ $("connRefresh").onclick = () => send("host|state");
 $("calStart").onclick = () => { calActive = true; send("cal|start"); };
 $("calMark").onclick = () => send("cal|mark");
 $("calFinish").onclick = () => {
-  send("cal|finish|" + ($("calName").value || "unnamed")); calActive = false;
+  send("cal|finish|" + $("calName").value); calActive = false;
 };
 $("calCancel").onclick = () => { send("cal|cancel"); calActive = false; };
 
