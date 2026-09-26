@@ -304,6 +304,16 @@ class BotHost:
 
     def _provide_frame(self, mode: str):
         bot = self.bot
+        if mode == "title":
+            feed = self._get_feed()
+            if feed is None:
+                return None
+            if feed.name_region() is None:
+                feed.minimap_img()  # force locate so the region resolves
+            img = feed.name_img()
+            if img is None:
+                return {"state": "IDLE"}
+            return {"img": img, "title": self._idle_title()}
         if mode == "window":
             if bot is not None:
                 img = bot._window_capture()
@@ -350,10 +360,8 @@ class BotHost:
         elif msg == "cal|cancel":
             if self.calibrator:
                 self.calibrator.stop()
-        elif msg == "dash|view|window":
-            self.streamer.set_mode("window")
-        elif msg == "dash|view|minimap":
-            self.streamer.set_mode("minimap")
+        elif msg.startswith("dash|view|"):
+            self.streamer.set_mode(msg.split("|", 2)[2])
         elif msg == "events|history":
             self._send_history()
         elif msg == "config|get":

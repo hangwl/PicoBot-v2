@@ -96,6 +96,7 @@
       <div class="row" style="margin-top:8px">
         <button id="vMin">Minimap</button>
         <button id="vWin">Window</button>
+        <button id="vTitle">Title</button>
       </div>
     </div>
     <div class="panel">
@@ -262,6 +263,7 @@ $("startBot").onclick = () => send("bot|start");
 $("stopBot").onclick = () => send("bot|stop");
 $("vMin").onclick = () => send("dash|view|minimap");
 $("vWin").onclick = () => send("dash|view|window");
+$("vTitle").onclick = () => send("dash|view|title");
 $("mapSel").onchange = e => send("map|set|" + e.target.value);
 $("mapRefresh").onclick = () => send("map|list");
 $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.target.value); };

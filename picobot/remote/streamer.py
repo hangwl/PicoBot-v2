@@ -124,7 +124,7 @@ class FrameStreamer:
         self._thread = None
 
     def set_mode(self, mode: str) -> None:
-        if mode in ("minimap", "window"):
+        if mode in ("minimap", "window", "title"):
             self.mode = mode
 
     def _loop(self) -> None:

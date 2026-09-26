@@ -178,6 +178,30 @@ class HostCommandTests(unittest.TestCase):
         self.assertIsNone(self.host.serial_port)
         self.save_mock.assert_not_called()
 
+    def test_view_command_accepts_title(self):
+        self.assertTrue(self.host._handle_command("dash|view|title"))
+        self.assertEqual(self.host.streamer.mode, "title")
+
+    def test_title_mode_serves_name_strip(self):
+        img = np.zeros((20, 100, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.name_region.return_value = (0, 0, 100, 40)
+        feed.name_img.return_value = img
+        self.host._feed = feed
+        self.host.bot_config.name_ocr = False
+        snap = self.host._provide_frame("title")
+        self.assertIs(snap["img"], img)
+
+    def test_title_mode_forces_minimap_locate(self):
+        feed = Mock()
+        feed.name_region.return_value = None
+        feed.name_img.return_value = None
+        self.host._feed = feed
+        self.host.bot_config.name_ocr = False
+        snap = self.host._provide_frame("title")
+        feed.minimap_img.assert_called_once()
+        self.assertEqual(snap["state"], "IDLE")
+
     def test_host_state_payload(self):
         self.host._handle_command("host|state")
         self.assertTrue(self.sent)
