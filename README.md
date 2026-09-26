@@ -47,6 +47,11 @@ override the remembered values and are persisted the same way.
   the stream rate (persisted as `"view_fps"` in `config.json`, default 10;
   1–30 allowed — higher rates cost more CPU on captures + JPEG encode).
   Layout controls: *Save layout* / *Forget* / *Re-detect* / *Draw minimap*.
+  With the map field blank, *Save/Forget* only act when the live minimap
+  fingerprint verifies the map — a stale `active_map` pin can't redirect
+  a write to the wrong file. Typing a map name writes that file
+  explicitly (creating a stub if it doesn't exist yet) and refreshes its
+  fingerprint.
 - **Bot** — Start/Stop the smart bot.
 - **Calibrate** — Record → walk your rotation pressing *Mark anchor* at each
   farming spot → Save. The recorder derives walk/climb legs from your position

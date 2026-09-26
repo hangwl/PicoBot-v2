@@ -328,7 +328,65 @@ class BotHost:
             "no_rotation": not bool(rot.anchors),
         }
 
-    def _layout_save(self) -> None:
+    def _live_fingerprint(self, feed=None) -> Optional[str]:
+        """Ink fingerprint of the current minimap capture, or None."""
+        from .vision.minimap import fingerprint
+
+        feed = feed or self._get_feed()
+        img = feed.minimap_img() if feed is not None else None
+        if img is None:
+            return None
+        c = feed.minimap.colors
+        return fingerprint(
+            img,
+            ignore_colors=(c.player, c.other_player, c.rune),
+            include_colors=(c.ink or c.border,),
+        ) or None
+
+    def _layout_target(self, name: str):
+        """Which map file a layout write applies to, or (None, error).
+
+        Explicit ``name`` = the user asserts the identity — the file is
+        created if it doesn't exist yet (stub map). Blank = the entry
+        must be *verified* against the live screen: the running bot's
+        resolved map or a fingerprint match whose stored fingerprint
+        actually matches this frame. ``active_map`` is deliberately not
+        consulted — that pin is rotation scope, not evidence of which
+        map is on screen, and trusting it here wrote layouts into the
+        wrong file.
+        """
+        if name:
+            entry = self.maps.get(name)
+            if entry is None:
+                from .bot.maps import MapEntry
+
+                entry = MapEntry(name=name)
+            return entry, None
+        from .vision.minimap import fingerprint_distance
+
+        fp = self._live_fingerprint()
+        if not fp:
+            return None, "no minimap frame — can't verify the current map"
+        thresh = self.bot_config.map_match_threshold
+        cands = []
+        if self.bot is not None and self.bot._map is not None:
+            cands.append(self.bot._map)
+        cands.append(self.maps.match(fp, thresh))
+        seen = set()
+        for e in cands:
+            if e is None or id(e) in seen:
+                continue
+            seen.add(id(e))
+            if e.fingerprint and fingerprint_distance(
+                fp, e.fingerprint
+            ) <= thresh:
+                return e, None
+        return None, (
+            "no map verified — the current screen doesn't match any saved "
+            "map's fingerprint; type the map name to save anyway"
+        )
+
+    def _layout_save(self, name: str = "") -> None:
         bot = self.bot
         feed = self._get_feed()
         region = None
@@ -339,37 +397,19 @@ class BotHost:
         if not region:
             self.bus.emit("error", "no minimap layout detected to save")
             return
-        entry = self._resolved_map_entry()
+        entry, err = self._layout_target(name.strip())
         if entry is None:
-            if not self.maps.names():
-                self.bus.emit(
-                    "error", "no maps saved yet — Record a rotation first"
-                )
-            else:
-                self.bus.emit(
-                    "error", "no map resolved — fingerprint didn't match"
-                )
+            self.bus.emit("error", err)
             return
         entry.minimap_region = tuple(int(v) for v in region)
-        # The save is explicit confirmation that the current screen is
-        # this map — backfill a missing fingerprint too.
-        if not entry.fingerprint:
-            img = (
-                bot.minimap_frame()
-                if bot is not None
-                else feed.minimap_img() if feed is not None else None
-            )
-            if img is not None:
-                from .vision.minimap import fingerprint
-
-                mm = bot.minimap if bot is not None else feed.minimap
-                c = mm.colors
-                entry.fingerprint = fingerprint(
-                    img,
-                    ignore_colors=(c.player, c.other_player, c.rune),
-                    include_colors=(c.ink or c.border,),
-                ) or entry.fingerprint
+        # The save asserts "this screen is this map" — refresh the
+        # fingerprint too (backfills missing ones, repairs stale ones).
+        fp = self._live_fingerprint(feed)
+        if fp:
+            entry.fingerprint = fp
         self.maps.save(entry)
+        self.maps.reload()
+        self._send_maps()
         self.bus.emit(
             "map", f"layout saved for {entry.name}: {list(entry.minimap_region)}"
         )
@@ -421,13 +461,18 @@ class BotHost:
         save_config(self.config)
         self.bus.emit("vision", f"minimap region set: {list(rect)}")
 
-    def _layout_clear(self) -> None:
-        entry = self._resolved_map_entry()
-        if entry is None or not entry.minimap_region:
-            self.bus.emit("error", "resolved map has no stored layout")
+    def _layout_clear(self, name: str = "") -> None:
+        entry, err = self._layout_target(name.strip())
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        if not entry.minimap_region:
+            self.bus.emit("error", f"{entry.name} has no stored layout")
             return
         entry.minimap_region = None
         self.maps.save(entry)
+        self.maps.reload()
+        self._send_maps()
         self.bus.emit("map", f"layout cleared for {entry.name}")
 
     def _provide_frame(self, mode: str):
@@ -491,10 +536,10 @@ class BotHost:
             self.streamer.set_mode(msg.split("|", 2)[2])
         elif msg.startswith("dash|fps|"):
             self._fps_set(msg.split("|", 2)[2])
-        elif msg == "layout|save":
-            self._layout_save()
-        elif msg == "layout|clear":
-            self._layout_clear()
+        elif msg == "layout|save" or msg.startswith("layout|save|"):
+            self._layout_save(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
+        elif msg == "layout|clear" or msg.startswith("layout|clear|"):
+            self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg == "layout|reset":
             self._layout_reset()
         elif msg.startswith("layout|region|"):

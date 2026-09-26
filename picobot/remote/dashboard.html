@@ -125,6 +125,8 @@
         <button id="layoutSave">Save layout</button>
         <button id="layoutClear">Forget</button>
         <button id="layoutReset">Re-detect</button>
+        <input id="layName" placeholder="map (blank=auto)" size="11"
+          title="blank = verified map only; type a name to save/clear that map's layout explicitly">
       </div>
       <div class="row" style="margin-top:8px">
         <button id="drawMinimap">Draw minimap</button>
@@ -432,8 +434,12 @@ $("stopBot").onclick = () => send("bot|stop");
 $("vMin").onclick = () => send("dash|view|minimap");
 $("vWin").onclick = () => send("dash|view|window");
 $("fpsSel").onchange = () => send("dash|fps|" + $("fpsSel").value);
-$("layoutSave").onclick = () => send("layout|save");
-$("layoutClear").onclick = () => send("layout|clear");
+const layTarget = () => {
+  const n = $("layName").value.trim();
+  return n ? "|" + n : "";
+};
+$("layoutSave").onclick = () => send("layout|save" + layTarget());
+$("layoutClear").onclick = () => send("layout|clear" + layTarget());
 $("layoutReset").onclick = () => send("layout|reset");
 
 // --- Drag-to-draw regions on the Window view ---------------------------
