@@ -64,11 +64,21 @@ def _vline(img: np.ndarray, x: int, color) -> None:
         img[::3, x] = color
 
 
+def _hline(img: np.ndarray, y: int, color) -> None:
+    """Dashed horizontal line — floor boundary."""
+    h, w = img.shape[:2]
+    if 0 <= y < h:
+        img[y, ::3] = color
+
+
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
     for x in meta.get("walls") or []:
         _vline(out, int(x), (60, 60, 255))                   # dashed red walls
+    floor = meta.get("floor")
+    if floor is not None:
+        _hline(out, int(floor), (60, 60, 255))               # dashed red floor
     for x, y in meta.get("anchors") or []:
         _box(out, int(x), int(y), 3, (255, 128, 0))      # blue anchors
     pos = meta.get("player")
@@ -152,7 +162,7 @@ class FrameStreamer:
                     }
                     for key in (
                         "state", "map", "hazard", "player",
-                        "layout", "no_rotation",
+                        "layout", "no_rotation", "patrol",
                     ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]

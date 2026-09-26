@@ -47,9 +47,10 @@ class MapEntry:
     fingerprint: Optional[str] = None
     map_name: Optional[str] = None   # optional label (legacy OCR field)
     minimap_region: Optional[tuple] = None  # remembered (x, y, w, h) layout
-    # Optional per-map walls (normalized x fractions): player left of
+    # Optional per-map boundaries (normalized fractions): player left of
     # "left" must face right, right of "right" must face left — for maps
-    # whose play area doesn't span the minimap edge-to-edge.
+    # whose play area doesn't span the minimap edge-to-edge. "floor" is
+    # a normalized y: at/below it, no downward movement is attempted.
     walls: Optional[dict] = None
     path: Optional[Path] = None
 
@@ -85,7 +86,7 @@ class MapEntry:
         raw_walls = data.get("walls")
         if isinstance(raw_walls, dict):
             walls = {}
-            for side in ("left", "right"):
+            for side in ("left", "right", "floor"):
                 v = raw_walls.get(side)
                 if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.5:
                     walls[side] = float(v)

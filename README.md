@@ -129,7 +129,16 @@ you verified in the dashboard carries over to the bot at Start:
   stand at the left/right wall and press **L wall** / **R wall** in the
   View panel — the boundary is stored on that map (normalized x), drawn
   as a dashed red line, and overrides `wall_zone_px` on that side.
-  **Clear** removes both; the map field targets a different map.
+  **Floor** does the same vertically: stand on the bottom platform and
+  the bot stops attempting down-jumps at/below it. **Clear** removes
+  all boundaries; the map field targets a different map.
+- **Patrol mode** (`"patrol": true` on a map's rotation, or the
+  **patrol anchors** checkbox): anchors become checkpoints — instead of
+  parking at one, the dwell weaves *toward the next anchor* and advances
+  on arrival. A 2-anchor map becomes a continuous back-and-forth patrol;
+  legs are only used when the next checkpoint sits on another level.
+  Anchor precision matters less in patrol mode — only the heading (x)
+  and same-level check (y) are used, not a pixel-exact servo target.
 
 ## Bot configuration
 

@@ -81,6 +81,7 @@ class SmartBot(BotBase):
         self._last_up_skill = 0.0
         self._weave_dir: Optional[str] = None
         self._weave_bounds: Optional[Tuple[int, int]] = None
+        self._patrol_target: Optional[int] = None
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
@@ -383,9 +384,21 @@ class SmartBot(BotBase):
         self.sleep(0.3)
         return True
 
-    def down_jump(self) -> None:
+    def _floor_px(self) -> Optional[int]:
+        """Resolved per-map floor y, or None when no floor is set."""
+        walls = self._map.walls if self._map is not None else None
+        if walls and walls.get("floor") is not None:
+            return self._ry(walls["floor"])
+        return None
+
+    def down_jump(self, img=None) -> None:
         if not self.is_window_focused():
             return
+        floor = self._floor_px()
+        if floor is not None:
+            pos = self.player_pos(img)
+            if pos is not None and pos[1] >= floor - 2:
+                return  # bottom of the map — nothing to drop through
         self.hid.key_down("down")
         self.hid.press(self.config.jump_key)
         self.sleep(0.1)
@@ -521,6 +534,11 @@ class SmartBot(BotBase):
                         vert_ref = cy
                         last_vert_jump = now
                     elif dy > threshold and now - last_vert_jump >= 0.9:
+                        floor = self._floor_px()
+                        if floor is not None and cy >= floor - 2:
+                            # Bottom of the map — the target is below the
+                            # lowest platform; verdict now, no keypresses.
+                            return vert_stuck("descend")
                         vert_fails = (
                             vert_fails + 1
                             if vert_ref is not None and cy <= vert_ref + 1
@@ -530,7 +548,7 @@ class SmartBot(BotBase):
                         last_vert_jump = now
                         if vert_fails >= 2:
                             return vert_stuck("descend")
-                        self.down_jump()
+                        self.down_jump(img)
                     else:
                         self.sleep(0.05)
                 elif flash_ok and (
@@ -647,7 +665,12 @@ class SmartBot(BotBase):
             self._anchor_idx = 0
             self._rotation_started = False
         self._leg_fp = self.minimap_fingerprint()
-        if not self._rotation_started:
+        if self._travel_target is not None:
+            # Preset by a patrol level-change handoff — the anchor
+            # sequence already advanced when the target was picked.
+            target = self._travel_target
+            self._rotation_started = True
+        elif not self._rotation_started:
             # First leg: head for the nearest anchor, not blindly #0.
             pos = self.player_pos()
             if pos is not None:
@@ -715,6 +738,7 @@ class SmartBot(BotBase):
         now = time.time()
         self._weave_dir = None
         self._weave_bounds = None
+        self._patrol_target = None
         if rot.anchors and self._anchor_idx < len(rot.anchors):
             anchor = rot.anchors[self._anchor_idx]
             if anchor.face:
@@ -756,7 +780,9 @@ class SmartBot(BotBase):
                 break
             if self._use_skill(buff):
                 self.sleep(jittered(0.6))
-        if self.config.dwell_weave:
+        if self.effective_rotation().patrol:
+            self._patrol_tick()
+        elif self.config.dwell_weave:
             self._weave_attack()
         else:
             self._attack_once()
@@ -820,6 +846,15 @@ class SmartBot(BotBase):
             elif random.random() < 0.06:
                 direction = "left" if direction == "right" else "right"
         self._weave_dir = direction
+        self._weave_hop(direction)
+
+    def _weave_hop(self, direction: str) -> None:
+        """Hold ``direction`` through one jump→FJ→attack weave.
+
+        Bounded inside the call (keys released before return) so a hazard
+        pause can't leave a direction held.
+        """
+        cfg = self.config
         skill = self._pick_attack()
         self.hid.key_down(direction)
         try:
@@ -839,6 +874,76 @@ class SmartBot(BotBase):
                 self.sleep(random.uniform(0.3, 0.5))
         finally:
             self.hid.key_up(direction)
+
+    def _patrol_tick(self) -> None:
+        """Checkpoint patrol: weave toward the *next* anchor instead of
+        parking — anchors are waypoints, not destinations. On arrival the
+        checkpoint's on_arrive fires and the heading advances; when the
+        next checkpoint sits on another level the dwell hands off to the
+        recorded leg for the vertical part."""
+        rot = self.effective_rotation()
+        if len(rot.anchors) < 2:
+            self._weave_attack()
+            return
+        cfg = self.config
+        if self._patrol_target is None or self._patrol_target == self._anchor_idx:
+            self._patrol_target, self._pingpong_dir = rot.next_index(
+                self._anchor_idx, self._pingpong_dir
+            )
+        target = rot.anchors[self._patrol_target]
+        tx, ty = self._rx(target.x), self._ry(target.y)
+        img = self.minimap_frame()
+        pos = self.minimap.player_pos(img) if img is not None else None
+        self.viz["player"] = pos
+        if pos is None:
+            self.sleep(0.2)
+            return
+        level_band = max(8, cfg.nav_threshold_px * 2)
+        if abs(ty - pos[1]) > level_band:
+            # Different level — the leg (climb/drop) owns this transition.
+            self._travel_target = self._patrol_target
+            self._patrol_target = None
+            self._dwell_end = time.time()
+            return
+        if abs(tx - pos[0]) <= cfg.nav_threshold_px:
+            # Checkpoint reached — fire its arrival skills and head on.
+            self._anchor_idx = self._patrol_target
+            self._patrol_target = None
+            now = time.time()
+            self._arrive_pending = [
+                (s, now + s.wait_on_arrival)
+                for name in target.on_arrive
+                if (s := self.skills.get(name)) is not None
+            ]
+            if target.face:
+                self.hid.press(target.face)
+            self.log(f"Checkpoint: {target.name}")
+            return
+        # Head toward the checkpoint; walls still override the heading.
+        dx = tx - pos[0]
+        direction = self._weave_dir or ("right" if dx >= 0 else "left")
+        walls = self._map.walls if self._map is not None else None
+        map_w = self._region_wh()[0]
+        left_wall = (
+            self._rx(walls["left"])
+            if walls and walls.get("left") is not None
+            else cfg.wall_zone_px
+        )
+        right_wall = (
+            self._rx(walls["right"])
+            if walls and walls.get("right") is not None
+            else map_w - cfg.wall_zone_px
+        )
+        if pos[0] <= left_wall:
+            direction = "right"
+        elif pos[0] >= right_wall:
+            direction = "left"
+        elif dx > cfg.nav_threshold_px:
+            direction = "right"
+        elif dx < -cfg.nav_threshold_px:
+            direction = "left"
+        self._weave_dir = direction
+        self._weave_hop(direction)
 
     def _attack_once(self) -> None:
         """Stationary single attack tick (legacy dwell path)."""

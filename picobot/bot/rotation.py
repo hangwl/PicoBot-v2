@@ -17,6 +17,8 @@ Config shape (inside ``"rotation"`` in config.json or a map file)::
       "rest_chance": 0.02,          // occasional idle stretch per dwell
       "wander_chance": 0.05,        // occasional detour after a leg
       "travel_style": "mixed",      // walk | flash | mixed (default leg style)
+      "patrol": false,              // anchors as checkpoints: weave toward
+                                    // the next one instead of parking
       "anchors": [
         {"name": "west", "pos": [0.31, 0.55], "dwell": [8, 14],
          "on_arrive": ["fountain"], "face": "left"}
@@ -164,6 +166,10 @@ class Rotation:
     rest_chance: float = 0.02
     wander_chance: float = 0.05
     travel_style: str = "mixed"
+    # Checkpoints instead of parking spots: the dwell weaves toward the
+    # next anchor and advances on arrival rather than waiting out a
+    # dwell timer — a 2-anchor map becomes a back-and-forth patrol.
+    patrol: bool = False
 
     # -- Traversal -----------------------------------------------------------
     def next_index(self, current: int, direction: int = 1) -> Tuple[int, int]:
@@ -218,6 +224,7 @@ class Rotation:
             rest_chance=float(data.get("rest_chance", 0.02)),
             wander_chance=float(data.get("wander_chance", 0.05)),
             travel_style=travel_style,
+            patrol=bool(data.get("patrol", False)),
         )
 
     def to_dict(self) -> dict:
@@ -227,6 +234,7 @@ class Rotation:
             "rest_chance": self.rest_chance,
             "wander_chance": self.wander_chance,
             "travel_style": self.travel_style,
+            "patrol": self.patrol,
             "anchors": [a.to_dict() for a in self.anchors],
             "legs": [
                 {"from": f, "to": t, "steps": [s.to_dict() for s in steps]}

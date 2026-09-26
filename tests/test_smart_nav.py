@@ -45,6 +45,7 @@ def _bot(positions, target=(50, 50), threshold=4, stuck_limit=40):
     bot.config.flash_jump_enabled = False
     bot.hid = FakeHid()
     bot.minimap = Mock()
+    bot.minimap.region = (0, 0, 200, 150)
     seq = list(positions)
     bot.minimap.player_pos = Mock(
         side_effect=lambda img: seq.pop(0) if len(seq) > 1 else seq[0]
@@ -61,6 +62,7 @@ def _bot(positions, target=(50, 50), threshold=4, stuck_limit=40):
     bot.up_jump = Mock()
     bot.down_jump = Mock()
     bot.viz = {"target": None}
+    bot._map = None
     bot._target = target
     return bot
 
@@ -142,6 +144,64 @@ class VerticalStuckTests(unittest.TestCase):
         self.assertEqual(bot.up_jump.call_count, 2)
 
 
+class FloorZoneTests(unittest.TestCase):
+    """A per-map floor (walls.floor) suppresses downward movement at the
+    bottom platform — no Down-jumps against solid ground."""
+
+    def test_nav_verdict_without_keypresses_at_floor(self):
+        # floor y = 0.8*150 = 120; player pinned at 120, target at 140.
+        from picobot.bot.maps import MapEntry
+
+        bot = _bot([(20, 120)] * 10, target=(20, 140))
+        bot._map = MapEntry(name="m", walls={"floor": 0.8})
+        with patch("time.time", side_effect=iter(range(1, 10000))):
+            self.assertTrue(_drive(bot))     # aligned → accept
+        bot.down_jump.assert_not_called()
+
+    def test_nav_floor_aborts_when_misaligned(self):
+        from picobot.bot.maps import MapEntry
+
+        bot = _bot([(20, 120)] * 10, target=(60, 140))
+        bot._map = MapEntry(name="m", walls={"floor": 0.8})
+        with patch("time.time", side_effect=iter(range(1, 10000))):
+            self.assertFalse(_drive(bot))
+        bot.down_jump.assert_not_called()
+
+    def test_down_jump_skipped_at_floor(self):
+        from picobot.bot.maps import MapEntry
+
+        bot = SmartBot.__new__(SmartBot)
+        bot.config = BotConfig()
+        bot.config.jump_key = "space"
+        bot.hid = FakeHid()
+        bot.is_window_focused = Mock(return_value=True)
+        bot.sleep = Mock(return_value=False)
+        bot._map = MapEntry(name="m", walls={"floor": 0.8})
+        bot.minimap = Mock()
+        bot.minimap.region = (0, 0, 200, 150)
+        bot.player_pos = Mock(return_value=(50, 122))  # at/below floor
+        bot.down_jump()
+        self.assertEqual(bot.hid.presses, [])
+        # Above the floor — drops normally.
+        bot.player_pos = Mock(return_value=(50, 60))
+        bot.down_jump()
+        self.assertEqual(bot.hid.presses, ["space"])
+
+    def test_down_jump_normal_without_floor(self):
+        bot = SmartBot.__new__(SmartBot)
+        bot.config = BotConfig()
+        bot.config.jump_key = "space"
+        bot.hid = FakeHid()
+        bot.is_window_focused = Mock(return_value=True)
+        bot.sleep = Mock(return_value=False)
+        bot._map = None
+        bot.minimap = Mock()
+        bot.minimap.region = (0, 0, 200, 150)
+        bot.player_pos = Mock(return_value=(50, 140))
+        bot.down_jump()
+        self.assertEqual(bot.hid.presses, ["space"])
+
+
 class RopeLiftCooldownTests(unittest.TestCase):
     """up_jump with a skill key must respect the 3s skill cooldown."""
 
@@ -192,10 +252,7 @@ class RopeLiftCooldownTests(unittest.TestCase):
         bot.up_jump.assert_called()             # kept retrying the skill
 
 
-class WeaveTests(unittest.TestCase):
-    """dwell_weave: hop across the anchor's platform, attack mid-air."""
-
-    def _bot(self, pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
+def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot = SmartBot.__new__(SmartBot)
         bot.config = BotConfig()
         bot.config.dwell_weave = True
@@ -218,13 +275,22 @@ class WeaveTests(unittest.TestCase):
         bot._anchor_idx = 0
         bot._weave_dir = None
         bot._weave_bounds = None
+        bot._patrol_target = None
+        bot._pingpong_dir = 1
+        bot._travel_target = None
+        bot._dwell_end = 0.0
+        bot._arrive_pending = []
         bot.viz = {"player": None, "target": None}
         rot = Rotation(anchors=[Anchor("a0", *anchor_xy)])
         bot.effective_rotation = Mock(return_value=rot)
         return bot
 
+
+class WeaveTests(unittest.TestCase):
+    """dwell_weave: hop across the anchor's platform, attack mid-air."""
+
     def test_hop_weaves_attack_after_flash_jump(self):
-        bot = self._bot((50, 50))
+        bot = _weave_bot((50, 50))
         bot._weave_attack()
         # jump → jump (FJ triggers) → attack. An attack between the two
         # jump presses eats the FJ input window.
@@ -234,19 +300,19 @@ class WeaveTests(unittest.TestCase):
         self.assertEqual(len(bot.hid.ups), len(bot.hid.downs))  # released
 
     def test_edge_of_platform_flips_inward(self):
-        bot = self._bot((88, 50), bounds=(10, 90))  # at right edge
+        bot = _weave_bot((88, 50), bounds=(10, 90))  # at right edge
         bot._weave_dir = "right"
         bot._weave_attack()
         self.assertEqual(bot._weave_dir, "left")
 
     def test_wall_zone_forces_inward_facing(self):
-        bot = self._bot((8, 50), bounds=(10, 90))   # inside left wall zone
+        bot = _weave_bot((8, 50), bounds=(10, 90))   # inside left wall zone
         bot._weave_dir = "left"
         bot._weave_attack()
         self.assertEqual(bot._weave_dir, "right")
         self.assertEqual(bot.hid.downs, ["right"])
         # right edge — even if platform bounds say "right is fine"
-        bot = self._bot((195, 50), bounds=(10, 199))
+        bot = _weave_bot((195, 50), bounds=(10, 199))
         bot._weave_dir = "right"
         bot._weave_attack()
         self.assertEqual(bot._weave_dir, "left")
@@ -254,7 +320,7 @@ class WeaveTests(unittest.TestCase):
     def test_wall_zone_disabled_at_zero(self):
         # x=12 would be inside the default 16px zone — with it disabled,
         # direction stays on the platform-bounds/random logic only.
-        bot = self._bot((12, 50), bounds=(0, 100))
+        bot = _weave_bot((12, 50), bounds=(0, 100))
         bot.config.wall_zone_px = 0
         bot._weave_dir = "left"
         with patch("random.random", return_value=0.5):
@@ -268,14 +334,14 @@ class WeaveTests(unittest.TestCase):
 
         # Left wall at x=60 (0.3 * 200): pos x=55 is outside the global
         # 16px edge zone but inside the wall — must face right.
-        bot = self._bot((55, 50), bounds=(0, 150))
+        bot = _weave_bot((55, 50), bounds=(0, 150))
         bot._map = MapEntry(name="m", walls={"left": 0.3})
         bot._weave_dir = "left"
         with patch("random.random", return_value=0.5):
             bot._weave_attack()
         self.assertEqual(bot._weave_dir, "right")
         # Inside the wall on the right side: normal platform logic.
-        bot = self._bot((80, 50), bounds=(0, 150))
+        bot = _weave_bot((80, 50), bounds=(0, 150))
         bot._map = MapEntry(name="m", walls={"left": 0.3})
         bot._weave_dir = "right"
         with patch("random.random", return_value=0.5):
@@ -286,7 +352,7 @@ class WeaveTests(unittest.TestCase):
         from picobot.bot.maps import MapEntry
 
         # Right wall at x=150 (0.75 * 200): pos x=160 must face left.
-        bot = self._bot((160, 50), bounds=(0, 199))
+        bot = _weave_bot((160, 50), bounds=(0, 199))
         bot._map = MapEntry(name="m", walls={"right": 0.75})
         bot._weave_dir = "right"
         with patch("random.random", return_value=0.5):
@@ -295,7 +361,7 @@ class WeaveTests(unittest.TestCase):
 
     def test_marks_attack_used_for_cooldowns(self):
         from picobot.bot.skills import Skill, SkillBook
-        bot = self._bot((50, 50))
+        bot = _weave_bot((50, 50))
         bot.skills = SkillBook({"burst": Skill("burst", "s", 30.0)})
         bot._weave_attack()
         self.assertFalse(bot.skills.ready("burst"))  # cooldown now tracked
@@ -304,11 +370,89 @@ class WeaveTests(unittest.TestCase):
         # Regression: _attack_cycle pressed without mark_used, so any
         # cooldown>0 attack stayed permanently "ready".
         from picobot.bot.skills import Skill, SkillBook
-        bot = self._bot((50, 50))
+        bot = _weave_bot((50, 50))
         bot.config.dwell_weave = False
         bot.skills = SkillBook({"burst": Skill("burst", "s", 30.0)})
         bot._attack_cycle()
         self.assertFalse(bot.skills.ready("burst"))
+
+
+class PatrolTests(unittest.TestCase):
+    """Patrol mode: anchors are checkpoints — weave toward the next one
+    and advance on arrival instead of standing at a dwell spot."""
+
+    def _bot(self, pos, rot):
+        bot = _weave_bot(pos)
+        bot._rest_until = 0.0
+        bot.effective_rotation = Mock(return_value=rot)
+        return bot
+
+    def _rot(self, patrol=True, y=0.33):
+        a0 = Anchor("a0", 0.25, y)
+        a1 = Anchor("a1", 0.75, y)
+        return Rotation(anchors=[a0, a1], patrol=patrol)
+
+    def test_heads_toward_next_anchor_weaving(self):
+        bot = self._bot((60, 50), self._rot())
+        bot._patrol_tick()
+        # Jump → FJ re-press → attack, direction held toward anchor 1.
+        self.assertEqual(bot.hid.presses, ["space", "space", "a"])
+        self.assertEqual(bot.hid.downs, ["right"])
+        self.assertEqual(bot._anchor_idx, 0)
+        self.assertEqual(bot._patrol_target, 1)
+
+    def test_checkpoint_arrival_advances_and_arms_on_arrive(self):
+        rot = self._rot()
+        rot.anchors[1].on_arrive = ("main",)
+        bot = self._bot((148, 50), rot)   # within nav_threshold of x=150
+        bot._patrol_tick()
+        self.assertEqual(bot._anchor_idx, 1)
+        self.assertIsNone(bot._patrol_target)
+        self.assertEqual(bot.hid.presses, [])   # arrival tick: no hop
+        self.assertEqual(len(bot._arrive_pending), 1)
+
+    def test_level_change_hands_off_to_travel(self):
+        # Next checkpoint on another level → preset _travel_target and
+        # end the dwell so TRAVEL runs the recorded leg.
+        rot = Rotation(
+            anchors=[Anchor("a0", 0.25, 0.33), Anchor("a1", 0.75, 0.05)],
+            patrol=True,
+        )
+        bot = self._bot((60, 50), rot)
+        bot._dwell_end = 9999.0
+        bot._patrol_tick()
+        self.assertEqual(bot._travel_target, 1)
+        self.assertIsNone(bot._patrol_target)
+        self.assertTrue(bot.dwell_done())
+
+    def test_wall_overrides_checkpoint_heading(self):
+        # Heading left toward a0, but inside the left wall → face right.
+        from picobot.bot.maps import MapEntry
+
+        bot = self._bot((70, 50), self._rot())
+        bot._map = MapEntry(name="m", walls={"left": 0.4})  # wall x=80
+        bot._anchor_idx = 1                  # next → a0 (x=50), dx=-20
+        bot._patrol_tick()
+        self.assertEqual(bot._weave_dir, "right")
+        self.assertEqual(bot.hid.downs, ["right"])
+
+    def test_single_anchor_falls_back_to_weave(self):
+        bot = self._bot((50, 50), Rotation(
+            anchors=[Anchor("a0", 0.5, 0.33)], patrol=True
+        ))
+        bot._patrol_tick()
+        self.assertEqual(bot.hid.presses, ["space", "space", "a"])
+
+    def test_dwell_dispatches_to_patrol(self):
+        bot = self._bot((60, 50), self._rot())
+        bot._patrol_tick = Mock()
+        bot.dwell_tick()
+        bot._patrol_tick.assert_called_once()
+
+    def test_patrol_roundtrip(self):
+        rot = self._rot()
+        self.assertTrue(Rotation.from_dict(rot.to_dict()).patrol)
+        self.assertFalse(Rotation.from_dict({}).patrol)
 
 
 class TargetSnapTests(unittest.TestCase):

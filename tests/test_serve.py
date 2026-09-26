@@ -313,6 +313,35 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|wall|left")
             self.assertIsNone(MapStore(tmp).get("m1").walls)
 
+    def test_floor_set_at_player_y(self):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        feed.minimap.player_pos.return_value = (50, 120)
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.assertTrue(
+                self.host._handle_command("layout|wall|floor|m1")
+            )
+            saved = MapStore(tmp).get("m1")
+            self.assertEqual(saved.walls, {"floor": 0.8})
+
+    def test_patrol_toggle_writes_map_rotation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.assertTrue(
+                self.host._handle_command("layout|patrol|on|m1")
+            )
+            self.assertTrue(MapStore(tmp).get("m1").rotation.patrol)
+            self.assertTrue(
+                self.host._handle_command("layout|patrol|off|m1")
+            )
+            self.assertFalse(MapStore(tmp).get("m1").rotation.patrol)
+
     def test_layout_save_verifies_fingerprint_match(self):
         # Auto path succeeds when the stored fingerprint matches live.
         feed = Mock()

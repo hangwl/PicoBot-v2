@@ -323,7 +323,7 @@ class BotHost:
         else:
             entry = self._resolved_map_cached()
             rot = entry.rotation if entry else self.bot_config.rotation
-        walls = None
+        walls = floor = None
         if entry is not None and entry.walls:
             region = None
             if bot is not None:
@@ -331,17 +331,22 @@ class BotHost:
             if region is None:
                 feed = self._get_feed()
                 region = feed.minimap.region if feed is not None else None
-            w = region[2] if region else 0
+            w, h = (region[2], region[3]) if region else (0, 0)
             if w:
                 walls = [
                     int(min(max(float(v), 0.0), 1.0) * w)
                     for v in (entry.walls.get("left"), entry.walls.get("right"))
                     if isinstance(v, (int, float))
                 ] or None
+            fy = entry.walls.get("floor")
+            if h and isinstance(fy, (int, float)):
+                floor = int(min(max(float(fy), 0.0), 1.0) * h)
         return {
             "map": entry.name if entry else None,
             "no_rotation": not bool(rot.anchors),
             "walls": walls,
+            "floor": floor,
+            "patrol": bool(rot.patrol),
         }
 
     def _live_fingerprint(self, feed=None) -> Optional[str]:
@@ -492,18 +497,19 @@ class BotHost:
         self.bus.emit("map", f"layout cleared for {entry.name}")
 
     def _layout_set_wall(self, msg: str) -> None:
-        """layout|wall|left|right|clear[|<name>] — per-map wall bounds.
+        """layout|wall|left|right|floor|clear[|<name>] — map boundaries.
 
-        ``left``/``right`` pin a wall boundary at the player's current
-        minimap x (normalized fraction of region width); inside it the
-        weave facing is forced inward. ``clear`` removes both. Unlike
-        the global ``wall_zone_px`` edge margins, these work on maps
-        whose play area doesn't span the minimap edge-to-edge.
+        ``left``/``right`` pin a wall at the player's current minimap x
+        (inside it the weave faces inward); ``floor`` pins the player's
+        y as the map's bottom — no downward movement is attempted there.
+        ``clear`` removes them all. Unlike the global ``wall_zone_px``
+        edge margins, these work on maps whose play area doesn't span
+        the minimap edge-to-edge.
         """
         parts = msg.split("|", 3)
         side = parts[2] if len(parts) > 2 else ""
         name = parts[3].strip() if len(parts) > 3 else ""
-        if side not in ("left", "right", "clear"):
+        if side not in ("left", "right", "floor", "clear"):
             return
         entry, err = self._layout_target(name)
         if entry is None:
@@ -527,19 +533,46 @@ class BotHost:
             pos = feed.minimap.player_pos(img) if img is not None else None
         if not region and feed is not None:
             region = feed.minimap.region
-        if pos is None or not region or not region[2]:
+        if pos is None or not region:
             self.bus.emit(
                 "error", "no player position — can't place a wall"
             )
             return
+        span = region[3] if side == "floor" else region[2]
+        if not span:
+            self.bus.emit("error", "no minimap region — can't place a wall")
+            return
         walls = dict(entry.walls or {})
-        walls[side] = round(max(0.0, min(1.0, pos[0] / region[2])), 4)
+        v = pos[1] if side == "floor" else pos[0]
+        walls[side] = round(max(0.0, min(1.0, v / span)), 4)
         entry.walls = walls
         self.maps.save(entry)
         self.maps.reload()
         self._send_maps()
+        axis = "y" if side == "floor" else "x"
         self.bus.emit(
-            "map", f"{side} wall set at x={pos[0]} for {entry.name}"
+            "map", f"{side} wall set at {axis}={v} for {entry.name}"
+        )
+
+    def _layout_set_patrol(self, msg: str) -> None:
+        """layout|patrol|on|off[|<name>] — checkpoint patrol for a map.
+
+        On, the dwell weaves toward the next anchor and advances on
+        arrival instead of standing in place; anchors become waypoints.
+        """
+        parts = msg.split("|", 3)
+        on = len(parts) > 2 and parts[2] == "on"
+        name = parts[3].strip() if len(parts) > 3 else ""
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        entry.rotation.patrol = on
+        self.maps.save(entry)
+        self.maps.reload()
+        self._send_maps()
+        self.bus.emit(
+            "map", f"patrol {'on' if on else 'off'} for {entry.name}"
         )
 
     def _provide_frame(self, mode: str):
@@ -547,6 +580,7 @@ class BotHost:
         if mode == "window":
             meta = self._map_meta()
             meta.pop("walls", None)   # minimap-relative — meaningless here
+            meta.pop("floor", None)
             if bot is not None:
                 img = bot._window_capture()
                 if img is None:
@@ -607,6 +641,8 @@ class BotHost:
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg.startswith("layout|wall|"):
             self._layout_set_wall(msg)
+        elif msg.startswith("layout|patrol|"):
+            self._layout_set_patrol(msg)
         elif msg == "layout|reset":
             self._layout_reset()
         elif msg.startswith("layout|region|"):

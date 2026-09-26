@@ -135,8 +135,13 @@
       <div class="row" style="margin-top:8px">
         <button id="wallL" title="stand at the left wall, then click — player left of it always faces right">L wall</button>
         <button id="wallR" title="stand at the right wall, then click — player right of it always faces left">R wall</button>
-        <button id="wallClear" title="remove both walls for this map">Clear</button>
-        <label>walls at player x (uses map field)</label>
+        <button id="wallF" title="stand on the bottom platform, then click — no downward movement below it">Floor</button>
+        <button id="wallClear" title="remove all boundaries for this map">Clear</button>
+        <label>walls at player pos (uses map field)</label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label><input type="checkbox" id="patrolChk"> patrol anchors</label>
+        <label>weave toward the next checkpoint instead of standing still</label>
       </div>
     </div>
     <div class="panel">
@@ -291,6 +296,8 @@ ws.onmessage = e => {
     if (p.layout !== undefined)
       chip("layout", "layout: " + (p.layout || "–"),
         p.layout === "auto" ? "warn" : "");
+    if (p.patrol !== undefined)
+      $("patrolChk").checked = !!p.patrol;
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
     const now = $("now");
     now.textContent =
@@ -463,7 +470,10 @@ $("layoutClear").onclick = () => send("layout|clear" + layTarget());
 $("layoutReset").onclick = () => send("layout|reset");
 $("wallL").onclick = () => send("layout|wall|left" + layTarget());
 $("wallR").onclick = () => send("layout|wall|right" + layTarget());
+$("wallF").onclick = () => send("layout|wall|floor" + layTarget());
 $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
+$("patrolChk").onchange = () =>
+  send("layout|patrol|" + ($("patrolChk").checked ? "on" : "off") + layTarget());
 
 // --- Drag-to-draw regions on the Window view ---------------------------
 let drawMode = null, drawStart = null, lastImg = null;
