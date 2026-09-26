@@ -28,8 +28,10 @@ class FakeBot:
         self._focused = True
         self._rune = False
         self._players = False
+        self._dwell_end = 0.0
         self.grind_calls = 0
         self.wander_calls = 0
+        self.dwell_ticks = 0
         self.notifications = []
 
     # BotBase-compatible surface
@@ -48,6 +50,15 @@ class FakeBot:
     def check_lie_detector(self):
         return None
 
+    def unsafe_reason(self):
+        if self.config.pause_on_lie_detector and self.check_lie_detector():
+            return "verification prompt"
+        if self.config.stop_when_rune_appears and self._rune:
+            return "rune"
+        if self.config.stop_when_players_appear and self._players:
+            return "other players"
+        return None
+
     def sleep(self, _duration):
         return not self._continue
 
@@ -56,6 +67,29 @@ class FakeBot:
 
     def notify(self, msg):
         self.notifications.append(msg)
+
+    # Rotation surface (no rotation configured -> legacy path)
+    def rotation_active(self):
+        return False
+
+    def effective_rotation(self):
+        return self.config.rotation
+
+    def begin_dwell(self):
+        self._dwell_end = time.time() + self.config.stationary_seconds
+
+    def dwell_done(self):
+        return time.time() >= self._dwell_end
+
+    def dwell_tick(self):
+        self.dwell_ticks += 1
+        self._continue = False
+
+    def begin_travel(self):
+        return False
+
+    def run_travel(self):
+        return True
 
     def grind_once(self):
         self.grind_calls += 1
@@ -124,11 +158,8 @@ class MachineTests(unittest.TestCase):
         machine = Machine(bot)
         machine.current_state = Grind(bot)
         machine.current_state.enter()
-        with mock.patch(
-            "picobot.bot.states.grind.time.time",
-            return_value=time.time() + 10,
-        ):
-            self.assertTrue(machine.switch())
+        # stationary_seconds=0 -> dwell_done() is immediately True
+        self.assertTrue(machine.switch())
         self.assertIsInstance(machine.current_state, Wander)
 
     def test_grind_stays_when_wander_disabled(self):

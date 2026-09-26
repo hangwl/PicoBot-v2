@@ -47,19 +47,20 @@ def safety_transition(bot, *, notify: bool = True):
         return "PAUSE"
     if not bot.should_continue():
         return None
-    # Lie detector / human-verification seam: check_lie_detector() is a stub
-    # until a template image is wired in — see SmartBot.check_lie_detector.
-    if bot.config.pause_on_lie_detector and bot.check_lie_detector():
+    if hasattr(bot, "unsafe_reason"):
+        reason = bot.unsafe_reason()
+    else:
+        # Fallback probe for bare bot doubles lacking unsafe_reason().
+        reason = None
+        if bot.config.pause_on_lie_detector and bot.check_lie_detector():
+            reason = "verification prompt"
+        elif bot.config.stop_when_rune_appears and bot.rune_present():
+            reason = "rune"
+        elif bot.config.stop_when_players_appear and bot.other_players_present():
+            reason = "other players"
+    if reason is not None:
         if notify:
-            bot.notify("Verification prompt suspected — pausing")
-        return "PAUSE"
-    if bot.config.stop_when_rune_appears and bot.rune_present():
-        if notify:
-            bot.notify("Rune detected on minimap — pausing")
-        return "PAUSE"
-    if bot.config.stop_when_players_appear and bot.other_players_present():
-        if notify:
-            bot.notify("Other players detected — pausing")
+            bot.notify(f"{reason.capitalize()} detected — pausing")
         return "PAUSE"
     return None
 

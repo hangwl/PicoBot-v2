@@ -34,6 +34,45 @@ class BotConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             BotConfig.from_dict({"minimap_region": [1, 2, 3]})
 
+    def test_skills_synthesised_from_legacy_keys(self):
+        cfg = BotConfig.from_dict({
+            "attack_keys": ["a", "s"],
+            "buff_keys": ["f"],
+            "buff_interval_seconds": 90,
+        })
+        self.assertIn("attack_s", cfg.skills)
+        self.assertEqual(cfg.skills["buff_f"].cooldown, 90.0)
+
+    def test_explicit_skills_map(self):
+        cfg = BotConfig.from_dict({
+            "skills": {"fountain": {"key": "d", "cooldown": 57,
+                                    "kind": "summon"}}
+        })
+        self.assertEqual(list(cfg.skills), ["fountain"])
+        self.assertEqual(cfg.skills["fountain"].cooldown, 57.0)
+
+    def test_rotation_and_map_options(self):
+        cfg = BotConfig.from_dict({
+            "rotation": {
+                "style": "pingpong",
+                "anchors": [{"pos": [0.2, 0.5]}, {"pos": [0.8, 0.5]}],
+            },
+            "travel_style": "flash",
+            "flash_jump": {"enabled": True, "key": "alt"},
+            "maps_dir": "my_maps",
+            "active_map": "farm_1",
+            "auto_select_map": False,
+            "map_match_threshold": 12.5,
+        })
+        self.assertEqual(cfg.rotation.style, "pingpong")
+        self.assertEqual(len(cfg.rotation.anchors), 2)
+        self.assertEqual(cfg.travel_style, "flash")
+        self.assertEqual(cfg.flash_jump_key, "alt")
+        self.assertEqual(cfg.maps_dir, "my_maps")
+        self.assertEqual(cfg.active_map, "farm_1")
+        self.assertFalse(cfg.auto_select_map)
+        self.assertEqual(cfg.map_match_threshold, 12.5)
+
 
 class TimingTests(unittest.TestCase):
     def test_human_delay_respects_minimum(self):

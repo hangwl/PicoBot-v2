@@ -1,117 +1,110 @@
 # PicoBot
 
-PicoBot is a tool for macroing/botting. It uses a compatible microcontroller to act as a HID device to relay physical keyboard/mouse inputs to a computer.
+PicoBot is a perception-driven game bot. A compatible microcontroller (e.g.
+Raspberry Pi Pico running CircuitPython) acts as a real HID device and relays
+keyboard/mouse inputs to a computer — inputs arrive exactly like a physical
+keyboard. On top of that transport, a smart bot watches the game's minimap,
+navigates between anchor points, and fires skills off per-skill cooldowns,
+mimicking how a real player works a farming rotation.
 
-Note that while I am using a Raspberry Pi Pico device, other microcontroller devices that support `Circuit Python` should still work. The `Adafruit HID` library is required to relay physical keyboard inputs.
+Note that while I am using a Raspberry Pi Pico device, other microcontroller
+devices that support `Circuit Python` should still work. The `Adafruit HID`
+library is required to relay physical keyboard inputs.
 
 ## Disclaimer
-This project is purely for learning purposes. Picobot was built for my personal botting needs in a Maplestory private server. Botting is a punishable offense, please use the program at your own risk. 
+
+This project is purely for learning purposes. Picobot was built for my personal
+botting needs in a Maplestory private server. Botting is a punishable offense,
+please use the program at your own risk.
 
 ## Installation
 
-1. Install Python 3.13 or later.
-2. (Optional) Create and activate a virtual environment: `python -m venv .venv` then `\.venv\Scripts\activate` on Windows.
+1. Install Python 3.14 or later.
+2. (Optional) Create and activate a virtual environment.
 3. From the project root, install dependencies in editable mode: `pip install -e .`
 
-## Usage Guide
-
-To run the app, launch the GUI after installation with:
+## Running
 
 ```bash
-python -m picobot
+python -m picobot --port COM3 --window "Eluna (x64)"
+# or: python -m picobot.serve --port auto --window "Eluna (x64)"
 ```
 
-The application will start the Tk interface, where you can select a COM port, target window, macro folder. 
+This starts the headless host: serial transport + WebSocket (default :8765) +
+HTTP dashboard (default :8000). Open `http://localhost:8000` — the dashboard is
+the UI. `--port auto` discovers the Pico DATA port; omit `--port` entirely to
+run without a Pico (preview/calibration only).
 
-PicoBot automatically starts a WebSocket-based remote control server on port 8765 when a COM port is selected. During macro playback, if the remote server is active (which it is by default), all HID events (key inputs) are relayed via the remote server to the microcontroller device via serial communication.  
+## Dashboard
 
-Additionally, the server embeds a HTML remote controller interface that can be accessed via the specified HTTP port. Using [Tailscale](https://github.com/tailscale/tailscale), you can access this interface on a remote device. Paired with [Sunshine/Moonlight](https://github.com/LizardByte/Sunshine) streaming, you can bot/play your game from anywhere (note that some players in GMS have been reportedly banned for using Sunshine/Moonlight).
+- **View** — live annotated minimap feed (player dot, anchors, nav target,
+  hazard markers) or the full game window on demand.
+- **Bot** — Start/Stop the smart bot.
+- **Map** — pick the active rotation map, or leave on auto (fingerprint match).
+- **Calibrate** — Record → walk your rotation pressing *Mark anchor* at each
+  farming spot → Save. The recorder derives walk/climb legs from your position
+  trace, dwell ranges from how long you stood, and candidate skills from the
+  keys you pressed at each anchor. Headless alternative:
+  `python -m picobot.bot.calibrate --window "Eluna (x64)" --name my_map`
+  (F9 = mark, ESC = save).
+- **Remote input** — arrow pad + key buttons for rune solving or nudges from a
+  phone.
+- **Events** — structured stream of everything the bot perceives and does
+  (`fsm`, `nav`, `skill`, `hid`, `safety`, …).
 
-To record a macro, run `macro_recorder.py` script in administrator mode. The `ESC` key stops the recording and saves the recorded macro as a text file. In the selected macro folder, macro files form a randomized playlist that loops continuously until the playback is interrupted. Files prefixed with `START_` are prioritized to start first.
+## Maps & rotations
 
-To use the Telegram notifier, please refer to [BotFather](https://core.telegram.org/bots/tutorial) to get your own `Bot Token` and `Chat ID`.
+Each map is a JSON file in `maps/` holding a rotation graph — anchors (farming
+spots) and legs (walk / flash-jump / climb steps between them), plus skill
+bindings and a minimap fingerprint for auto-selection:
 
-## Picobot Directory Tree
-
+```json
+{
+  "name": "limina_1f_east",
+  "fingerprint": "<hex>",
+  "rotation": {
+    "style": "loop",
+    "position_jitter_px": 4,
+    "rest_chance": 0.02,
+    "wander_chance": 0.05,
+    "travel_style": "mixed",
+    "anchors": [
+      {"name": "west", "pos": [0.31, 0.55], "dwell": [8, 14],
+       "on_arrive": ["fountain"], "face": "left"}
+    ],
+    "legs": [
+      {"from": 0, "to": 1, "steps": [
+        {"walk_to": [0.5, 0.55], "style": "flash"},
+        {"climb": {"dir": "up", "until_y": 0.31, "x": 0.5}},
+        {"walk_to": [0.72, 0.31]}
+      ]}
+    ]
+  },
+  "skills": {
+    "fountain": {"key": "s", "cooldown": 57, "kind": "summon",
+                 "wait_on_arrival": 4}
+  }
+}
 ```
-picobot/
-├── playback/
-│   ├── __init__.py
-│   └── macro_controller.py
-├── remote/
-│   ├── __init__.py
-│   ├── control.py
-│   └── http.py
-├── services/
-│   ├── __init__.py
-│   └── system.py
-├── transport/
-│   ├── __init__.py
-│   └── serial_manager.py
-├── ui/
-│   ├── __init__.py
-│   └── views.py
-├── __init__.py
-├── __main__.py
-├── app.py
-├── config.py
-├── context.py
-├── countdown.py
-├── messaging.py
-└── settings.py
-```
 
----
+- Coordinates are 0–1 fractions of the minimap region (values >1 are raw px).
+- `style`: `loop` | `pingpong` | `shuffle`.
+- Step kinds: `walk_to` (+ `style`: walk|flash|mixed), `climb`
+  (`dir`, `until_y`, optional align `x`), `up_jump`, `down_jump`, `wait`.
+- Skill `kind`: `attack` (attack loop), `buff` (fires when ready anywhere),
+  `summon` (fires at anchors listing it via `on_arrive`).
+- `wait_on_arrival`: seconds the bot waits at an anchor for a skill's cooldown
+  before giving up — players wait a beat for their summon too.
 
-## PicoBot Server (Desktop GUI)
+## Bot configuration
 
-- **Launch**
-  - From the repo root: `python -m picobot`
-  - The Tk app opens (`picobot/app.py`).
-
-- **Setup steps in the GUI**
-  - **1. Select Pico DATA COM port** in “Select Pico DATA Port”. This auto-starts the Remote server.
-  - **2. Select Target Window** to which keystrokes will be sent.
-  - **3. Select Macro Folder** (root folder that holds your macros/playlists).
-  - Optional: configure **Telegram & Countdown**.
-
-- **Macro folders and playlists**
-  - Put `.txt` macro files inside folders. Each subfolder under your macro root is treated as a distinct “playlist”.
-  - If you pick a specific playlist folder as the macro folder, the server will list sibling playlists by looking one level up (a heuristic added for convenience).
-  - Record new macros with `macro_recorder.py` (run as admin). Press `ESC` to stop and save.
-
-- **Remote server**
-  - A WebSocket server is started when the COM port is selected. Default port comes from config (e.g., 8765).
-  - An embedded HTTP server serves a basic remote UI on the configured HTTP port.
-  - TLS is supported for WS if `ws_tls`, `ws_certfile`, and `ws_keyfile` are set and valid (see `AppConfig` in `picobot/config.py`).
-
-- **During playback**
-  - HID events are relayed over serial to the Pico. You can stop via the GUI, a remote command, or by switching windows.
-
-- **Troubleshooting (server)**
-  - “No COM ports found”: ensure drivers/cable are OK and the Pico DATA port is selected (not the CDC-only port).
-  - Playlists don’t appear: confirm your macro root has subfolders. If you selected a playlist folder directly, the server now lists siblings from its parent.
-  - Port conflicts: adjust WS/HTTP ports in the GUI; check firewall rules.
-
----
-
-## Smart Bot (experimental)
-
-In addition to blind macro playback, `picobot.bot` runs a perception-driven
-bot: it watches the game window's minimap, keeps position via
-goal-directed navigation (`move_to_point`), and composes behaviors with a
-finite state machine (`GRIND` / `WANDER` / `PAUSE`) instead of replaying
-recorded key sequences.
-
-- **GUI**: select a COM port + target window as usual, then click **SMART**.
-  If the remote server is running, the bot reuses its serial session.
-- **Headless**: `python -m picobot.bot --port COM3 --window "Eluna (x64)"`
-- **Config**: a `"bot"` object in `config.json`. All keys are optional:
+Global tuning lives in `config.json` under `"bot"` — keys, timing, safety
+toggles, minimap colors/region, flash jump, map store:
 
 ```json
 {
   "bot": {
-    "attack_keys": ["a", "s"],
+    "attack_keys": ["a"],
     "buff_keys": ["shift"],
     "buff_interval_seconds": 60,
     "jump_key": "alt",
@@ -130,78 +123,75 @@ recorded key sequences.
       "other_player": [118, 45, 253],
       "rune": [255, 102, 221],
       "border": [228, 228, 228]
-    }
+    },
+    "flash_jump": {"enabled": true, "key": "alt"},
+    "travel_style": "mixed",
+    "maps_dir": "maps",
+    "active_map": null,
+    "auto_select_map": true,
+    "map_match_threshold": 15.0
   }
 }
 ```
 
 Notes:
 
-- `minimap_region` is `(x, y, w, h)` **relative to the game window**. Set it
-  if auto-detection fails on your client — marker/frame colors (BGR) may
-  also differ between clients, hence `minimap_colors`.
-- Safety: losing window focus, a rune marker, or other players on the
-  minimap pause the bot (and fire a Telegram alert if configured). The
-  original auto-solve-rune flow is intentionally not ported yet.
-- `pause_on_lie_detector` is a **seam, not a feature**: the check is a
-  documented stub (`SmartBot.check_lie_detector`) pending template images
-  for the verification prompt. Enable only once those exist.
-- Key timing is humanized host-side (lognormal gaps, ~60-140ms holds);
-  the Pico firmware relays raw down/up events and is unchanged.
+- Legacy `attack_keys`/`buff_keys` are synthesized into skills when no explicit
+  `"skills"` map exists — new configs should use named skills.
+- `minimap_region` is `(x, y, w, h)` **relative to the game window**. Set it if
+  auto-detection fails on your client.
+- Safety: losing window focus, a rune marker, other players on the minimap, or
+  an unexpected map change mid-leg pauses the bot (and fires a Telegram alert
+  if configured). Solve the check via the dashboard's remote input pad.
+- `pause_on_lie_detector` is a **seam, not a feature**: `check_lie_detector` is
+  a documented stub pending template images. Keep it off.
+- Key timing is humanized host-side; the Pico firmware relays raw down/up
+  events and is unchanged.
 
----
+## Remote connections over mobile data (Tailscale)
 
-## PicoBot Controller (Flutter App)
+- Install Tailscale on the desktop host and your phone, sign in to the same
+  tailnet, and enable **MagicDNS**.
+- Open `http://<host>.tail-xxxx.ts.net:8000` on the phone — the dashboard shows
+  the live minimap/window feed and the remote input pad (rune solving, lie
+  detector checks) works anywhere. WireGuard encryption means no port
+  forwarding and no TLS needed.
+- The Flutter controller app (`picobot_controller/`) still works as a remote
+  control: it sends `hid|…` payloads over the same WebSocket protocol. Macro
+  playlist commands are gone along with playback.
 
-The mobile/desktop controller UI lives under `picobot_controller/`.
+## Picobot directory tree
 
-- **Prerequisites**
-  - Install Flutter (stable channel).
-  - Android Studio / Xcode as needed for your platform.
+```
+picobot/
+├── bot/                # smart bot
+│   ├── states/         # FSM states: Grind, Travel, Wander, Pause
+│   ├── __main__.py     # headless bot entry
+│   ├── base.py         # lifecycle + event sink
+│   ├── calibrate.py    # walk-once rotation recorder (+ CLI)
+│   ├── config.py       # BotConfig (config.json["bot"])
+│   ├── inputs.py       # HidController (ACK'd payloads, held-key tracking)
+│   ├── machine.py      # FSM runtime
+│   ├── maps.py         # maps/ store + fingerprint matching
+│   ├── rotation.py     # anchor/leg graph model
+│   ├── skills.py       # per-skill cooldown scheduler
+│   ├── smart_bot.py    # perception → decide → act task
+│   └── timing.py       # humanized delays
+├── remote/
+│   ├── control.py      # WS server + hid|… relay + dashboard commands
+│   ├── dashboard.html  # web UI
+│   ├── http.py         # embedded HTTP server
+│   └── streamer.py     # annotated frame feed
+├── transport/
+│   └── serial_manager.py
+├── vision/             # mss capture, window handle, minimap analysis
+├── events.py           # structured event bus
+├── serve.py            # headless host (the app)
+└── config.py, settings.py, messaging.py
+```
 
-- **Run locally**
-  - In `picobot_controller/`: `flutter pub get`
-  - Then: `flutter run -d <device>`
+## Deprecated
 
-- **Build**
-  - Android: `flutter build apk`
-  - iOS: open the iOS project and build via Xcode (signing required).
-  - Web/Desktop: use `flutter run`/`flutter build` with appropriate targets.
-
-- **Connect to the server**
-  - Open Settings → “Server Profiles”. Add a profile with the desktop’s IP and WS port (e.g., `192.168.1.100:8765`).
-  - Use “Reconnect” to force a connect. The status dot shows: green (connected), orange (reconnecting), red (disconnected).
-
-- **Playlists in the AppBar**
-  - When connected and playlists are available, a playlist dropdown appears inline in the AppBar next to the connection indicator.
-  - Selecting a playlist tells the server which subfolder under your macro root to use.
-
-- **Background and multitasking**
-  - The controller keeps the WS open while backgrounded/in split-screen where possible. On resume, it avoids reconnecting if the link is still alive and just refreshes playlists.
-  - If the OS drops the socket, the app automatically retries with an orange “reconnecting” indicator.
-
-- **Troubleshooting (controller)**
-  - Cannot connect: verify the desktop server is running, IP/port are correct, and firewall allows the port.
-  - No playlists: ensure the desktop macro root has subfolders; the server responds with `macroPlaylists` only when it finds any.
-  - After device lock/unlock: the app now handles resume more gracefully; use the “Reconnect” button if needed.
-
----
-
-## Remote connections over mobile data (Tailscale MagicDNS)
-
-- **Why Tailscale**
-  - Works behind CGNAT and firewalls without port forwarding.
-  - End-to-end encrypted (WireGuard). MagicDNS gives a stable hostname.
-
-- **Setup**
-  - Install Tailscale on the desktop host running the PicoBot Server and sign in.
-  - In the Tailscale admin console, enable **MagicDNS** (Settings → DNS → MagicDNS On).
-  - Optionally enable **HTTPS certificates** (not required for ws://, but useful for wss://).
-  - Install Tailscale on your phone and sign in to the same tailnet.
-
-- **Connect from the controller**
-  - In the controller’s Server Profile host field, use either:
-    - The host’s MagicDNS name (as shown in the Tailscale admin page or `tailscale status`), e.g. `myhost.tail-1234.ts.net`.
-    - Or the Tailscale IP (100.x.y.z) of the desktop.
-  - Keep the same WebSocket port as shown by the desktop app (default 8765).
-  - TLS is optional because Tailscale already encrypts traffic. If you still prefer wss://, configure cert/key in `picobot/config.py` and enable WS TLS in the GUI.
+Recorded macro playback (`playback/`, `macro_recorder.py`, playlist commands,
+the Tk GUI) was removed — blind playback is too easily detected. The rotation
+system replaces it.

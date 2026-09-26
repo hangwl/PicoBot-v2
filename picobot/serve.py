@@ -1,0 +1,403 @@
+"""Headless PicoBot host: serial transport + smart bot + web dashboard.
+
+``python -m picobot.serve --port COM3 --window "Eluna (x64)"``
+
+Owns the WebSocket/HTTP remote server, the SmartBot lifecycle, the frame
+streamer feeding the dashboard, and the calibration recorder. There is no
+desktop UI — the dashboard *is* the UI (locally or over Tailscale).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import ssl
+import threading
+from pathlib import Path
+from typing import Optional
+
+from .config import AppConfig, load_config
+from .events import EventBus
+from .messaging import TelegramHandler
+from .remote import EmbeddedHTTPServer, RemoteCallbacks, RemoteControlServer
+from .remote.streamer import FrameStreamer
+from .settings import configure_logging
+
+logger = logging.getLogger(__name__)
+
+
+class _VisionFeed:
+    """Window/minimap capture used for previews and calibration.
+
+    Lazily created — pygetwindow/mss only exist on the host machine.
+    """
+
+    def __init__(self, window_title: str, colors, region) -> None:
+        from .vision.game_window import GameWindow
+        from .vision.minimap import MinimapAnalyzer
+        from .vision.screen import ScreenGrabber
+
+        self.window = GameWindow(window_title)
+        self.screen = ScreenGrabber()
+        self.minimap = MinimapAnalyzer(colors=colors, region=region)
+
+    def minimap_img(self):
+        region = self.minimap.region
+        if region is None:
+            l, t, r, b = self.window.rect()
+            full = self.screen.capture((l, t, r - l, b - t))
+            if full is None or self.minimap.locate(full) is None:
+                return None
+            region = self.minimap.region
+        x, y, w, h = region
+        return self.screen.capture((self.window.left + x, self.window.top + y, w, h))
+
+    def window_img(self):
+        l, t, r, b = self.window.rect()
+        return self.screen.capture((l, t, r - l, b - t))
+
+    def close(self) -> None:
+        self.screen.close()
+
+
+class BotHost:
+    """Wires transport, bot, streamer, and calibration together."""
+
+    def __init__(
+        self,
+        serial_port: Optional[str],
+        window_title: str,
+        config: Optional[AppConfig] = None,
+    ) -> None:
+        from .bot import BotConfig
+        from .bot.maps import MapStore
+        from .bot.calibrate import CalibrationRunner
+
+        self.config = config or load_config()
+        self.bot_config = BotConfig.from_dict(getattr(self.config, "bot", None))
+        self.window_title = window_title
+        self.serial_port = serial_port
+        self.bus = EventBus()
+        self.telegram = TelegramHandler(self.config.bot_token, self.config.chat_id)
+        self.maps = MapStore(self.bot_config.maps_dir)
+        self._feed: Optional[_VisionFeed] = None
+        self._feed_lock = threading.Lock()
+        self._active_map_override: Optional[str] = self.bot_config.active_map
+
+        self.bot = None
+        self.bot_thread: Optional[threading.Thread] = None
+        self.calibrator: Optional[CalibrationRunner] = None
+
+        callbacks = RemoteCallbacks(
+            schedule=lambda fn: fn(),
+            log=lambda m: self.bus.emit("remote", m),
+            set_status=lambda m: self.bus.emit("status", m),
+            set_ws_port=lambda p: self.bus.emit("status", f"ws port: {p}"),
+            start_macro=lambda: None,
+            stop_macro=lambda: None,
+            is_macro_playing=lambda: False,
+            broadcast=lambda m: None,
+            get_macro_base_path=lambda: "",
+            on_remote_playlist_selected=lambda p: None,
+            start_bot=self.start_bot,
+            stop_bot=self.stop_bot,
+            is_bot_running=self.is_bot_running,
+            handle_command=self._handle_command,
+        )
+        self.remote = RemoteControlServer(
+            serial_port or "",
+            self.config.ws_port,
+            callbacks,
+            ssl_context=self._ssl_context(),
+            serial_optional=serial_port is None,
+        )
+        self.streamer = FrameStreamer(
+            self._provide_frame, self.remote.broadcast, interval=0.35
+        )
+        self.bus.subscribe(self._forward_event)
+
+    # -- Lifecycle ----------------------------------------------------------
+    def _ssl_context(self):
+        try:
+            if self.config.ws_tls:
+                cert = Path(self.config.ws_certfile or "")
+                key = Path(self.config.ws_keyfile or "")
+                if cert.exists() and key.exists():
+                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ctx.load_cert_chain(certfile=str(cert), keyfile=str(key))
+                    return ctx
+        except Exception as exc:
+            logger.error("TLS setup failed: %s", exc)
+        return None
+
+    def run(self) -> None:
+        self.remote.start()
+        self.http = EmbeddedHTTPServer(
+            lambda: self.remote.ws_port, self.config.http_port,
+            search_paths=[
+                Path(__file__).resolve().parent / "remote" / "dashboard.html",
+                Path(__file__).resolve().parent.parent / "index.html",
+            ],
+        )
+        self.http.start()
+        self.streamer.start()
+        self._hook_keyboard()
+        self.bus.emit("status", f"dashboard: http://0.0.0.0:{self.config.http_port}")
+        logger.info("BotHost running (ws :%s, http :%s)",
+                    self.remote.ws_port, self.config.http_port)
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.shutdown()
+
+    def shutdown(self) -> None:
+        self.stop_bot()
+        if self.calibrator:
+            self.calibrator.stop()
+        self.streamer.stop()
+        self.remote.stop()
+        if getattr(self, "http", None):
+            self.http.stop()
+        if self._feed:
+            self._feed.close()
+
+    # -- Bot lifecycle --------------------------------------------------------
+    def is_bot_running(self) -> bool:
+        return bool(self.bot_thread and self.bot_thread.is_alive())
+
+    def start_bot(self) -> None:
+        if self.is_bot_running():
+            return
+        if not self.serial_port:
+            self.bus.emit("error", "no serial port — start with --port")
+            return
+        self.bot_thread = threading.Thread(
+            target=self._bot_entry, name="SmartBot", daemon=True
+        )
+        self.bot_thread.start()
+
+    def stop_bot(self) -> None:
+        if self.bot is not None:
+            self.bot.stop()
+        if self.bot_thread and self.bot_thread.is_alive():
+            self.bot_thread.join(timeout=4)
+
+    def _bot_entry(self) -> None:
+        from .bot import HidController, SmartBot
+
+        try:
+            bus = self.bus
+
+            def send(payload: str) -> bool:
+                bus.emit("hid", payload)
+                return self.remote.enqueue_hid_payload(
+                    payload, wait_ack=True, timeout=1.5
+                )
+
+            self.bot = SmartBot(
+                HidController(send),
+                self.window_title,
+                self.bot_config,
+                notify_callback=self.telegram.send_message,
+                event_bus=bus,
+            )
+            self.bus.emit("bot", "started")
+            self.bot.start()
+        except Exception as exc:
+            logger.error("Smart bot failed: %s", exc)
+            self.bus.emit("error", f"smart bot failed: {exc}")
+        finally:
+            self.bot = None
+            self.bus.emit("bot", "stopped")
+
+    # -- Frames & events -------------------------------------------------------
+    def _forward_event(self, event: dict) -> None:
+        payload = {"event": "evt", **event}
+        self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _get_feed(self) -> Optional[_VisionFeed]:
+        with self._feed_lock:
+            if self._feed is None:
+                try:
+                    self._feed = _VisionFeed(
+                        self.window_title,
+                        self.bot_config.minimap_colors,
+                        self.bot_config.minimap_region,
+                    )
+                except Exception as exc:
+                    logger.warning("vision feed unavailable: %s", exc)
+                    return None
+            return self._feed
+
+    def _provide_frame(self, mode: str):
+        bot = self.bot
+        if mode == "window":
+            if bot is not None:
+                img = bot._window_capture()
+                return {"img": img} if img is not None else None
+            feed = self._get_feed()
+            return {"img": feed.window_img()} if feed else None
+        if bot is not None:
+            return bot.viz_snapshot()
+        feed = self._get_feed()
+        if feed is None:
+            return None
+        img = feed.minimap_img()
+        if img is None:
+            return {"state": "IDLE"}
+        return {
+            "img": img,
+            "player": feed.minimap.player_pos(img),
+            "state": "IDLE",
+        }
+
+    # -- Dashboard commands ------------------------------------------------------
+    def _handle_command(self, msg: str) -> bool:
+        if msg == "map|list":
+            self._send_maps()
+        elif msg.startswith("map|set|"):
+            self._set_map(msg.split("|", 2)[2])
+        elif msg == "cal|start":
+            self._cal_start()
+        elif msg == "cal|mark":
+            if self.calibrator:
+                self.calibrator.mark()
+        elif msg.startswith("cal|finish"):
+            name = msg.split("|", 2)[2] if msg.count("|") >= 2 else "unnamed"
+            self._cal_finish(name or "unnamed")
+        elif msg == "cal|cancel":
+            if self.calibrator:
+                self.calibrator.stop()
+        elif msg == "dash|view|window":
+            self.streamer.set_mode("window")
+        elif msg == "dash|view|minimap":
+            self.streamer.set_mode("minimap")
+        elif msg == "events|history":
+            self._send_history()
+        elif msg == "config|get":
+            self._send_config()
+        else:
+            return False
+        return True
+
+    def _send_maps(self) -> None:
+        payload = {
+            "event": "maps",
+            "maps": self.maps.names(),
+            "active": self._active_map_override,
+        }
+        self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _set_map(self, name: str) -> None:
+        self._active_map_override = name or None
+        self.bot_config.active_map = self._active_map_override
+        self.bot_config.auto_select_map = not bool(name)
+        if self.bot is not None:
+            self.bot.config.active_map = self._active_map_override
+            self.bot.config.auto_select_map = not bool(name)
+        self.bus.emit("map", f"active map: {name or 'auto'}")
+        self._send_maps()
+
+    def _send_history(self) -> None:
+        payload = {"event": "history", "items": self.bus.history()}
+        self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _send_config(self) -> None:
+        from dataclasses import asdict
+
+        data = asdict(self.bot_config)
+        data["skills"] = {n: s.to_dict() for n, s in self.bot_config.skills.items()}
+        data["rotation"] = self.bot_config.rotation.to_dict()
+        data["minimap_colors"] = asdict(self.bot_config.minimap_colors)
+        payload = {"event": "config", "config": data}
+        self.remote.broadcast("dash|" + json.dumps(payload))
+
+    # -- Calibration -------------------------------------------------------------
+    def _cal_start(self) -> None:
+        feed = self._get_feed()
+        if feed is None:
+            self.bus.emit("error", "calibration needs the game window")
+            return
+        from .bot.calibrate import CalibrationRunner
+
+        self.calibrator = CalibrationRunner(
+            feed.minimap_img,
+            feed.minimap.player_pos,
+            event=lambda k, m: self.bus.emit(k, m),
+        )
+        img = feed.minimap_img()
+        wh = (img.shape[1], img.shape[0]) if img is not None else (200, 150)
+        self.calibrator.start(wh)
+
+    def _cal_finish(self, name: str) -> None:
+        if not self.calibrator:
+            return
+        feed = self._get_feed()
+        fp = None
+        if feed is not None:
+            img = feed.minimap_img()
+            if img is not None:
+                from .vision.minimap import fingerprint
+
+                c = feed.minimap.colors
+                fp = fingerprint(
+                    img, ignore_colors=(c.player, c.other_player, c.rune)
+                )
+        try:
+            entry = self.calibrator.finish(name, fingerprint=fp)
+            path = self.maps.save(entry)
+            self.maps.reload()
+            self.bus.emit("cal", f"map saved: {path}")
+            self._send_maps()
+        except Exception as exc:
+            self.bus.emit("error", f"calibration save failed: {exc}")
+
+    def _hook_keyboard(self) -> None:
+        """Global key hook so calibration can attribute skill presses."""
+        try:
+            import keyboard
+
+            def on_press(event):
+                if (
+                    self.calibrator
+                    and self.calibrator.running
+                    and event.event_type == "down"
+                ):
+                    self.calibrator.record_key(event.name)
+
+            keyboard.hook(on_press)
+        except Exception as exc:
+            logger.info("keyboard hook unavailable: %s", exc)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="picobot.serve")
+    parser.add_argument("--port", default=None, help="Pico DATA COM port")
+    parser.add_argument("--window", default=None, help="game window title")
+    parser.add_argument("--ws", type=int, default=None, help="WS port")
+    parser.add_argument("--http", type=int, default=None, help="HTTP port")
+    args = parser.parse_args()
+
+    configure_logging()
+    config = load_config()
+    if args.ws:
+        config.ws_port = args.ws
+    if args.http:
+        config.http_port = args.http
+    port = args.port
+    if port == "auto":
+        from .transport import discover_data_port
+
+        port = discover_data_port()
+        if port is None:
+            parser.exit(2, "no Pico DATA port discovered\n")
+        print(f"discovered Pico DATA port: {port}")
+    window_title = args.window or config.default_target_window
+    BotHost(port, window_title, config).run()
+
+
+if __name__ == "__main__":
+    main()

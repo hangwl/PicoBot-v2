@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PicoBot Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --edge: #262b36;
+    --fg: #d7dce3; --dim: #8a919e; --accent: #4f8cff;
+    --ok: #3fb96f; --warn: #d9a13b; --bad: #d95656;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.4 ui-monospace, Menlo, Consolas, monospace;
+  }
+  header {
+    display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+    padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--edge);
+  }
+  header b { font-size: 15px; }
+  .chip {
+    padding: 2px 10px; border: 1px solid var(--edge); border-radius: 20px;
+    font-size: 12px; color: var(--dim);
+  }
+  .chip.on { color: var(--ok); border-color: var(--ok); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); }
+  .chip.bad { color: var(--bad); border-color: var(--bad); }
+  main { display: flex; gap: 12px; padding: 12px; flex-wrap: wrap; }
+  .col { display: flex; flex-direction: column; gap: 12px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 8px; padding: 10px;
+  }
+  .panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: .08em; }
+  canvas#view {
+    display: block; background: #000; border-radius: 4px;
+    image-rendering: pixelated; width: 400px; max-width: 90vw;
+  }
+  #log {
+    height: 420px; overflow-y: auto; font-size: 12px; white-space: pre-wrap;
+  }
+  #log div { padding: 1px 0; border-bottom: 1px solid #1d212b; }
+  .k-log { color: var(--dim); }
+  .k-fsm { color: var(--accent); }
+  .k-nav, .k-map { color: #9d7bff; }
+  .k-skill, .k-hid { color: #4ec9b0; }
+  .k-safety, .k-error { color: var(--bad); }
+  .k-notify { color: var(--warn); }
+  .k-bot, .k-cal, .k-status, .k-remote { color: var(--fg); }
+  button, select, input {
+    background: #20242e; color: var(--fg); border: 1px solid var(--edge);
+    border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .pad { display: grid; grid-template-columns: repeat(3, 44px); gap: 5px; }
+  .pad button { height: 40px; font-size: 16px; padding: 0; }
+  .pad .spacer { visibility: hidden; }
+  label { color: var(--dim); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <b>PicoBot</b>
+  <span id="ws" class="chip">ws: connecting…</span>
+  <span id="bot" class="chip">bot: ?</span>
+  <span id="state" class="chip">state: –</span>
+  <span id="map" class="chip">map: –</span>
+  <span id="hazard" class="chip">hazard: none</span>
+</header>
+<main>
+  <div class="col">
+    <div class="panel">
+      <h3>View</h3>
+      <canvas id="view" width="400" height="300"></canvas>
+      <div class="row" style="margin-top:8px">
+        <button id="vMin">Minimap</button>
+        <button id="vWin">Window</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Bot</h3>
+      <div class="row">
+        <button id="startBot" class="primary">Start</button>
+        <button id="stopBot" class="danger">Stop</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Map</h3>
+      <div class="row">
+        <select id="mapSel"><option value="">(auto)</option></select>
+        <button id="mapRefresh">Refresh</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Calibrate</h3>
+      <div class="row">
+        <input id="calName" placeholder="map name" size="12">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="calStart">Record</button>
+        <button id="calMark">Mark anchor</button>
+        <button id="calFinish">Save</button>
+        <button id="calCancel">Cancel</button>
+      </div>
+      <div style="margin-top:6px"><label>walk the rotation; mark each anchor; save</label></div>
+    </div>
+    <div class="panel">
+      <h3>Remote input</h3>
+      <div class="row">
+        <div class="pad">
+          <span class="spacer"></span><button data-k="up">↑</button><span class="spacer"></span>
+          <button data-k="left">←</button><button data-k="down">↓</button><button data-k="right">→</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div class="row"><input id="keyIn" placeholder="key" size="6">
+            <button id="keyPress">press</button></div>
+          <div class="row">
+            <button data-k="alt">alt</button>
+            <button data-k="ctrl">ctrl</button>
+            <button data-k="shift">shift</button>
+            <button data-k="enter">enter</button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:6px"><label>tap = press · rune arrows work</label></div>
+    </div>
+  </div>
+  <div class="col" style="flex:1;min-width:280px">
+    <div class="panel" style="flex:1">
+      <h3>Events</h3>
+      <div id="log"></div>
+    </div>
+  </div>
+</main>
+<script>
+const WS_PORT = "REPLACE_WS_PORT";
+const ws = new WebSocket(`ws://${location.hostname}:${WS_PORT}`);
+const $ = id => document.getElementById(id);
+const logEl = $("log");
+let calActive = false;
+
+function log(kind, msg) {
+  const d = document.createElement("div");
+  d.className = "k-" + kind;
+  const t = new Date().toTimeString().slice(0, 8);
+  d.textContent = `[${t}] ${msg}`;
+  logEl.appendChild(d);
+  while (logEl.children.length > 600) logEl.firstChild.remove();
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function chip(id, text, cls) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "chip" + (cls ? " " + cls : "");
+}
+
+ws.onopen = () => {
+  chip("ws", "ws: connected", "on");
+  ws.send("events|history");
+  ws.send("bot|query");
+  ws.send("map|list");
+  ws.send("config|get");
+};
+ws.onclose = () => chip("ws", "ws: closed", "bad");
+ws.onerror = () => chip("ws", "ws: error", "warn");
+
+ws.onmessage = e => {
+  const m = e.data;
+  if (m === "bot|running") { chip("bot", "bot: running", "on"); return; }
+  if (m === "bot|stopped") { chip("bot", "bot: stopped"); return; }
+  if (!m.startsWith("dash|")) return;
+  let p;
+  try { p = JSON.parse(m.slice(5)); } catch { return; }
+  if (p.event === "frame") {
+    const img = new Image();
+    img.onload = () => {
+      const c = $("view");
+      c.width = img.width; c.height = img.height;
+      c.getContext("2d").drawImage(img, 0, 0);
+    };
+    img.src = "data:image/jpeg;base64," + p.jpeg;
+    if (p.state) chip("state", "state: " + p.state,
+      p.state === "PAUSE" ? "warn" : "");
+    if (p.map !== undefined) chip("map", "map: " + (p.map || "–"));
+    chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
+  } else if (p.event === "evt") {
+    log(p.kind, p.msg);
+    if (p.kind === "bot")
+      chip("bot", "bot: " + p.msg, p.msg === "started" ? "on" : "");
+    if (p.kind === "cal")
+      calActive = !p.msg.includes("saved") && !p.msg.includes("failed");
+  } else if (p.event === "history") {
+    logEl.innerHTML = "";
+    (p.items || []).forEach(it => log(it.kind, it.msg));
+  } else if (p.event === "maps") {
+    const sel = $("mapSel");
+    sel.innerHTML = '<option value="">(auto)</option>';
+    (p.maps || []).forEach(n => {
+      const o = document.createElement("option");
+      o.value = n; o.textContent = n;
+      if (n === p.active) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+};
+
+const send = m => { if (ws.readyState === 1) ws.send(m); };
+$("startBot").onclick = () => send("bot|start");
+$("stopBot").onclick = () => send("bot|stop");
+$("vMin").onclick = () => send("dash|view|minimap");
+$("vWin").onclick = () => send("dash|view|window");
+$("mapSel").onchange = e => send("map|set|" + e.target.value);
+$("mapRefresh").onclick = () => send("map|list");
+$("calStart").onclick = () => { calActive = true; send("cal|start"); };
+$("calMark").onclick = () => send("cal|mark");
+$("calFinish").onclick = () => {
+  send("cal|finish|" + ($("calName").value || "unnamed")); calActive = false;
+};
+$("calCancel").onclick = () => { send("cal|cancel"); calActive = false; };
+
+// Remote input pad: tap sends down + up (~90ms hold, human-ish).
+function press(key) {
+  if (!key) return;
+  send(`key|down|${key}`);
+  setTimeout(() => send(`key|up|${key}`), 90 + Math.random() * 60);
+}
+document.querySelectorAll("[data-k]").forEach(b =>
+  b.addEventListener("click", () => press(b.dataset.k)));
+$("keyPress").onclick = () => {
+  press($("keyIn").value.trim()); $("keyIn").select();
+};
+</script>
+</body>
+</html>

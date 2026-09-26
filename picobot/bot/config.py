@@ -8,9 +8,11 @@ defaults so the bot can run with an empty config.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..vision.minimap import MinimapColors
+from .rotation import Rotation
+from .skills import Skill, SkillBook
 
 
 @dataclass
@@ -51,6 +53,36 @@ class BotConfig:
     minimap_region: Optional[Tuple[int, int, int, int]] = None
     """Explicit (x, y, w, h) minimap rect relative to the window.
     Set this if border auto-detection fails on your client/resolution."""
+
+    # -- Skills -----------------------------------------------------------------
+    skills: Dict[str, Skill] = field(default_factory=dict)
+    """Named skills with per-skill cooldowns. Populated by ``from_dict``
+    (explicit ``"skills"`` map, or synthesised from the legacy
+    attack_keys/buff_keys fields in ``__post_init__``)."""
+
+    # -- Rotation ---------------------------------------------------------------
+    rotation: Rotation = field(default_factory=Rotation)
+    """Anchor/leg route graph. When empty the bot falls back to the legacy
+    stationary-grind/wander behaviour. Map files can override this."""
+
+    # -- Movement ---------------------------------------------------------------
+    flash_jump_enabled: bool = True
+    flash_jump_key: Optional[str] = None  # None = reuse jump_key
+    travel_style: str = "mixed"           # default leg style: walk|flash|mixed
+
+    # -- Maps -------------------------------------------------------------------
+    maps_dir: str = "maps"
+    auto_select_map: bool = True
+    active_map: Optional[str] = None      # force a map by name (skip auto-match)
+    map_match_threshold: float = 15.0     # fingerprint distance bound (0-255)
+
+    def __post_init__(self) -> None:
+        if not self.skills:
+            self.skills = SkillBook.from_config({
+                "attack_keys": self.attack_keys,
+                "buff_keys": self.buff_keys,
+                "buff_interval_seconds": self.buff_interval_seconds,
+            }).skills
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "BotConfig":
@@ -94,6 +126,34 @@ class BotConfig:
             if len(r) != 4:
                 raise ValueError("minimap_region must be [x, y, w, h]")
             cfg.minimap_region = tuple(int(v) for v in r)
+        if isinstance(data.get("skills"), dict) and data["skills"]:
+            cfg.skills = {
+                name: Skill.from_dict(name, spec)
+                for name, spec in data["skills"].items()
+            }
+        if isinstance(data.get("rotation"), dict):
+            cfg.rotation = Rotation.from_dict(data["rotation"])
+        if "flash_jump" in data and isinstance(data["flash_jump"], dict):
+            fj = data["flash_jump"]
+            cfg.flash_jump_enabled = bool(fj.get("enabled", True))
+            key = fj.get("key")
+            cfg.flash_jump_key = str(key) if key else None
+        if "travel_style" in data:
+            cfg.travel_style = str(data["travel_style"])
+        if "maps_dir" in data:
+            cfg.maps_dir = str(data["maps_dir"])
+        if "active_map" in data:
+            v = data["active_map"]
+            cfg.active_map = str(v) if v else None
+        if "auto_select_map" in data:
+            cfg.auto_select_map = bool(data["auto_select_map"])
+        if "map_match_threshold" in data:
+            cfg.map_match_threshold = float(data["map_match_threshold"])
+        if not (isinstance(data.get("skills"), dict) and data["skills"]):
+            # No explicit skills map: rebuild from the (possibly overridden)
+            # legacy key lists.
+            cfg.skills = {}
+        cfg.__post_init__()
         return cfg
 
 

@@ -7,7 +7,7 @@ name = "picobot-v2"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "keyboard>=0.13.5",
     "pygetwindow>=0.0.9",
@@ -17,6 +17,7 @@ dependencies = [
     # Smart bot (python -m picobot.bot / SMART button)
     "mss>=9.0.2",
     "numpy>=1.26",
+    "pillow>=12.3.0",
 ]
 
 [project.optional-dependencies]

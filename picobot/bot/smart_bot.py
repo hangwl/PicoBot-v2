@@ -1,9 +1,11 @@
 """SmartBot: closed-loop grinding driven by minimap perception.
 
-Replaces blind macro playback with a perceive -> decide -> act loop:
-the minimap supplies player/rune/other-player positions, an FSM composes
-behaviors (grind / wander / pause), and movement is goal-directed via
-``move_to_point`` instead of recorded key sequences.
+Replaces blind macro playback with a perceive -> decide -> act loop.
+The bot runs a *rotation*: a graph of anchors (farming spots) connected
+by legs (walk / flash-jump / climb steps) read from config or a map file.
+An FSM composes the behaviour (GRIND dwell / TRAVEL leg / WANDER detour /
+PAUSE), movement is goal-directed, and skills fire off per-skill
+cooldowns — the way a player actually works a map.
 """
 
 from __future__ import annotations
@@ -11,18 +13,27 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from ..vision.game_window import GameWindow
-from ..vision.minimap import MinimapAnalyzer
+from ..vision.minimap import (
+    MinimapAnalyzer,
+    fingerprint,
+    fingerprint_distance,
+)
 from ..vision.screen import ScreenGrabber
 from .base import BotBase
 from .config import BotConfig
 from .inputs import HidController
 from .machine import Machine
+from .maps import MapEntry, MapStore
+from .rotation import Anchor, Rotation, Step, resolve_coord
+from .skills import Skill, SkillBook
 from .timing import human_delay, jittered
 
 logger = logging.getLogger(__name__)
+
+_UNSET = object()
 
 
 class SmartBot(BotBase):
@@ -45,8 +56,39 @@ class SmartBot(BotBase):
             controller, window, screen, minimap, config,
             log_callback=log_callback, notify_callback=notify_callback,
         )
+        self.skills = SkillBook(config.skills)
+        self.maps = MapStore(config.maps_dir)
+        self._map: Optional[MapEntry] = None
+        self._anchor_idx = 0
+        self._pingpong_dir = 1
+        self._rotation_started = False
+        self._travel_target: Optional[int] = None
+        self._leg_fp: Optional[str] = None
+        self._dwell_end = 0.0
+        self._rest_until = 0.0
+        self._arrive_pending: List[Tuple[Skill, float]] = []
         self._minimap_warned = False
-        self._last_buff = 0.0
+        self._map_warned = False
+        # Latest-observation snapshot consumed by the dashboard streamer.
+        self.viz: dict = {
+            "state": "IDLE", "img": None, "player": None, "hazard": None,
+            "target": None, "map": None, "anchor": None,
+        }
+
+    def _viz_state(self, name: str) -> None:
+        self.viz["state"] = name
+        self.event("fsm", name)
+
+    def viz_snapshot(self) -> dict:
+        """Read-only snapshot of what the bot currently sees/does."""
+        snap = dict(self.viz)
+        rot = self.effective_rotation()
+        region = self.minimap.region
+        if rot.anchors and region:
+            snap["anchors"] = [
+                (self._rx(a.x), self._ry(a.y)) for a in rot.anchors
+            ]
+        return snap
 
     @classmethod
     def connect(
@@ -80,9 +122,9 @@ class SmartBot(BotBase):
         region = self.minimap.region
         if region is not None:
             x, y, w, h = region
-            return self.screen.capture(
+            return self._stash_frame(self.screen.capture(
                 (self.window.left + x, self.window.top + y, w, h)
-            )
+            ))
         # Region unknown: try one auto-detection pass on the window image.
         img = self._window_capture()
         if img is None:
@@ -97,11 +139,30 @@ class SmartBot(BotBase):
             return None
         return self.minimap_frame()
 
-    def player_pos(self) -> Optional[Tuple[int, int]]:
-        img = self.minimap_frame()
+    def _stash_frame(self, img):
+        self.viz["img"] = img
+        return img
+
+    def _fp_ignored_colors(self):
+        c = self.minimap.colors
+        return (c.player, c.other_player, c.rune)
+
+    def minimap_fingerprint(self, img=None) -> Optional[str]:
+        if img is None:
+            img = self.minimap_frame()
         if img is None:
             return None
-        return self.minimap.player_pos(img)
+        return fingerprint(img, ignore_colors=self._fp_ignored_colors())
+
+    def player_pos(self, img=None) -> Optional[Tuple[int, int]]:
+        if img is None:
+            img = self.minimap_frame()
+        if img is None:
+            self.viz["player"] = None
+            return None
+        pos = self.minimap.player_pos(img)
+        self.viz["player"] = pos
+        return pos
 
     def rune_present(self) -> bool:
         img = self.minimap_frame()
@@ -125,6 +186,80 @@ class SmartBot(BotBase):
         exist this always returns None (keep ``pause_on_lie_detector`` off).
         """
         return None
+
+    # -- Safety ------------------------------------------------------------------
+    def unsafe_reason(self, img=_UNSET) -> Optional[str]:
+        """Why the bot should pause right now, or None if the map is clean."""
+        if self.config.pause_on_lie_detector and self.check_lie_detector():
+            return "verification prompt"
+        if img is _UNSET:
+            img = self.minimap_frame()
+        return self._img_hazard(img)
+
+    def _img_hazard(self, img) -> Optional[str]:
+        """Hazard checks that all run off one minimap capture."""
+        cfg = self.config
+        if img is None:
+            self.viz["hazard"] = None
+            return None
+        reason = None
+        if cfg.stop_when_rune_appears and self.minimap.has_rune(img):
+            reason = "rune"
+        elif cfg.stop_when_players_appear and self.minimap.has_other_players(img):
+            reason = "other players"
+        elif self._leg_fp:
+            fp = fingerprint(img, ignore_colors=self._fp_ignored_colors())
+            if fingerprint_distance(fp, self._leg_fp) > cfg.map_match_threshold:
+                reason = "map changed unexpectedly (portal?)"
+        if reason != self.viz["hazard"] and reason is not None:
+            self.event("safety", reason)
+        self.viz["hazard"] = reason
+        return reason
+
+    # -- Maps & rotation -----------------------------------------------------------
+    def effective_rotation(self) -> Rotation:
+        if self._map is not None:
+            return self._map.rotation
+        return self.config.rotation
+
+    def rotation_active(self) -> bool:
+        return bool(self.effective_rotation().anchors)
+
+    def _resolve_map(self, img=None) -> None:
+        """Pin ``active_map`` or auto-select by minimap fingerprint."""
+        cfg = self.config
+        if not (cfg.auto_select_map or cfg.active_map):
+            return
+        entry = None
+        if cfg.active_map:
+            entry = self.maps.get(cfg.active_map)
+            if entry is None and not self._map_warned:
+                self.log(f"Map '{cfg.active_map}' not found in {cfg.maps_dir}/")
+                self._map_warned = True
+        else:
+            fp = self.minimap_fingerprint(img)
+            entry = self.maps.match(fp, cfg.map_match_threshold)
+        if entry is not self._map:
+            self._map = entry
+            self.viz["map"] = entry.name if entry else None
+            merged = dict(cfg.skills)
+            if entry is not None:
+                merged.update(entry.skills)
+                self.log(f"Map: {entry.name}")
+                self.event("map", entry.name)
+            self.skills = SkillBook(merged)
+            self._anchor_idx = 0
+            self._rotation_started = False
+
+    def _region_wh(self) -> Tuple[int, int]:
+        region = self.minimap.region
+        return (region[2], region[3]) if region else (200, 150)
+
+    def _rx(self, value: float) -> int:
+        return resolve_coord(value, self._region_wh()[0])
+
+    def _ry(self, value: float) -> int:
+        return resolve_coord(value, self._region_wh()[1])
 
     # -- Movement ----------------------------------------------------------------
     def up_jump(self) -> None:
@@ -154,17 +289,38 @@ class SmartBot(BotBase):
         self.hid.key_up("down")
         self.sleep(0.4)
 
+    def _flash_key(self) -> str:
+        return self.config.flash_jump_key or self.config.jump_key
+
+    def _flash_hop(self) -> None:
+        """One flash-jump pair with irregular, human-ish spacing."""
+        jk = self._flash_key()
+        self.hid.press(jk)
+        self.sleep(random.uniform(0.13, 0.26))
+        self.hid.press(jk)
+        self.sleep(random.uniform(0.32, 0.62))
+
     def move_to_point(
-        self, target_x: int, target_y: int, threshold: Optional[int] = None
+        self,
+        target_x: int,
+        target_y: int,
+        threshold: Optional[int] = None,
+        *,
+        style: str = "walk",
     ) -> bool:
         """Navigate on the minimap toward (x, y); True if reached.
 
-        Polls the player dot at ~20Hz, holds the correct direction key only
-        when it changes, and jumps vertically once horizontally aligned. A
-        stuck counter triggers a rope-escape maneuver.
+        Polls the player dot while holding the correct direction key.
+        ``style`` controls horizontal travel: ``walk`` holds the key,
+        ``flash`` chains flash-jump hops, ``mixed`` mostly flashes with
+        occasional plain-walk stretches. Aborts (False) on hazards,
+        focus loss, or stop.
         """
         threshold = threshold or self.config.nav_threshold_px
-        self.log(f"Navigating to ({target_x}, {target_y})")
+        flash_ok = self.config.flash_jump_enabled and style in ("flash", "mixed")
+        self.viz["target"] = (target_x, target_y)
+        self.event("nav", f"→ ({target_x}, {target_y})", {"style": style})
+        self.log(f"Navigating to ({target_x}, {target_y}) [{style}]")
         held_dir = None
 
         def sync_dir(new_dir):
@@ -181,7 +337,15 @@ class SmartBot(BotBase):
         last = None
         try:
             while self.should_continue() and self.is_window_focused():
-                pos = self.player_pos()
+                img = self.minimap_frame()
+                if img is None:
+                    self.sleep(0.5)
+                    continue
+                reason = self._img_hazard(img)
+                if reason:
+                    self.log(f"Navigation aborted: {reason}")
+                    return False
+                pos = self.minimap.player_pos(img)
                 if pos is None:
                     self.sleep(0.5)
                     continue
@@ -189,6 +353,7 @@ class SmartBot(BotBase):
                 dx, dy = target_x - cx, target_y - cy
                 if abs(dx) <= threshold and abs(dy) <= threshold:
                     self.log("Navigation target reached")
+                    self.viz["target"] = None
                     return True
                 sync_dir("right" if dx > threshold else
                          "left" if dx < -threshold else None)
@@ -197,7 +362,14 @@ class SmartBot(BotBase):
                         self.up_jump()
                     elif dy > threshold:
                         self.down_jump()
-                self.sleep(0.05)
+                    else:
+                        self.sleep(0.05)
+                elif flash_ok and (
+                    style == "flash" or random.random() < 0.6
+                ):
+                    self._flash_hop()
+                else:
+                    self.sleep(0.05)
                 stuck = stuck + 1 if last == pos else 0
                 last = pos
                 if stuck >= self.config.nav_stuck_limit:
@@ -211,27 +383,236 @@ class SmartBot(BotBase):
         finally:
             sync_dir(None)
             self.hid.release_all()
+            self.viz["target"] = None
         return False
 
-    # -- Behaviors -----------------------------------------------------------------
-    def grind_once(self) -> None:
-        """One grind tick: buffs if due, then a randomized attack."""
-        if not self.is_window_focused() or not self.should_continue():
+    def climb(
+        self,
+        direction: str,
+        until_y: float,
+        *,
+        x: Optional[float] = None,
+        timeout: float = 10.0,
+    ) -> bool:
+        """Hold ``direction`` on a rope until player y crosses ``until_y``.
+
+        If ``x`` is given, aligns to that x first (the rope's position).
+        Fails (False) if the grab never latches, progress stalls, the
+        player dot vanishes (portal?), or a hazard appears — so a missed
+        grab next to a portal pauses the bot instead of changing maps.
+        """
+        if x is not None:
+            pos = self.player_pos()
+            if pos is not None and not self.move_to_point(
+                self._rx(x), pos[1], threshold=2, style="walk"
+            ):
+                return False
+        target_y = self._ry(until_y)
+        self.log(f"Climb {direction} → y≈{target_y}")
+        deadline = time.time() + timeout
+        grabbed = False
+        last_y = None
+        still = 0
+        lost = 0
+        self.hid.key_down(direction)
+        try:
+            while (
+                self.should_continue()
+                and self.is_window_focused()
+                and time.time() < deadline
+            ):
+                img = self.minimap_frame()
+                if img is None:
+                    self.sleep(0.3)
+                    continue
+                reason = self._img_hazard(img)
+                if reason:
+                    self.log(f"Climb aborted: {reason}")
+                    return False
+                pos = self.minimap.player_pos(img)
+                if pos is None:
+                    lost += 1
+                    if lost >= 10:
+                        self.log("Climb aborted: position lost")
+                        return False
+                    self.sleep(0.15)
+                    continue
+                lost = 0
+                y = pos[1]
+                if direction == "up" and y <= target_y + 2:
+                    return True
+                if direction == "down" and y >= target_y - 2:
+                    return True
+                if last_y is not None and y == last_y:
+                    still += 1
+                else:
+                    still = 0
+                    grabbed = True
+                last_y = y
+                if not grabbed and time.time() - (deadline - timeout) > 2.5:
+                    self.log("Climb failed: rope never latched")
+                    return False
+                if grabbed and still >= 10:
+                    self.log("Climb failed: stalled on rope")
+                    return False
+                self.sleep(0.15)
+            self.log("Climb failed: timed out")
+            return False
+        finally:
+            self.hid.key_up(direction)
+
+    # -- Rotation ----------------------------------------------------------------
+    def begin_travel(self) -> bool:
+        """Pick the next anchor and arm the leg + map-change baseline."""
+        self._resolve_map()
+        rot = self.effective_rotation()
+        if not rot.anchors:
+            return False
+        if self._anchor_idx >= len(rot.anchors):
+            self._anchor_idx = 0
+            self._rotation_started = False
+        self._leg_fp = self.minimap_fingerprint()
+        if not self._rotation_started:
+            # First leg: head for the nearest anchor, not blindly #0.
+            pos = self.player_pos()
+            if pos is not None:
+                target = min(
+                    range(len(rot.anchors)),
+                    key=lambda i: (self._rx(rot.anchors[i].x) - pos[0]) ** 2
+                    + (self._ry(rot.anchors[i].y) - pos[1]) ** 2,
+                )
+            else:
+                target = self._anchor_idx
+            self._rotation_started = True
+        else:
+            target, self._pingpong_dir = rot.next_index(
+                self._anchor_idx, self._pingpong_dir
+            )
+        self._travel_target = target
+        self.log(f"TRAVEL: → {rot.anchors[target].name}")
+        return True
+
+    def run_travel(self) -> bool:
+        """Execute the current leg; True if the anchor was reached."""
+        rot = self.effective_rotation()
+        target = self._travel_target
+        if target is None:
+            return False
+        ok = self._run_leg(rot.leg_steps(self._anchor_idx, target))
+        self._leg_fp = None
+        self._travel_target = None
+        if ok:
+            self._anchor_idx = target
+        else:
+            self.log("Leg incomplete — re-planning next cycle")
+        return ok
+
+    def _run_leg(self, steps: List[Step]) -> bool:
+        rot = self.effective_rotation()
+        jitter = rot.position_jitter_px
+        for step in steps:
+            if not self.should_continue() or not self.is_window_focused():
+                return False
+            if step.kind == "walk_to":
+                jx = random.randint(-jitter, jitter) if jitter else 0
+                jy = random.randint(-jitter, jitter) if jitter else 0
+                style = step.style or rot.travel_style or self.config.travel_style
+                if not self.move_to_point(
+                    self._rx(step.x) + jx, self._ry(step.y) + jy, style=style
+                ):
+                    return False
+            elif step.kind == "climb":
+                if not self.climb(step.direction, step.until_y, x=step.x):
+                    return False
+            elif step.kind == "up_jump":
+                self.up_jump()
+            elif step.kind == "down_jump":
+                self.down_jump()
+            elif step.kind == "wait":
+                if self.sleep(step.seconds):
+                    return False
+        return self.unsafe_reason() is None
+
+    # -- Dwell ---------------------------------------------------------------------
+    def begin_dwell(self) -> None:
+        """Start a farming dwell at the current anchor (or legacy timer)."""
+        rot = self.effective_rotation()
+        now = time.time()
+        if rot.anchors and self._anchor_idx < len(rot.anchors):
+            anchor = rot.anchors[self._anchor_idx]
+            if anchor.face:
+                self.hid.press(anchor.face)
+            self._arrive_pending = [
+                (s, now + s.wait_on_arrival)
+                for name in anchor.on_arrive
+                if (s := self.skills.get(name)) is not None
+            ]
+            dwell = anchor.dwell_seconds()
+            self._dwell_end = now + dwell
+            if random.random() < rot.rest_chance:
+                self._rest_until = now + min(dwell * 0.6, random.uniform(5, 25))
+                self.log("Taking a breather")
+            else:
+                self._rest_until = 0.0
+        else:
+            self._arrive_pending = []
+            self._rest_until = 0.0
+            self._dwell_end = now + self.config.stationary_seconds
+
+    def dwell_done(self) -> bool:
+        return time.time() >= self._dwell_end
+
+    def dwell_tick(self) -> None:
+        """One farming tick at an anchor: arrival skills, buffs, attack."""
+        if time.time() < self._rest_until:
+            self.sleep(0.5)
             return
         now = time.time()
-        if self.config.buff_keys and now - self._last_buff >= self.config.buff_interval_seconds:
-            for key in self.config.buff_keys:
-                if not self.should_continue():
-                    break
-                self.hid.press(key)
+        for skill, deadline in list(self._arrive_pending):
+            if self.skills.ready(skill.name, now):
+                self._use_skill(skill)
+                self._arrive_pending.remove((skill, deadline))
+            elif now > deadline:
+                self._arrive_pending.remove((skill, deadline))
+        self._attack_cycle()
+
+    # -- Attacks & skills -----------------------------------------------------------
+    def _use_skill(self, skill: Skill) -> bool:
+        if not self.is_window_focused() or not self.should_continue():
+            return False
+        if self.hid.press(skill.key, skill.hold):
+            self.skills.mark_used(skill.name)
+            self.log(f"Skill: {skill.name}")
+            self.event("skill", skill.name, {"key": skill.key})
+            return True
+        return False
+
+    def _pick_attack(self) -> Optional[Skill]:
+        ready = self.skills.ready_attacks()
+        if not ready:
+            return None
+        cooldown_ready = [s for s in ready if s.cooldown > 0]
+        return random.choice(cooldown_ready or ready)
+
+    def _attack_cycle(self) -> None:
+        for buff in self.skills.due_buffs():
+            if not self.should_continue():
+                break
+            if self._use_skill(buff):
                 self.sleep(jittered(0.6))
-            self._last_buff = now
-        keys = list(self.config.attack_keys)
-        random.shuffle(keys)
-        key = keys[0] if keys else "a"
-        self.hid.press(key)
+        skill = self._pick_attack()
+        if skill is None:
+            self.sleep(0.2)
+            return
+        self.hid.press(skill.key, skill.hold)
         lo, hi = self.config.skill_gap_seconds
         self.sleep(human_delay(random.uniform(lo, hi)))
+
+    def grind_once(self) -> None:
+        """Legacy no-rotation tick: due buffs, then a randomized attack."""
+        if not self.is_window_focused() or not self.should_continue():
+            return
+        self._attack_cycle()
 
     def random_wander(self) -> None:
         """Bounded random walk for ``wander_seconds``, then return home."""
@@ -286,6 +667,7 @@ class SmartBot(BotBase):
         try:
             self.window.activate()
             self.sleep(1)
+            self._resolve_map()
             Machine(self).run()
             self.log("Smart bot stopped")
         except KeyboardInterrupt:

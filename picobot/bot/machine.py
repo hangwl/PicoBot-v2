@@ -13,6 +13,7 @@ import logging
 from .states.base import POP
 from .states.grind import Grind
 from .states.pause import Pause
+from .states.travel import Travel
 from .states.wander import Wander
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 class Machine:
     state_mapping = {
         "GRIND": Grind,
+        "TRAVEL": Travel,
         "WANDER": Wander,
         "PAUSE": Pause,
     }
@@ -62,12 +64,14 @@ class Machine:
         previous.exit()
         self.current_state = state_cls(self.bot)
         self.current_state.enter()
+        self._notify_state(result)
         return True
 
     def run(self) -> None:
         """Start in GRIND and loop until the bot is stopped."""
         self.current_state = Grind(self.bot)
         self.current_state.enter()
+        self._notify_state("GRIND")
         try:
             while self.bot.should_continue():
                 if not self.switch() and self.bot.should_continue():
@@ -75,6 +79,16 @@ class Machine:
         finally:
             if self.current_state is not None:
                 self.current_state.exit()
+            self._notify_state("STOPPED")
+
+    def _notify_state(self, name: str) -> None:
+        """Tell the bot which state we're in (for dashboards); optional."""
+        hook = getattr(self.bot, "_viz_state", None)
+        if callable(hook):
+            try:
+                hook(name)
+            except Exception:
+                pass
 
 
 __all__ = ["Machine"]

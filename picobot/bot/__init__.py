@@ -10,15 +10,25 @@ from .base import BotBase
 from .config import BotConfig
 from .inputs import HidController
 from .machine import Machine
+from .maps import MapEntry, MapStore
+from .rotation import Anchor, Rotation, Step
+from .skills import Skill, SkillBook
 from .smart_bot import SmartBot
 from .timing import human_delay, human_hold, jittered
 
 __all__ = [
+    "Anchor",
     "BotBase",
     "BotConfig",
     "HidController",
     "Machine",
+    "MapEntry",
+    "MapStore",
+    "Rotation",
+    "Skill",
+    "SkillBook",
     "SmartBot",
+    "Step",
     "human_delay",
     "human_hold",
     "jittered",

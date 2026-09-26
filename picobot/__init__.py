@@ -1,4 +1,4 @@
-"""PicoBot package exposing the GUI application and related services."""
+"""PicoBot: perception-driven game bot over a Pico HID relay."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ __all__ = ["main"]
 
 
 def main() -> None:
-    """Launch the PicoBot GUI application."""
+    """Launch the PicoBot dashboard host (``python -m picobot.serve``)."""
 
-    from .app import main as _app_main
+    from .serve import main as _serve_main
 
-    _app_main()
+    _serve_main()

@@ -34,6 +34,7 @@ class BotBase:
         *,
         log_callback: LogCallback = None,
         notify_callback: NotifyCallback = None,
+        event_bus=None,
     ) -> None:
         self.hid = controller
         self.window = window
@@ -42,6 +43,11 @@ class BotBase:
         self.config = config or BotConfig()
         self._log_callback = log_callback
         self._notify_callback = notify_callback
+        if event_bus is None:
+            from ..events import EventBus
+
+            event_bus = EventBus()
+        self.events = event_bus
         self._stop_event = threading.Event()
 
     # -- Lifecycle --------------------------------------------------------------
@@ -66,11 +72,16 @@ class BotBase:
     # -- Messaging ---------------------------------------------------------------
     def log(self, message: str) -> None:
         logger.info("%s", message)
+        self.events.emit("log", message)
         if self._log_callback:
             try:
                 self._log_callback(message)
             except Exception:
                 pass
+
+    def event(self, kind: str, message: str, data: Optional[dict] = None) -> None:
+        """Emit a structured event without a log line."""
+        self.events.emit(kind, message, data)
 
     def notify(self, message: str) -> None:
         """Push a high-priority alert (e.g. Telegram) for safety events."""

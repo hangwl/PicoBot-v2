@@ -12,7 +12,7 @@ between game clients (e.g. GMS-based private servers vs. other versions).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 import numpy as np
 
@@ -84,6 +84,61 @@ def blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
     if xs.size == 0:
         return None
     return int(xs.mean()), int(ys.mean())
+
+
+def fingerprint(
+    img: np.ndarray,
+    ignore_colors: Optional[Iterable[Tuple[int, int, int]]] = None,
+    tolerance: int = 10,
+    size: int = 16,
+) -> str:
+    """Content hash of a minimap capture, for map identification.
+
+    The image is divided into ``size``×``size`` cells; each cell's mean AND
+    max grayscale become the hash (hex string, 2 bytes per cell). The max
+    channel preserves thin platform lines that mean-pooling would wash
+    out. Pixels matching ``ignore_colors`` (e.g. the roaming marker dots)
+    are excluded, so markers don't perturb the hash of a static minimap.
+    """
+    h, w = img.shape[:2]
+    bh, bw = max(1, h // size), max(1, w // size)
+    crop = img[: bh * size, : bw * size].astype(np.float32)
+    if ignore_colors:
+        ignore = np.zeros(crop.shape[:2], dtype=bool)
+        for bgr in ignore_colors:
+            ignore |= color_mask(crop.astype(np.uint8), bgr, tolerance)
+        weights = (~ignore).astype(np.float32)
+        masked = np.where(ignore, -1.0, 0.0)
+    else:
+        weights = np.ones(crop.shape[:2], dtype=np.float32)
+        masked = np.zeros(crop.shape[:2], dtype=np.float32)
+    gray = (
+        0.114 * crop[:, :, 0] + 0.587 * crop[:, :, 1] + 0.299 * crop[:, :, 2]
+    )
+    num = (gray * weights).reshape(size, bh, size, bw).sum(axis=(1, 3))
+    den = weights.reshape(size, bh, size, bw).sum(axis=(1, 3))
+    means = np.where(den > 0, num / np.maximum(den, 1), 127.0)
+    # Excluded pixels get -1 so they never win the per-cell max.
+    maxes = (gray + masked).reshape(size, bh, size, bw).max(axis=(1, 3))
+    maxes = np.where(maxes >= 0, maxes, 127.0)
+    cells = np.concatenate([means, maxes]).astype(np.uint8)
+    return cells.tobytes().hex()
+
+
+def fingerprint_distance(a: str, b: str) -> float:
+    """Mean absolute pixel difference between two fingerprints (0-255).
+
+    Returns ``inf`` for missing/mismatched/invalid inputs so unknown maps
+    never match.
+    """
+    if not a or not b or len(a) != len(b):
+        return float("inf")
+    try:
+        pa = np.frombuffer(bytes.fromhex(a), dtype=np.uint8).astype(np.int16)
+        pb = np.frombuffer(bytes.fromhex(b), dtype=np.uint8).astype(np.int16)
+    except ValueError:
+        return float("inf")
+    return float(np.abs(pa - pb).mean())
 
 
 class MinimapAnalyzer:
@@ -181,4 +236,6 @@ __all__ = [
     "blob_centroid",
     "color_mask",
     "erode3",
+    "fingerprint",
+    "fingerprint_distance",
 ]

@@ -40,6 +40,12 @@ class RemoteCallbacks:
     broadcast: Callable[[str], None]
     get_macro_base_path: Callable[[], str]
     on_remote_playlist_selected: Callable[[str], None]
+    # Smart-bot lifecycle + dashboard command sink (optional; serve.py wires
+    # these, the legacy Tk app leaves them None).
+    start_bot: Optional[Callable[[], None]] = None
+    stop_bot: Optional[Callable[[], None]] = None
+    is_bot_running: Optional[Callable[[], bool]] = None
+    handle_command: Optional[Callable[[str], bool]] = None
 
 
 class AsyncWebsocketBridge:
@@ -215,8 +221,10 @@ class RemoteControlServer:
         *,
         serial_manager: Optional[SerialManager] = None,
         ssl_context: Optional[ssl.SSLContext] = None,
+        serial_optional: bool = False,
     ) -> None:
         self.serial_port_name = serial_port_name
+        self.serial_optional = serial_optional
         self.ws_port = ws_port
         self.callbacks = callbacks
         self.serial_manager = serial_manager or SerialManager(serial_port_name)
@@ -242,7 +250,9 @@ class RemoteControlServer:
                 exc,
             )
             self._set_status("Remote: Serial error")
-            return
+            if not self.serial_optional:
+                return
+            # Degraded mode: WS/HTTP still come up; payloads fail on send.
         self.serial_manager.register_line_callback(self._on_serial_line)
         self.stop_event.clear()
         self.cmd_queue = queue.Queue()
@@ -460,6 +470,38 @@ class RemoteControlServer:
             except Exception:
                 pass
             return
+        # Dashboard commands: bot lifecycle, maps, calibration, stream mode.
+        if msg.startswith(("bot|", "map|", "cal|", "dash|")):
+            handled = False
+            if msg == "bot|start" and self.callbacks.start_bot:
+                self._log("WS: bot|start received")
+                self._schedule(self.callbacks.start_bot)
+                handled = True
+            elif msg == "bot|stop" and self.callbacks.stop_bot:
+                self._log("WS: bot|stop received")
+                self._schedule(self.callbacks.stop_bot)
+                handled = True
+            elif msg == "bot|query" and self.callbacks.is_bot_running:
+                try:
+                    running = bool(self.callbacks.is_bot_running())
+                except Exception:
+                    running = False
+                try:
+                    await websocket.send(
+                        "bot|running" if running else "bot|stopped"
+                    )
+                except Exception:
+                    pass
+                handled = True
+            elif self.callbacks.handle_command:
+                try:
+                    handled = bool(self.callbacks.handle_command(msg))
+                except Exception as exc:
+                    self._log(f"dashboard command error: {exc}")
+            if not handled:
+                self._log(f"WS: unhandled dashboard command '{msg}'")
+            return
+
         if msg.startswith("macro|"):
             parts = msg.split("|")
             action = parts[1] if len(parts) > 1 else ""
