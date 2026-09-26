@@ -87,10 +87,6 @@
         <select id="winSel" style="min-width:220px"><option value="">(window)</option></select>
         <button id="connRefresh">Refresh</button>
       </div>
-      <div class="row" style="margin-top:8px">
-        <input id="winIn" placeholder="or type title (substring ok)" style="min-width:160px">
-        <button id="winSet">Set</button>
-      </div>
       <div style="margin-top:6px"><label>selections are remembered</label></div>
     </div>
     <div class="panel">
@@ -270,9 +266,6 @@ $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.targe
 $("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target.value); };
 $("portAuto").onclick = () => send("host|serial|auto");
 $("connRefresh").onclick = () => send("host|state");
-$("winSet").onclick = () => {
-  const t = $("winIn").value.trim(); if (t) send("host|window|" + t);
-};
 $("calStart").onclick = () => { calActive = true; send("cal|start"); };
 $("calMark").onclick = () => send("cal|mark");
 $("calFinish").onclick = () => {

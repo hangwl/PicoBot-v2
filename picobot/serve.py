@@ -33,14 +33,26 @@ class _VisionFeed:
     Lazily created — pygetwindow/mss only exist on the host machine.
     """
 
-    def __init__(self, window_title: str, colors, region) -> None:
+    def __init__(
+        self,
+        window_title: str,
+        colors,
+        region,
+        on_event=None,
+        map_change_threshold: float = 15.0,
+    ) -> None:
         from .vision.game_window import GameWindow
         from .vision.minimap import MinimapAnalyzer
         from .vision.screen import ScreenGrabber
 
         self.window = GameWindow(window_title)
         self.screen = ScreenGrabber()
-        self.minimap = MinimapAnalyzer(colors=colors, region=region)
+        self.minimap = MinimapAnalyzer(
+            colors=colors,
+            region=region,
+            map_change_threshold=map_change_threshold,
+        )
+        self._on_event = on_event
 
     def minimap_img(self):
         region = self.minimap.region
@@ -51,7 +63,11 @@ class _VisionFeed:
                 return None
             region = self.minimap.region
         x, y, w, h = region
-        return self.screen.capture((self.window.left + x, self.window.top + y, w, h))
+        img = self.screen.capture((self.window.left + x, self.window.top + y, w, h))
+        if img is not None and self.minimap.note_frame(img):
+            if self._on_event:
+                self._on_event("vision", "map change detected — minimap relocated")
+        return img
 
     def window_img(self):
         l, t, r, b = self.window.rect()
@@ -228,6 +244,8 @@ class BotHost:
                         self.window_title,
                         self.bot_config.minimap_colors,
                         self.bot_config.minimap_region,
+                        on_event=self.bus.emit,
+                        map_change_threshold=self.bot_config.map_match_threshold,
                     )
                 except Exception as exc:
                     logger.warning("vision feed unavailable: %s", exc)
@@ -330,23 +348,12 @@ class BotHost:
     def _list_windows() -> list:
         try:
             import pygetwindow as gw
+
+            return sorted(
+                {t.strip() for t in gw.getAllTitles() if t and t.strip()}
+            )
         except Exception:
             return []
-        titles = set()
-        try:
-            windows = gw.getAllWindows()
-        except Exception:
-            return []
-        for w in windows:
-            # A single window whose title can't be read must not sink the
-            # whole enumeration — getAllTitles() has that failure mode.
-            try:
-                t = (w.title or "").strip()
-            except Exception:
-                continue
-            if t:
-                titles.add(t)
-        return sorted(titles)
 
     def _send_host_state(self) -> None:
         payload = {

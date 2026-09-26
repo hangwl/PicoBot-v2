@@ -114,5 +114,58 @@ class MinimapAnalyzerTests(unittest.TestCase):
             MinimapColors.from_dict({"player": [1, 2]})
 
 
+def _hlines(w=200, h=150):
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img[::15, :] = 200
+    return img
+
+
+def _vlines(w=200, h=150):
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img[:, ::15] = 200
+    return img
+
+
+class MapChangeWatchdogTests(unittest.TestCase):
+    def test_same_map_frames_do_not_trip(self):
+        a = MinimapAnalyzer(region=(0, 0, 200, 150))
+        self.assertFalse(a.note_frame(_hlines()))
+        self.assertFalse(a.note_frame(_hlines()))
+
+    def test_persistent_change_trips_after_n_frames(self):
+        a = MinimapAnalyzer(region=(0, 0, 200, 150))
+        a._region_explicit = False  # simulate auto-located region
+        a.note_frame(_hlines())     # baseline
+        self.assertFalse(a.note_frame(_vlines()))   # miss 1
+        self.assertFalse(a.note_frame(_vlines()))   # miss 2
+        self.assertTrue(a.note_frame(_vlines()))    # miss 3 → change
+        self.assertIsNone(a.region)                 # auto region dropped
+
+    def test_explicit_region_kept_on_change(self):
+        a = MinimapAnalyzer(region=(0, 0, 200, 150))
+        a.note_frame(_hlines())
+        for _ in range(2):
+            self.assertFalse(a.note_frame(_vlines()))
+        self.assertTrue(a.note_frame(_vlines()))
+        self.assertEqual(a.region, (0, 0, 200, 150))
+
+    def test_transient_flicker_does_not_trip(self):
+        a = MinimapAnalyzer()
+        a._region = (0, 0, 200, 150)
+        a.note_frame(_hlines())
+        self.assertFalse(a.note_frame(_vlines()))   # 1 miss
+        self.assertFalse(a.note_frame(_hlines()))   # recovers → counter reset
+        self.assertFalse(a.note_frame(_hlines()))
+        self.assertEqual(a.region, (0, 0, 200, 150))
+
+    def test_baseline_rearms_after_reset(self):
+        a = MinimapAnalyzer(map_change_frames=2)
+        a.note_frame(_hlines())
+        a.note_frame(_vlines())
+        self.assertTrue(a.note_frame(_vlines()))    # change confirmed
+        # New baseline adopted; same new content must not re-trip.
+        self.assertFalse(a.note_frame(_vlines()))
+
+
 if __name__ == "__main__":
     unittest.main()

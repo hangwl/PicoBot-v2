@@ -50,7 +50,9 @@ class SmartBot(BotBase):
         window = GameWindow(window_title)
         screen = ScreenGrabber()
         minimap = MinimapAnalyzer(
-            colors=config.minimap_colors, region=config.minimap_region
+            colors=config.minimap_colors,
+            region=config.minimap_region,
+            map_change_threshold=config.map_match_threshold,
         )
         super().__init__(
             controller, window, screen, minimap, config,
@@ -122,9 +124,13 @@ class SmartBot(BotBase):
         region = self.minimap.region
         if region is not None:
             x, y, w, h = region
-            return self._stash_frame(self.screen.capture(
+            img = self.screen.capture(
                 (self.window.left + x, self.window.top + y, w, h)
-            ))
+            )
+            if img is not None and self.minimap.note_frame(img):
+                self.event("vision", "map change detected — minimap relocated")
+                self._minimap_warned = False  # re-warn if re-locate fails
+            return self._stash_frame(img)
         # Region unknown: try one auto-detection pass on the window image.
         img = self._window_capture()
         if img is None:

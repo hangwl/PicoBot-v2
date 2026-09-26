@@ -147,6 +147,11 @@ class MinimapAnalyzer:
     ``region`` may be supplied explicitly (recommended — border auto-detection
     is fragile across clients/resolutions). If omitted, ``locate`` searches a
     window capture for the frame-colored border rectangle.
+
+    A fingerprint watchdog (``note_frame``) watches captured content; when it
+    changes persistently — i.e. the player changed maps — an auto-located
+    region is dropped so the next ``locate`` re-detects the minimap's new
+    position/size. Explicitly configured regions are never reset.
     """
 
     def __init__(
@@ -155,14 +160,54 @@ class MinimapAnalyzer:
         region: Region | None = None,
         *,
         border_tolerance: int = 10,
+        map_change_threshold: float = 15.0,
+        map_change_frames: int = 3,
     ) -> None:
         self.colors = colors or MinimapColors()
         self._region = region
+        self._region_explicit = region is not None
         self._border_tolerance = border_tolerance
+        self._map_change_threshold = map_change_threshold
+        self._map_change_frames = map_change_frames
+        self._baseline_fp: Optional[str] = None
+        self._fp_misses = 0
 
     @property
     def region(self) -> Optional[Region]:
         return self._region
+
+    def note_frame(self, minimap_img: np.ndarray) -> bool:
+        """Watchdog: report True when a map change is confirmed.
+
+        Compares each capture's content fingerprint to a baseline taken on
+        the current map. ``map_change_frames`` consecutive mismatches confirm
+        a real change (single-frame flicker like loading blanks is ignored).
+        On confirmation an auto-located region is cleared so ``locate`` runs
+        again on the next capture; the baseline is reset either way.
+        """
+        fp = fingerprint(
+            minimap_img,
+            ignore_colors=(
+                self.colors.player, self.colors.other_player, self.colors.rune
+            ),
+        )
+        if self._baseline_fp is None:
+            self._baseline_fp = fp
+            return False
+        if (
+            fingerprint_distance(fp, self._baseline_fp)
+            <= self._map_change_threshold
+        ):
+            self._fp_misses = 0
+            return False
+        self._fp_misses += 1
+        if self._fp_misses < self._map_change_frames:
+            return False
+        self._fp_misses = 0
+        self._baseline_fp = None
+        if not self._region_explicit:
+            self._region = None
+        return True
 
     def locate(self, window_img: np.ndarray) -> Optional[Region]:
         """Find the minimap frame in a window capture, once; result is cached.
