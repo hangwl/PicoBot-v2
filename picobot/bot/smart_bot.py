@@ -78,6 +78,7 @@ class SmartBot(BotBase):
         self._arrive_pending: List[Tuple[Skill, float]] = []
         self._minimap_warned = False
         self._map_warned = False
+        self._last_up_skill = 0.0
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
@@ -349,14 +350,24 @@ class SmartBot(BotBase):
         return resolve_coord(value, self._region_wh()[1])
 
     # -- Movement ----------------------------------------------------------------
-    def up_jump(self) -> None:
-        """Vertical boost: configured skill key if set, else jump+up+jump."""
+    def up_jump(self) -> bool:
+        """Vertical boost: configured skill key if set, else jump+up+jump.
+
+        Returns False when the skill key was suppressed by its cooldown
+        (rope lift & co. are on a real timer — pressing early does nothing
+        in-game) or the window isn't focused; True when it pressed.
+        """
         if not self.is_window_focused():
-            return
+            return False
         if self.config.up_jump_skill_key:
+            now = time.time()
+            last = getattr(self, "_last_up_skill", 0.0)
+            if now - last < self.config.up_jump_skill_cooldown:
+                return False
+            self._last_up_skill = now
             self.hid.press(self.config.up_jump_skill_key)
             self.sleep(0.3)
-            return
+            return True
         jk = self.config.jump_key
         self.hid.press(jk)
         self.sleep(0.1)
@@ -366,6 +377,7 @@ class SmartBot(BotBase):
         self.hid.key_up(jk)
         self.hid.key_up("up")
         self.sleep(0.3)
+        return True
 
     def down_jump(self) -> None:
         if not self.is_window_focused():
@@ -494,11 +506,16 @@ class SmartBot(BotBase):
                             if vert_ref is not None and cy >= vert_ref - 1
                             else 0
                         )
-                        vert_ref = cy
-                        last_vert_jump = now
                         if vert_fails >= 2:
                             return vert_stuck("ascend")
-                        self.up_jump()
+                        if self.up_jump() is False:
+                            # Up-skill on cooldown — ride it out; a suppressed
+                            # press is neither a failed attempt nor a stuck
+                            # poll (skipped by the continue).
+                            self.sleep(0.05)
+                            continue
+                        vert_ref = cy
+                        last_vert_jump = now
                     elif dy > threshold and now - last_vert_jump >= 0.9:
                         vert_fails = (
                             vert_fails + 1

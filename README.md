@@ -128,6 +128,7 @@ toggles, minimap colors/region, flash jump, map store:
     "buff_interval_seconds": 60,
     "jump_key": "alt",
     "up_jump_skill_key": null,
+    "up_jump_skill_cooldown": 3.0,
     "stationary_seconds": 20,
     "wander_seconds": 15,
     "skill_gap_seconds": [0.5, 1.0],
@@ -144,7 +145,7 @@ toggles, minimap colors/region, flash jump, map store:
       "border": [228, 228, 228],
       "ink": null
     },
-    "flash_jump": {"enabled": true, "key": "alt"},
+    "flash_jump": {"enabled": true, "key": null},
     "travel_style": "mixed",
     "maps_dir": "maps",
     "active_map": null,
@@ -157,6 +158,12 @@ toggles, minimap colors/region, flash jump, map store:
 
 Notes:
 
+- `up_jump_skill_key` is the rope-lift style skill used instead of the
+  jump+up+jump combo; presses are gated by `up_jump_skill_cooldown`
+  (default 3s) and nav rides out the cooldown rather than misreading a
+  suppressed press as "can't climb".
+- Flash jump is jump-again-mid-air — it always uses `jump_key` (`key` is
+  a legacy override, normally left null).
 - Legacy `attack_keys`/`buff_keys` are synthesized into skills when no explicit
   `"skills"` map exists — new configs should use named skills.
 - `minimap_region` is `(x, y, w, h)` **relative to the game window's client

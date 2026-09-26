@@ -141,6 +141,56 @@ class VerticalStuckTests(unittest.TestCase):
         self.assertEqual(bot.up_jump.call_count, 2)
 
 
+class RopeLiftCooldownTests(unittest.TestCase):
+    """up_jump with a skill key must respect the 3s skill cooldown."""
+
+    def _bot(self):
+        bot = SmartBot.__new__(SmartBot)
+        bot.config = BotConfig()
+        bot.config.up_jump_skill_key = "alt"
+        bot.config.up_jump_skill_cooldown = 3.0
+        bot.hid = FakeHid()
+        bot.is_window_focused = Mock(return_value=True)
+        bot.sleep = Mock(return_value=False)
+        bot._last_up_skill = 0.0
+        return bot
+
+    def test_suppresses_presses_during_cooldown(self):
+        bot = self._bot()
+        with patch("time.time", side_effect=iter([10.0, 11.0, 13.5])):
+            self.assertTrue(bot.up_jump())     # t=10 — fires
+            self.assertFalse(bot.up_jump())    # t=11 — on cooldown
+            self.assertTrue(bot.up_jump())     # t=13.5 — cooldown elapsed
+        self.assertEqual(bot.hid.presses, ["alt", "alt"])
+
+    def test_combo_path_unaffected(self):
+        bot = self._bot()
+        bot.config.up_jump_skill_key = None
+        bot.config.jump_key = "space"
+        self.assertTrue(bot.up_jump())
+        self.assertTrue(bot.up_jump())
+        self.assertEqual(bot.hid.presses, ["space", "space"])
+
+    def test_nav_waits_out_cooldown_instead_of_failing(self):
+        # up_jump suppressed (cooldown) must not count toward vert_fails —
+        # poll fast with cooldown never elapsing and the leg must not
+        # conclude "vertically blocked".
+        bot = _bot([(20, 60)] * 30, target=(20, 50))
+        bot.up_jump = Mock(return_value=False)   # always on cooldown
+        bot.config.nav_stuck_limit = 10
+        # No real clock needed: suppressed presses never set vert_ref and
+        # skip stuck counting via continue. Force stop after the script
+        # by exhausting positions into should_continue=False.
+        calls = [0]
+
+        def stop_after():
+            calls[0] += 1
+            return calls[0] < 25
+        bot.should_continue = Mock(side_effect=stop_after)
+        self.assertFalse(_drive(bot))           # stopped, not vert_stuck
+        bot.up_jump.assert_called()             # kept retrying the skill
+
+
 class TargetSnapTests(unittest.TestCase):
     def test_target_snapped_to_platform_ink(self):
         bot = _bot([(20, 49), (20, 50)], target=(20, 60))

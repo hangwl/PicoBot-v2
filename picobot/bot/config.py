@@ -37,6 +37,7 @@ class BotConfig:
     buff_interval_seconds: float = 60.0
     jump_key: str = "alt"
     up_jump_skill_key: Optional[str] = None  # e.g. a rope-lift skill; None = use combo
+    up_jump_skill_cooldown: float = 3.0     # rope lift re-cast delay
 
     # -- Timing ----------------------------------------------------------------
     skill_gap_seconds: Tuple[float, float] = (0.5, 1.0)  # base gap between attacks
@@ -101,6 +102,7 @@ class BotConfig:
                 setattr(cfg, name, bool(data[name]))
         floats = (
             "buff_interval_seconds", "stationary_seconds", "wander_seconds",
+            "up_jump_skill_cooldown",
         )
         for name in floats:
             if name in data:
