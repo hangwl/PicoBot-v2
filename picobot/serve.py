@@ -330,12 +330,23 @@ class BotHost:
     def _list_windows() -> list:
         try:
             import pygetwindow as gw
-
-            return sorted(
-                {t.strip() for t in gw.getAllTitles() if t and t.strip()}
-            )
         except Exception:
             return []
+        titles = set()
+        try:
+            windows = gw.getAllWindows()
+        except Exception:
+            return []
+        for w in windows:
+            # A single window whose title can't be read must not sink the
+            # whole enumeration — getAllTitles() has that failure mode.
+            try:
+                t = (w.title or "").strip()
+            except Exception:
+                continue
+            if t:
+                titles.add(t)
+        return sorted(titles)
 
     def _send_host_state(self) -> None:
         payload = {
