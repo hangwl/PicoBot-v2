@@ -404,20 +404,32 @@ class CalibrationRunner:
         if recorder is None:
             raise RuntimeError("no calibration in progress")
         # Snap each anchor's y onto platform ink — marks taken mid-fall or
-        # dragged a few px below the floor are unreachable as-is.
+        # dragged a few px below the floor are unreachable as-is. A snap
+        # only applies within a platform-spacing; farther out the mark is
+        # genuinely off-geometry and is left as recorded with a warning.
         if img is not None and self._snap_fn is not None:
-            snapped = 0
+            snapped = off = 0
             for a in recorder.anchors:
                 try:
                     py = self._snap_fn(img, a["pos"][0], a["pos"][1])
                 except Exception:
                     py = None
-                if py is not None and py != int(round(a["pos"][1])):
+                if py is None:
+                    off += 1
+                elif py != int(round(a["pos"][1])):
                     a["pos"] = (a["pos"][0], float(py))
                     snapped += 1
             if snapped:
                 self._emit(
                     "cal", f"snapped {snapped} anchor(s) onto platform ink"
+                )
+            if off:
+                self._emit(
+                    "error",
+                    f"{off} anchor(s) are off-platform (no ink within "
+                    "reach) — left as recorded; they may be unreachable. "
+                    "Re-mark while standing on a floor, or check "
+                    "minimap_colors.ink matches your client.",
                 )
         entry = recorder.finish(
             name,

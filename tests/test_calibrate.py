@@ -221,6 +221,18 @@ class CalibrationRunnerSnapTests(unittest.TestCase):
             self.events,
         )
 
+    def test_finish_warns_on_unsnappable_anchor(self):
+        # No platform ink near the mark — kept as recorded, warned loudly.
+        runner = self._runner(snap_fn=lambda img, x, y: None)
+        runner.mark()
+        entry = runner.finish("m")
+        self.assertAlmostEqual(
+            entry.rotation.anchors[0].y * 150, 95.0, places=1
+        )
+        self.assertTrue(
+            any("off-platform" in m for k, m in self.events), self.events
+        )
+
     def test_finish_snaps_anchor_onto_platform(self):
         # Anchor recorded at y=95 but nearest platform ink is y=80 —
         # the saved anchor must land on the floor.

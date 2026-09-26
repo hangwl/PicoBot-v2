@@ -247,14 +247,20 @@ class PlatformYTests(unittest.TestCase):
 
     def test_snaps_point_below_floor_up_onto_platform(self):
         a = MinimapAnalyzer()
-        # Target recorded beneath the lowest platform (y=95 < ink at 80)
-        self.assertEqual(a.platform_y(self._img(), 50, 95), 80)
+        # Target recorded 6px below the platform line snaps up onto it.
+        self.assertEqual(a.platform_y(self._img(), 50, 86), 80)
+
+    def test_beyond_snap_radius_returns_none(self):
+        a = MinimapAnalyzer()
+        # 15px below the floor is not marker jitter — it's off-geometry.
+        # Unbounded snapping teleported anchors to frame ink (bug).
+        self.assertIsNone(a.platform_y(self._img(), 50, 95))
 
     def test_nearest_row_wins(self):
         a = MinimapAnalyzer()
         img = self._img(rows=(20, 80))
-        self.assertEqual(a.platform_y(img, 50, 70), 80)
-        self.assertEqual(a.platform_y(img, 50, 40), 20)
+        self.assertEqual(a.platform_y(img, 50, 75), 80)
+        self.assertEqual(a.platform_y(img, 50, 26), 20)
 
     def test_column_without_ink_returns_none(self):
         a = MinimapAnalyzer()
@@ -267,7 +273,7 @@ class PlatformYTests(unittest.TestCase):
         img = _blank(100, 80)
         img[2, :] = (228, 228, 228)   # frame rim only
         img[50, :] = (228, 228, 228)  # real platform
-        self.assertEqual(a.platform_y(img, 50, 60), 50)
+        self.assertEqual(a.platform_y(img, 50, 55), 50)
 
 
 if __name__ == "__main__":

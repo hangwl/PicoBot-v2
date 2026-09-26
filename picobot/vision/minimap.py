@@ -409,15 +409,21 @@ class MinimapAnalyzer:
         *,
         column: int = 2,
         tolerance: int = 10,
+        max_snap: int = 8,
     ) -> Optional[int]:
         """Platform surface (nearest ink row) around column ``x`` at ``y``.
 
         Scans a narrow x-column of the minimap interior for platform/rope
         ink and returns the ink row closest to ``y``, minimap-relative.
         Used to project recorded or replayed targets onto real geometry:
-        a point beneath the lowest platform (mid-air mark, marker jitter)
-        snaps up onto the floor instead of becoming an unreachable
-        coordinate. Returns None when the column carries no ink.
+        a point slightly off a platform (mid-air mark, marker jitter)
+        snaps onto the floor instead of becoming an unreachable
+        coordinate.
+
+        ``max_snap`` is the honest bound: a mark should sit ~on a platform
+        line, so if the nearest ink is farther away the point is genuinely
+        off-geometry — returning None rather than teleporting it to some
+        distant row (e.g. a frame edge a color-mismatch mistook for ink).
         """
         inner, off = self._interior(minimap_img)
         h, w = inner.shape[:2]
@@ -431,7 +437,11 @@ class MinimapAnalyzer:
         ys = np.nonzero(mask)[0]
         if ys.size == 0:
             return None
-        return int(ys[np.abs(ys - (y - off)).argmin()] + off)
+        d = np.abs(ys - (y - off))
+        i = int(d.argmin())
+        if d[i] > max_snap:
+            return None
+        return int(ys[i] + off)
 
 
 __all__ = [
