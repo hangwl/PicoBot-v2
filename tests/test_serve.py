@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from picobot.bot.maps import MapEntry, MapStore
+from picobot.bot.rotation import Anchor
 from picobot.config import AppConfig
 from picobot.events import EventBus
 from picobot.remote.control import (
@@ -280,6 +281,31 @@ class HostCommandTests(unittest.TestCase):
             )
             self.host._handle_command("layout|clear")
             self.assertIsNone(MapStore(tmp).get("m1").minimap_region)
+
+    def test_idle_frame_reports_map_and_no_rotation(self):
+        img = np.zeros((30, 40, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        feed.minimap.player_pos.return_value = None
+        feed.minimap.region = (0, 0, 40, 30)
+        self.host._feed = feed
+        self.host.bot_config.name_ocr = False
+        self.host._active_map_override = "m1"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))  # no anchors
+            snap = self.host._provide_frame("minimap")
+            self.assertEqual(snap["map"], "m1")
+            self.assertTrue(snap["no_rotation"])
+            entry = MapStore(tmp).get("m1")
+            entry.rotation.anchors = [
+                Anchor(name="a", x=0.5, y=0.5)
+            ]
+            self.host.maps.save(entry)
+            self.host.maps.reload()
+            self.host._map_res_ts = 0.0  # expire the resolution cache
+            snap = self.host._provide_frame("minimap")
+            self.assertFalse(snap["no_rotation"])
 
     def test_layout_source_reports_provenance(self):
         feed = Mock()

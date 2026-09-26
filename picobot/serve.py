@@ -133,6 +133,8 @@ class BotHost:
         self.calibrator: Optional[CalibrationRunner] = None
         self._name_reader = None
         self._title_cache = (0.0, None)
+        self._map_res_ts = 0.0
+        self._map_res = None
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -340,6 +342,36 @@ class BotHost:
                 )
         return entry
 
+    def _resolved_map_cached(self):
+        """``_resolved_map_entry`` throttled to ~2s for per-frame use."""
+        now = time.time()
+        if now - self._map_res_ts < 2.0:
+            return self._map_res
+        try:
+            self._map_res = self._resolved_map_entry()
+        except Exception:
+            self._map_res = None
+        self._map_res_ts = now
+        return self._map_res
+
+    def _map_meta(self) -> dict:
+        """Frame metadata: resolved map name + whether a rotation can run.
+
+        ``no_rotation`` mirrors the bot's ``effective_rotation`` — a map
+        entry's own rotation, else the global config fallback.
+        """
+        bot = self.bot
+        if bot is not None:
+            entry = bot._map
+            rot = bot.effective_rotation()
+        else:
+            entry = self._resolved_map_cached()
+            rot = entry.rotation if entry else self.bot_config.rotation
+        return {
+            "map": entry.name if entry else None,
+            "no_rotation": not bool(rot.anchors),
+        }
+
     def _layout_save(self) -> None:
         bot = self.bot
         feed = self._get_feed()
@@ -418,6 +450,7 @@ class BotHost:
                 "img": img,
                 "title": self._idle_title(),
                 "layout": self._layout_source(),
+                **self._map_meta(),
             }
         if mode == "window":
             if bot is not None:
@@ -428,6 +461,7 @@ class BotHost:
                     "img": img,
                     "name_rect": bot._name_region(),
                     "layout": self._layout_source(),
+                    **self._map_meta(),
                 }
             feed = self._get_feed()
             if feed is None:
@@ -437,10 +471,12 @@ class BotHost:
                 "name_rect": feed.name_region(),
                 "title": self._idle_title(),
                 "layout": self._layout_source(),
+                **self._map_meta(),
             }
         if bot is not None:
             snap = bot.viz_snapshot() or {}
             snap["layout"] = self._layout_source()
+            snap.update(self._map_meta())
             return snap
         feed = self._get_feed()
         if feed is None:
@@ -454,6 +490,7 @@ class BotHost:
             "state": "IDLE",
             "title": self._idle_title(),
             "layout": self._layout_source(),
+            **self._map_meta(),
         }
 
     # -- Dashboard commands ------------------------------------------------------

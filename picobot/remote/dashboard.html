@@ -28,7 +28,7 @@
   .chip.warn { color: var(--warn); border-color: var(--warn); }
   .chip.bad { color: var(--bad); border-color: var(--bad); }
   main { display: flex; gap: 12px; padding: 12px; flex-wrap: wrap; }
-  .col { display: flex; flex-direction: column; gap: 12px; }
+  .col { display: flex; flex-direction: column; gap: 12px; flex: 1 1 300px; min-width: 0; }
   .panel {
     background: var(--panel); border: 1px solid var(--edge);
     border-radius: 8px; padding: 10px;
@@ -37,7 +37,15 @@
     text-transform: uppercase; letter-spacing: .08em; }
   canvas#view {
     display: block; background: #000; border-radius: 4px;
-    image-rendering: pixelated; width: 400px; max-width: 90vw;
+    image-rendering: pixelated; width: 400px; max-width: 100%; height: auto;
+  }
+  select, input { max-width: 100%; min-width: 0; }
+  @media (max-width: 640px) {
+    main { padding: 8px; gap: 8px; }
+    .col { gap: 8px; flex-basis: 100%; }
+    header { gap: 8px; padding: 8px 10px; }
+    #log { height: 300px; }
+    button, select, input { padding: 6px 9px; }
   }
   #log {
     height: 420px; overflow-y: auto; font-size: 12px; white-space: pre-wrap;
@@ -113,13 +121,6 @@
       </div>
     </div>
     <div class="panel">
-      <h3>Map</h3>
-      <div class="row">
-        <select id="mapSel"><option value="">(auto)</option></select>
-        <button id="mapRefresh">Refresh</button>
-      </div>
-    </div>
-    <div class="panel">
       <h3>Calibrate</h3>
       <div class="row">
         <input id="calName" placeholder="map name (blank = auto)" size="16">
@@ -153,7 +154,7 @@
       <div style="margin-top:6px"><label>tap = press · rune arrows work</label></div>
     </div>
   </div>
-  <div class="col" style="flex:1;min-width:280px">
+  <div class="col" style="flex:2 1 340px">
     <div class="panel" style="flex:1">
       <h3>Events</h3>
       <div id="log"></div>
@@ -187,7 +188,6 @@ ws.onopen = () => {
   chip("ws", "ws: connected", "on");
   ws.send("events|history");
   ws.send("bot|query");
-  ws.send("map|list");
   ws.send("config|get");
   ws.send("host|state");
 };
@@ -211,7 +211,10 @@ ws.onmessage = e => {
     img.src = "data:image/jpeg;base64," + p.jpeg;
     if (p.state) chip("state", "state: " + p.state,
       p.state === "PAUSE" ? "warn" : "");
-    if (p.map !== undefined) chip("map", "map: " + (p.map || "–"));
+    if (p.map !== undefined || p.no_rotation !== undefined)
+      chip("map",
+        "map: " + (p.map || "–") + (p.no_rotation ? " (no rotation)" : ""),
+        p.no_rotation ? "warn" : "");
     chip("title", "title: " + (p.title || "–"));
     if (p.layout !== undefined)
       chip("layout", "layout: " + (p.layout || "–"),
@@ -226,15 +229,6 @@ ws.onmessage = e => {
   } else if (p.event === "history") {
     logEl.innerHTML = "";
     (p.items || []).forEach(it => log(it.kind, it.msg));
-  } else if (p.event === "maps") {
-    const sel = $("mapSel");
-    sel.innerHTML = '<option value="">(auto)</option>';
-    (p.maps || []).forEach(n => {
-      const o = document.createElement("option");
-      o.value = n; o.textContent = n;
-      if (n === p.active) o.selected = true;
-      sel.appendChild(o);
-    });
   } else if (p.event === "host") {
     fillSel($("portSel"), "(serial)",
       (p.ports || []).map(pt => [pt.device, pt.device + (pt.desc ? " · " + pt.desc : "")]),
@@ -275,8 +269,6 @@ $("vWin").onclick = () => send("dash|view|window");
 $("vTitle").onclick = () => send("dash|view|title");
 $("layoutSave").onclick = () => send("layout|save");
 $("layoutClear").onclick = () => send("layout|clear");
-$("mapSel").onchange = e => send("map|set|" + e.target.value);
-$("mapRefresh").onclick = () => send("map|list");
 $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.target.value); };
 $("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target.value); };
 $("portAuto").onclick = () => send("host|serial|auto");

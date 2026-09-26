@@ -145,7 +145,8 @@ class FrameStreamer:
                         "jpeg": encode_jpeg(frame, self.quality),
                     }
                     for key in (
-                        "state", "map", "hazard", "player", "title", "layout"
+                        "state", "map", "hazard", "player", "title",
+                        "layout", "no_rotation",
                     ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]
