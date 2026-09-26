@@ -369,6 +369,15 @@ class HostCommandTests(unittest.TestCase):
         self.assertIn("main", bot.skills.skills)
         self.assertNotIn("old", bot.skills.skills)
 
+    def test_bot_start_shares_feed_analyzer(self):
+        feed = Mock()
+        feed.minimap = Mock()
+        self.host._feed = feed
+        with patch("picobot.bot.SmartBot") as sb, \
+             patch("picobot.bot.HidController"):
+            self.host._bot_entry()
+        self.assertEqual(sb.call_args.kwargs["minimap"], feed.minimap)
+
     def test_layout_source_reports_provenance(self):
         feed = Mock()
         feed.minimap.region = (0, 0, 100, 100)

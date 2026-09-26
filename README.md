@@ -66,7 +66,10 @@ only platform/line pixels feed the hash, so translucent minimap backgrounds
 can't drift matching as the character moves.
 `minimap_region` is the minimap layout remembered at calibration time — when
 the map is identified, the bot restores that region, so auto-detection drift
-can't accumulate on known maps (delete the key to force re-detection):
+can't accumulate on known maps (delete the key to force re-detection). When
+no region is set at all, the bot seeds itself by trying each saved map's
+remembered region + fingerprint before border auto-detection — so a layout
+you verified in the dashboard carries over to the bot at Start:
 
 ```json
 {
@@ -142,7 +145,8 @@ toggles, minimap colors/region, flash jump, map store:
     "maps_dir": "maps",
     "active_map": null,
     "auto_select_map": true,
-    "map_match_threshold": 15.0
+    "map_match_threshold": 15.0,
+    "marker_inset_px": 4
   }
 }
 ```
@@ -155,6 +159,10 @@ Notes:
   area** (i.e. below the OS title bar — captures never include the title bar
   or window borders). Set it if
   auto-detection fails on your client.
+- `marker_inset_px` (default 4) crops that many pixels off the minimap rim
+  before marker (player/rune/other-player) detection — frame and panel-chrome
+  pixels can't register as markers, and marker positions are the centroid of
+  the largest matching blob, not a global mean.
 - `minimap_colors.ink` is the platform/line color used to mask fingerprints —
   defaults to `border`. It matters on translucent minimaps: only ink pixels
   feed the fingerprint, so scene pixels showing through the background can't

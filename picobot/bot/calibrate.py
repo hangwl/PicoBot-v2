@@ -82,6 +82,12 @@ def _trace_to_steps(points: List[_Pt], wh: Tuple[int, int]) -> List[Step]:
         dx = run[-1][0] - run[0][0]
         dy = run[-1][1] - run[0][1]
         if abs(dy) >= 8 and abs(dy) > abs(dx):
+            if dy > 0 and len(run) <= 3:
+                # Quick downward drift (few samples) = drop-through, not a
+                # rope — replay it as down+jump so the leg respects the
+                # platform edge instead of beelining.
+                steps.append(Step("down_jump"))
+                continue
             nx, ny = norm(run[-1])
             steps.append(Step(
                 "climb",

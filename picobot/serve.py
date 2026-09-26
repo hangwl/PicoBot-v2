@@ -41,6 +41,7 @@ class _VisionFeed:
         region,
         on_event=None,
         map_change_threshold: float = 15.0,
+        marker_inset: int = 0,
     ) -> None:
         from .vision.game_window import GameWindow
         from .vision.minimap import MinimapAnalyzer
@@ -52,6 +53,7 @@ class _VisionFeed:
             colors=colors,
             region=region,
             map_change_threshold=map_change_threshold,
+            marker_inset=marker_inset,
         )
         self._on_event = on_event
 
@@ -220,10 +222,15 @@ class BotHost:
                     payload, wait_ack=True, timeout=1.5
                 )
 
+            # Share the dashboard feed's analyzer: it carries the
+            # user-verified/stored region (provenance, watchdog state) so
+            # bot start never re-detects over a fixed layout.
+            feed = self._get_feed()
             self.bot = SmartBot(
                 HidController(send),
                 self.window_title,
                 self.bot_config,
+                minimap=feed.minimap if feed is not None else None,
                 notify_callback=self.telegram.send_message,
                 event_bus=bus,
             )
@@ -251,6 +258,7 @@ class BotHost:
                         self.bot_config.minimap_region,
                         on_event=self.bus.emit,
                         map_change_threshold=self.bot_config.map_match_threshold,
+                        marker_inset=self.bot_config.marker_inset_px,
                     )
                 except Exception as exc:
                     logger.warning("vision feed unavailable: %s", exc)

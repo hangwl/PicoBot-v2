@@ -8,6 +8,7 @@ from picobot.vision.minimap import (
     blob_centroid,
     color_mask,
     erode3,
+    largest_blob_centroid,
 )
 
 
@@ -208,6 +209,33 @@ class SetRegionTests(unittest.TestCase):
         self.assertIsNone(a.region)
         self.assertIsNone(a.region_source)
         self.assertFalse(a._region_explicit)
+
+
+class LargestBlobTests(unittest.TestCase):
+    def test_picks_biggest_blob_over_specks(self):
+        mask = np.zeros((50, 50), dtype=bool)
+        mask[5, 5] = mask[45, 45] = True          # specks
+        mask[20:30, 20:30] = True                  # the real marker
+        self.assertEqual(largest_blob_centroid(mask), (24, 24))
+
+    def test_empty_mask(self):
+        self.assertIsNone(largest_blob_centroid(np.zeros((10, 10), bool)))
+
+    def test_marker_inset_excludes_rim(self):
+        a = MinimapAnalyzer(marker_inset=6)
+        img = _blank(100, 80)
+        _dot(img, 2, 2, a.colors.player)           # on the rim
+        self.assertIsNone(a.player_pos(img))
+        _dot(img, 40, 40, a.colors.player)         # interior
+        self.assertEqual(a.player_pos(img), (40, 40))
+
+    def test_rune_pos_reports_blob_centre_not_mean(self):
+        a = MinimapAnalyzer()
+        img = _blank(100, 80)
+        _dot(img, 30, 40, a.colors.rune, r=3)      # real rune marker
+        _dot(img, 90, 10, a.colors.rune, r=1)      # stray speck (survives erosion)
+        pos = a.rune_pos(img)
+        self.assertTrue(abs(pos[0] - 30) <= 2 and abs(pos[1] - 40) <= 2)
 
 
 if __name__ == "__main__":

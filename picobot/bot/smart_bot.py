@@ -43,6 +43,7 @@ class SmartBot(BotBase):
         window_title: str,
         config: BotConfig | None = None,
         *,
+        minimap: Optional[MinimapAnalyzer] = None,
         log_callback=None,
         notify_callback=None,
         event_bus=None,
@@ -50,10 +51,14 @@ class SmartBot(BotBase):
         config = config or BotConfig()
         window = GameWindow(window_title)
         screen = ScreenGrabber()
-        minimap = MinimapAnalyzer(
+        # A caller-supplied analyzer (e.g. the dashboard's feed) carries
+        # its verified region + provenance into the bot; otherwise build
+        # our own seeded by config.
+        minimap = minimap or MinimapAnalyzer(
             colors=config.minimap_colors,
             region=config.minimap_region,
             map_change_threshold=config.map_match_threshold,
+            marker_inset=config.marker_inset_px,
         )
         super().__init__(
             controller, window, screen, minimap, config,
@@ -133,11 +138,13 @@ class SmartBot(BotBase):
                 self.event("vision", "map change detected — minimap relocated")
                 self._minimap_warned = False  # re-warn if re-locate fails
             return self._stash_frame(img)
-        # Region unknown: try one auto-detection pass on the window image.
+        # Region unknown: try each map's remembered layout first (the
+        # fingerprint is meaningless under a wrong region, so seeding the
+        # region IS how the map gets identified), then border-detect.
         img = self._window_capture()
         if img is None:
             return None
-        if self.minimap.locate(img) is None:
+        if self._resolve_region(img) is None:
             if not self._minimap_warned:
                 self.log(
                     "Minimap not found — set 'minimap_region' in the bot "
@@ -146,6 +153,39 @@ class SmartBot(BotBase):
                 self._minimap_warned = True
             return None
         return self.minimap_frame()
+
+    def _resolve_region(self, window_img) -> Optional[Tuple[int, int, int, int]]:
+        """Install the best region for the current screen.
+
+        Tries every map file's remembered ``minimap_region``: capture that
+        rect, fingerprint it, and keep the candidate whose fingerprint
+        matches that map (position is stable across maps, size is not).
+        Falls back to border ``locate()`` when nothing matches.
+        """
+        for entry in self.maps.load_all():
+            if not entry.minimap_region or not entry.fingerprint:
+                continue
+            x, y, w, h = entry.minimap_region
+            img = self.screen.capture(
+                (self.window.client_left + x, self.window.client_top + y,
+                 w, h)
+            )
+            if img is None:
+                continue
+            fp = fingerprint(
+                img,
+                ignore_colors=self._fp_ignored_colors(),
+                include_colors=self._fp_ink_colors(),
+            )
+            if (
+                fp
+                and fingerprint_distance(fp, entry.fingerprint)
+                <= self.config.map_match_threshold
+            ):
+                self.minimap.set_region(entry.minimap_region)
+                self.log(f"Layout: restored {entry.name}'s remembered region")
+                return self.minimap.region
+        return self.minimap.locate(window_img)
 
     def _stash_frame(self, img):
         self.viz["img"] = img
@@ -219,7 +259,9 @@ class SmartBot(BotBase):
             self.viz["hazard"] = None
             return None
         reason = None
-        if cfg.stop_when_rune_appears and self.minimap.has_rune(img):
+        rune = self.minimap.rune_pos(img)
+        self.viz["rune"] = rune
+        if cfg.stop_when_rune_appears and rune is not None:
             reason = "rune"
         elif cfg.stop_when_players_appear and self.minimap.has_other_players(img):
             reason = "other players"
@@ -362,11 +404,18 @@ class SmartBot(BotBase):
         focus loss, or stop.
         """
         threshold = threshold or self.config.nav_threshold_px
+        # Hysteresis band: release the direction inside `stop_band`, only
+        # acquire it beyond `start_band` — stops left/right flapping on the
+        # target column.
+        stop_band = threshold * 0.75
+        start_band = threshold * 1.5
         flash_ok = self.config.flash_jump_enabled and style in ("flash", "mixed")
         self.viz["target"] = (target_x, target_y)
         self.event("nav", f"→ ({target_x}, {target_y})", {"style": style})
         self.log(f"Navigating to ({target_x}, {target_y}) [{style}]")
         held_dir = None
+        last_vert_jump = 0.0
+        escapes = 0
 
         def sync_dir(new_dir):
             nonlocal held_dir
@@ -400,12 +449,23 @@ class SmartBot(BotBase):
                     self.log("Navigation target reached")
                     self.viz["target"] = None
                     return True
-                sync_dir("right" if dx > threshold else
-                         "left" if dx < -threshold else None)
+                if held_dir == "right" and dx <= stop_band:
+                    sync_dir(None)
+                elif held_dir == "left" and dx >= -stop_band:
+                    sync_dir(None)
+                if held_dir is None:
+                    if dx > start_band:
+                        sync_dir("right")
+                    elif dx < -start_band:
+                        sync_dir("left")
                 if abs(dx) <= threshold * 3:
-                    if dy < -threshold:
+                    # Rate-limit vertical jumps — spamming them never helps.
+                    now = time.time()
+                    if dy < -threshold and now - last_vert_jump >= 0.9:
+                        last_vert_jump = now
                         self.up_jump()
-                    elif dy > threshold:
+                    elif dy > threshold and now - last_vert_jump >= 0.9:
+                        last_vert_jump = now
                         self.down_jump()
                     else:
                         self.sleep(0.05)
@@ -418,11 +478,17 @@ class SmartBot(BotBase):
                 stuck = stuck + 1 if last == pos else 0
                 last = pos
                 if stuck >= self.config.nav_stuck_limit:
-                    self.log("Stuck — attempting rope escape")
+                    escapes += 1
+                    if escapes >= 2:
+                        self.log("Stuck twice — abandoning leg")
+                        return False
+                    self.log("Stuck — sidestepping")
                     sync_dir(None)
-                    self.hid.key_down("down")
-                    self.sleep(3)
-                    self.hid.key_up("down")
+                    back = "left" if dx > 0 else "right"
+                    self.hid.key_down(back)
+                    self.sleep(0.4)
+                    self.hid.key_up(back)
+                    self.up_jump()
                     stuck = 0
                     last = None
         finally:

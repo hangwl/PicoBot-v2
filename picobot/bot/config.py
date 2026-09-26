@@ -76,6 +76,7 @@ class BotConfig:
     auto_select_map: bool = True
     active_map: Optional[str] = None      # force a map by name (skip auto-match)
     map_match_threshold: float = 15.0     # fingerprint distance bound (0-255)
+    marker_inset_px: int = 4              # marker scans ignore this many rim px
 
     def __post_init__(self) -> None:
         if not self.skills:
@@ -104,7 +105,8 @@ class BotConfig:
         for name in floats:
             if name in data:
                 setattr(cfg, name, float(data[name]))
-        ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px")
+        ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px",
+                "marker_inset_px")
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))

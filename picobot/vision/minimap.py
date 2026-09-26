@@ -11,6 +11,7 @@ between game clients (e.g. GMS-based private servers vs. other versions).
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, Tuple
 
@@ -86,6 +87,43 @@ def blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
     if xs.size == 0:
         return None
     return int(xs.mean()), int(ys.mean())
+
+
+def largest_blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
+    """Centroid of the largest connected component in ``mask``.
+
+    Unlike :func:`blob_centroid`, scattered noise pixels can't drag the
+    result toward a meaningless midpoint — only the biggest contiguous
+    blob wins. Returns None if the mask is empty.
+    """
+    ys, xs = np.nonzero(mask)
+    if xs.size == 0:
+        return None
+    h, w = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    best: Optional[Tuple[int, int, int]] = None  # (count, x, y)
+    for sy, sx in zip(ys.tolist(), xs.tolist()):
+        if visited[sy, sx]:
+            continue
+        stack = [(sy, sx)]
+        visited[sy, sx] = True
+        cx = cy = count = 0
+        while stack:
+            y, x = stack.pop()
+            count += 1
+            cx += x
+            cy += y
+            for ny in (y - 1, y, y + 1):
+                for nx in (x - 1, x, x + 1):
+                    if (
+                        0 <= ny < h and 0 <= nx < w
+                        and mask[ny, nx] and not visited[ny, nx]
+                    ):
+                        visited[ny, nx] = True
+                        stack.append((ny, nx))
+        if best is None or count > best[0]:
+            best = (count, cx // count, cy // count)
+    return (best[1], best[2])
 
 
 def fingerprint(
@@ -179,8 +217,10 @@ class MinimapAnalyzer:
         border_tolerance: int = 10,
         map_change_threshold: float = 15.0,
         map_change_frames: int = 3,
+        marker_inset: int = 0,
     ) -> None:
         self.colors = colors or MinimapColors()
+        self.marker_inset = max(0, int(marker_inset))
         self._region = region
         self._region_explicit = region is not None
         self._region_source = "config" if region is not None else None
@@ -189,6 +229,9 @@ class MinimapAnalyzer:
         self._map_change_frames = map_change_frames
         self._baseline_fp: Optional[str] = None
         self._fp_misses = 0
+        # Guards region/baseline state — the dashboard feed and a running
+        # bot can share one analyzer from different threads.
+        self._lock = threading.Lock()
 
     @property
     def region(self) -> Optional[Region]:
@@ -210,21 +253,23 @@ class MinimapAnalyzer:
         drop them on a confirmed map change. Re-anchors the content
         baseline so the region swap itself isn't mistaken for a change.
         """
-        self._region = tuple(int(v) for v in region)
-        self._region_explicit = explicit
-        self._region_source = "manual" if explicit else "stored"
-        self._baseline_fp = None
-        self._fp_misses = 0
+        with self._lock:
+            self._region = tuple(int(v) for v in region)
+            self._region_explicit = explicit
+            self._region_source = "manual" if explicit else "stored"
+            self._baseline_fp = None
+            self._fp_misses = 0
 
     def reset_region(self) -> None:
         """Drop the current region (any source) so ``locate`` re-runs on
         the next capture. The user asked for re-detection — also clears
         the explicit flag so the watchdog manages the fresh result."""
-        self._region = None
-        self._region_explicit = False
-        self._region_source = None
-        self._baseline_fp = None
-        self._fp_misses = 0
+        with self._lock:
+            self._region = None
+            self._region_explicit = False
+            self._region_source = None
+            self._baseline_fp = None
+            self._fp_misses = 0
 
     def note_frame(self, minimap_img: np.ndarray) -> bool:
         """Watchdog: report True when a map change is confirmed.
@@ -242,27 +287,28 @@ class MinimapAnalyzer:
             ),
             include_colors=(self.colors.ink or self.colors.border,),
         )
-        if not fp:
-            # Blank/transition frame — no signal; neither match nor miss.
-            return False
-        if self._baseline_fp is None:
-            self._baseline_fp = fp
-            return False
-        if (
-            fingerprint_distance(fp, self._baseline_fp)
-            <= self._map_change_threshold
-        ):
+        with self._lock:
+            if not fp:
+                # Blank/transition frame — no signal; neither match nor miss.
+                return False
+            if self._baseline_fp is None:
+                self._baseline_fp = fp
+                return False
+            if (
+                fingerprint_distance(fp, self._baseline_fp)
+                <= self._map_change_threshold
+            ):
+                self._fp_misses = 0
+                return False
+            self._fp_misses += 1
+            if self._fp_misses < self._map_change_frames:
+                return False
             self._fp_misses = 0
-            return False
-        self._fp_misses += 1
-        if self._fp_misses < self._map_change_frames:
-            return False
-        self._fp_misses = 0
-        self._baseline_fp = None
-        if not self._region_explicit:
-            self._region = None
-            self._region_source = None
-        return True
+            self._baseline_fp = None
+            if not self._region_explicit:
+                self._region = None
+                self._region_source = None
+            return True
 
     def locate(self, window_img: np.ndarray) -> Optional[Region]:
         """Find the minimap frame in a window capture, once; result is cached.
@@ -271,9 +317,13 @@ class MinimapAnalyzer:
         border-colored pixels on rows/columns where the border color is dense
         (the frame's edges). Returns the region relative to ``window_img``.
         """
-        if self._region is not None:
-            return self._region
+        with self._lock:
+            if self._region is not None:
+                return self._region
+        return self._detect(window_img)
 
+    def _detect(self, window_img: np.ndarray) -> Optional[Region]:
+        """Border-scan ``window_img`` for the minimap frame and cache it."""
         h, w = window_img.shape[:2]
         roi = window_img[: h // 2, : w // 2]
         mask = color_mask(roi, self.colors.border, self._border_tolerance)
@@ -295,8 +345,9 @@ class MinimapAnalyzer:
         if width < 50 or height < 50:
             return None
 
-        self._region = (left, top, width, height)
-        self._region_source = "auto"
+        with self._lock:
+            self._region = (left, top, width, height)
+            self._region_source = "auto"
         return self._region
 
     def crop(self, window_img: np.ndarray) -> Optional[np.ndarray]:
@@ -308,17 +359,37 @@ class MinimapAnalyzer:
         return window_img[y : y + h, x : x + w]
 
     # -- Marker detectors -----------------------------------------------------
+    def _interior(self, img: np.ndarray) -> Tuple[np.ndarray, int]:
+        """Crop ``marker_inset`` px of frame/chrome off each edge.
+
+        Marker detection runs on the map interior only — border-colored
+        or UI pixels at the crop's rim can't trigger false markers.
+        Returns the inner view plus the offset so reported positions
+        stay minimap-relative.
+        """
+        i = self.marker_inset
+        h, w = img.shape[:2]
+        if i <= 0 or h <= 2 * i or w <= 2 * i:
+            return img, 0
+        return img[i:-i, i:-i], i
+
+    def _marker(
+        self, minimap_img: np.ndarray, bgr: Tuple[int, int, int], tolerance: int
+    ) -> Optional[Tuple[int, int]]:
+        inner, off = self._interior(minimap_img)
+        mask = erode3(color_mask(inner, bgr, tolerance))
+        c = largest_blob_centroid(mask)
+        return (c[0] + off, c[1] + off) if c is not None else None
+
     def player_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10
     ) -> Optional[Tuple[int, int]]:
-        mask = erode3(color_mask(minimap_img, self.colors.player, tolerance))
-        return blob_centroid(mask)
+        return self._marker(minimap_img, self.colors.player, tolerance)
 
     def rune_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10
     ) -> Optional[Tuple[int, int]]:
-        mask = erode3(color_mask(minimap_img, self.colors.rune, tolerance))
-        return blob_centroid(mask)
+        return self._marker(minimap_img, self.colors.rune, tolerance)
 
     def has_rune(self, minimap_img: np.ndarray, tolerance: int = 10) -> bool:
         return self.rune_pos(minimap_img, tolerance) is not None
@@ -326,7 +397,8 @@ class MinimapAnalyzer:
     def has_other_players(
         self, minimap_img: np.ndarray, tolerance: int = 10
     ) -> bool:
-        mask = erode3(color_mask(minimap_img, self.colors.other_player, tolerance))
+        inner, _ = self._interior(minimap_img)
+        mask = erode3(color_mask(inner, self.colors.other_player, tolerance))
         return bool(mask.any())
 
 

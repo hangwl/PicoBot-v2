@@ -68,7 +68,10 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     target = meta.get("target")
     if target:
         _cross(out, int(target[0]), int(target[1]), 4, (0, 0, 255))  # red
-    if meta.get("hazard") == "rune":
+    rune = meta.get("rune")
+    if rune:
+        _box(out, int(rune[0]), int(rune[1]), 4, (255, 0, 255))  # purple rune
+    elif meta.get("hazard") == "rune":
         _box(out, out.shape[1] // 2, 6, 5, (255, 0, 255))
     if meta.get("hazard") == "other players":
         _box(out, out.shape[1] // 2, 14, 5, (0, 255, 255))

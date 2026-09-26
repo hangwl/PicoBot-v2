@@ -168,6 +168,22 @@ class TraceRecorderTests(unittest.TestCase):
         )
         self.assertEqual(entry.skills, {})  # everything bound in config
 
+    def test_quick_drop_becomes_down_jump(self):
+        from picobot.bot.calibrate import _trace_to_steps
+
+        # Sharp downward drop: few samples (fast fall) -> down_jump step.
+        steps = _trace_to_steps(
+            [(50, 50), (50, 58), (52, 70)], (200, 150))
+        self.assertEqual(steps[-1].kind, "down_jump")
+
+        # Sustained downward crawl = climbing down a rope -> climb.
+        steps = _trace_to_steps(
+            [(50, 50), (50, 55), (50, 60), (51, 65), (51, 70),
+             (52, 75), (52, 80)], (200, 150))
+        kinds = [s.kind for s in steps]
+        self.assertIn("climb", kinds)
+        self.assertNotIn("down_jump", kinds)
+
 
 if __name__ == "__main__":
     unittest.main()

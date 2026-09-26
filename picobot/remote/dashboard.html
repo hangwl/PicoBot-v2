@@ -37,17 +37,34 @@
     text-transform: uppercase; letter-spacing: .08em; }
   canvas#view {
     display: block; background: #000; border-radius: 4px;
-    image-rendering: pixelated; width: 400px; max-width: 100%; height: auto;
+    image-rendering: pixelated; width: 100%; max-width: 520px; height: auto;
     touch-action: none;
   }
+  #now {
+    padding: 6px 14px; background: #14161c; border-bottom: 1px solid var(--edge);
+    font-size: 13px; color: var(--fg); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #now .warn { color: var(--warn); }
+  details.panel > summary {
+    cursor: pointer; font-size: 12px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: .08em;
+    list-style: none; user-select: none;
+  }
+  details.panel > summary::before { content: "▸ "; }
+  details[open].panel > summary::before { content: "▾ "; }
+  details.panel > summary::-webkit-details-marker { display: none; }
   button.armed { border-color: var(--warn); color: var(--warn); }
   select, input { max-width: 100%; min-width: 0; }
   @media (max-width: 640px) {
     main { padding: 8px; gap: 8px; }
     .col { gap: 8px; flex-basis: 100%; }
     header { gap: 8px; padding: 8px 10px; }
-    #log { height: 300px; }
-    button, select, input { padding: 6px 9px; }
+    #now { padding: 6px 10px; }
+    #log { height: 260px; }
+    button, select, input { padding: 8px 10px; }
+    button { min-height: 40px; }
+    .pad button { height: 44px; }
   }
   #log {
     height: 420px; overflow-y: auto; font-size: 12px; white-space: pre-wrap;
@@ -87,20 +104,9 @@
   <span id="map" class="chip">map: –</span>
   <span id="hazard" class="chip">hazard: none</span>
 </header>
+<div id="now">connecting…</div>
 <main>
-  <div class="col">
-    <div class="panel">
-      <h3>Connection</h3>
-      <div class="row">
-        <select id="portSel" style="min-width:150px"><option value="">(serial)</option></select>
-        <button id="portAuto">Auto</button>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <select id="winSel" style="min-width:220px"><option value="">(window)</option></select>
-        <button id="connRefresh">Refresh</button>
-      </div>
-      <div style="margin-top:6px"><label>selections are remembered</label></div>
-    </div>
+  <div class="col" style="flex:1.2 1 360px">
     <div class="panel">
       <h3>View</h3>
       <canvas id="view" width="400" height="300"></canvas>
@@ -125,8 +131,8 @@
         <button id="stopBot" class="danger">Stop</button>
       </div>
     </div>
-    <div class="panel">
-      <h3>Calibrate</h3>
+    <details class="panel" open>
+      <summary>Calibrate</summary>
       <div class="row">
         <input id="calName" placeholder="map name (blank = auto)" size="16">
       </div>
@@ -138,9 +144,29 @@
       </div>
       <div style="margin-top:6px"><label id="calStat">not recording</label></div>
       <div style="margin-top:4px"><label>walk your farming route in-game; press F9 (or Mark) at each farming spot; Save writes the map file</label></div>
+    </details>
+  </div>
+  <div class="col" style="flex:1.4 1 340px">
+    <div class="panel" style="flex:1">
+      <h3>Events</h3>
+      <div id="log"></div>
     </div>
-    <div class="panel">
-      <h3>Movement keys</h3>
+  </div>
+  <div class="col" style="flex:1 1 300px">
+    <details class="panel" open>
+      <summary>Connection</summary>
+      <div class="row">
+        <select id="portSel" style="min-width:150px"><option value="">(serial)</option></select>
+        <button id="portAuto">Auto</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <select id="winSel" style="min-width:220px"><option value="">(window)</option></select>
+        <button id="connRefresh">Refresh</button>
+      </div>
+      <div style="margin-top:6px"><label>selections are remembered</label></div>
+    </details>
+    <details class="panel">
+      <summary>Movement keys</summary>
       <div class="row">
         <label>jump</label><input id="mkJump" size="6" placeholder="space">
         <label>rope lift</label><input id="mkRope" size="6" placeholder="(combo)">
@@ -148,9 +174,9 @@
         <label><input id="mkFjOn" type="checkbox"> FJ on</label>
       </div>
       <div style="margin-top:6px"><label>jump = jump/down-jump key · rope lift = up-jump skill (blank = jump+up+jump combo) · flash jump = FJ key (blank = jump key). Saves instantly.</label></div>
-    </div>
-    <div class="panel">
-      <h3>Skills</h3>
+    </details>
+    <details class="panel">
+      <summary>Skills</summary>
       <div id="skillRows"></div>
       <div class="row" style="margin-top:8px">
         <input id="skName" placeholder="name" size="7">
@@ -164,9 +190,9 @@
         <button id="skAdd">Add</button>
       </div>
       <div style="margin-top:6px"><label>attack = used during dwell · summon = fired at anchors · buff = on cooldown · movement = keybind only, ignored in combat (e.g. flash jump). Edits save instantly and apply to a running bot.</label></div>
-    </div>
-    <div class="panel">
-      <h3>Remote input</h3>
+    </details>
+    <details class="panel">
+      <summary>Remote input</summary>
       <div class="row">
         <div class="pad">
           <span class="spacer"></span><button data-k="up">↑</button><span class="spacer"></span>
@@ -184,13 +210,7 @@
         </div>
       </div>
       <div style="margin-top:6px"><label>tap = press · rune arrows work</label></div>
-    </div>
-  </div>
-  <div class="col" style="flex:2 1 340px">
-    <div class="panel" style="flex:1">
-      <h3>Events</h3>
-      <div id="log"></div>
-    </div>
+    </details>
   </div>
 </main>
 <script>
@@ -253,6 +273,14 @@ ws.onmessage = e => {
       chip("layout", "layout: " + (p.layout || "–"),
         p.layout === "auto" ? "warn" : "");
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
+    const now = $("now");
+    now.textContent =
+      (p.state || "IDLE") +
+      (p.map ? " · " + p.map : " · no map") +
+      (p.no_rotation ? " (no rotation)" : "") +
+      (p.hazard ? " ⚠ " + p.hazard : "");
+    now.style.color = p.hazard ? "var(--bad)"
+      : p.state === "PAUSE" ? "var(--warn)" : "var(--fg)";
   } else if (p.event === "evt") {
     if (p.kind === "calstat") {
       const d = p.data || {};
