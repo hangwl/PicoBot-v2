@@ -16,6 +16,7 @@ from picobot.remote.control import (
 )
 from picobot.remote.streamer import annotate, encode_jpeg
 from picobot.serve import BotHost
+from picobot.vision.minimap import MinimapAnalyzer, fingerprint
 
 
 class EventBusTests(unittest.TestCase):
@@ -341,6 +342,86 @@ class HostCommandTests(unittest.TestCase):
                 self.host._handle_command("layout|patrol|off|m1")
             )
             self.assertFalse(MapStore(tmp).get("m1").rotation.patrol)
+
+    def _inked_img(self, w=200, h=150):
+        """Minimap-like frame: platform rows in border/ink color."""
+        img = np.zeros((h, w, 3), dtype=np.uint8)
+        img[::20, :] = (228, 228, 228)
+        return img
+
+    def test_map_meta_walls_survive_bot_without_resolved_map(self):
+        # Regression: walls vanished the moment the bot started — the
+        # meta path trusted only bot._map (None until the first travel
+        # leg resolves it), bypassing the live-fingerprint path the feed
+        # was using.
+        img = self._inked_img()
+        analyzer = MinimapAnalyzer(region=(0, 0, 200, 150))
+        c = analyzer.colors
+        fp = fingerprint(
+            img,
+            ignore_colors=(c.player, c.other_player, c.rune),
+            include_colors=(c.ink or c.border,),
+        )
+        feed = Mock()
+        feed.minimap = analyzer
+        feed.minimap_img = Mock(return_value=img)
+        self.host._feed = feed
+        bot = Mock()
+        bot._map = None                       # not resolved yet
+        bot.minimap_frame = Mock(return_value=None)
+        bot.minimap.region = (0, 0, 200, 150)
+        self.host.bot = bot
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(
+                name="m1", fingerprint=fp, walls={"left": 0.25},
+            ))
+            meta = self.host._map_meta()
+        self.assertEqual(meta["map"], "m1")
+        self.assertEqual(meta["walls"], [50])       # 0.25 * 200
+
+    def test_map_meta_live_fingerprint_beats_stale_pin(self):
+        # A persisted active_map pin must not shadow the map actually on
+        # screen — the pin is rotation scope, not identity.
+        img = self._inked_img()
+        analyzer = MinimapAnalyzer(region=(0, 0, 200, 150))
+        c = analyzer.colors
+        fp = fingerprint(
+            img,
+            ignore_colors=(c.player, c.other_player, c.rune),
+            include_colors=(c.ink or c.border,),
+        )
+        feed = Mock()
+        feed.minimap = analyzer
+        feed.minimap_img = Mock(return_value=img)
+        self.host._feed = feed
+        self.host._active_map_override = "oldmap"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="oldmap", fingerprint="ff" * 512))
+            self.host.maps.save(MapEntry(
+                name="m1", fingerprint=fp, walls={"right": 0.8},
+            ))
+            meta = self.host._map_meta()
+        self.assertEqual(meta["map"], "m1")
+        self.assertEqual(meta["walls"], [160])      # 0.8 * 200
+
+    def test_ink_overlay_toggle_and_mask(self):
+        img = self._inked_img()
+        feed = Mock()
+        feed.minimap = MinimapAnalyzer(region=(0, 0, 200, 150))
+        feed.minimap_img = Mock(return_value=img)
+        self.host._feed = feed
+        self.assertTrue(self.host._handle_command("dash|ink|on"))
+        snap = self.host._provide_frame("minimap")
+        self.assertTrue(snap["ink_on"])
+        self.assertTrue(snap["ink_mask"][60, 50])   # platform row tinted
+        self.assertFalse(snap["ink_mask"][61, 50])  # background untouched
+        out = annotate(img, snap)
+        self.assertTrue((out[60, 50] != img[60, 50]).any())
+        self.assertTrue(self.host._handle_command("dash|ink|off"))
+        snap = self.host._provide_frame("minimap")
+        self.assertNotIn("ink_mask", snap)
 
     def test_layout_save_verifies_fingerprint_match(self):
         # Auto path succeeds when the stored fingerprint matches live.

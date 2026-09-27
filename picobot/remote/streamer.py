@@ -74,6 +74,13 @@ def _hline(img: np.ndarray, y: int, color) -> None:
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
+    mask = meta.get("ink_mask")
+    if mask is not None and mask.shape == out.shape[:2]:
+        # Tint detected platform ink — what the bot reads as geometry.
+        out[mask] = (
+            out[mask].astype(np.uint16) // 2
+            + np.array((30, 160, 255), dtype=np.uint16) // 2  # orange BGR
+        ).astype(np.uint8)
     for x in meta.get("walls") or []:
         _vline(out, int(x), (60, 60, 255))                   # dashed red walls
     floor = meta.get("floor")
@@ -162,7 +169,7 @@ class FrameStreamer:
                     }
                     for key in (
                         "state", "map", "hazard", "player",
-                        "layout", "no_rotation", "patrol",
+                        "layout", "no_rotation", "patrol", "ink_on",
                     ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]

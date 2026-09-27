@@ -143,6 +143,10 @@
         <label><input type="checkbox" id="patrolChk"> patrol anchors</label>
         <label>weave toward the next checkpoint instead of standing still</label>
       </div>
+      <div class="row" style="margin-top:8px">
+        <label><input type="checkbox" id="inkChk"> show platforms</label>
+        <label>tint the ink the bot reads as geometry</label>
+      </div>
     </div>
     <div class="panel">
       <h3>Bot</h3>
@@ -298,6 +302,8 @@ ws.onmessage = e => {
         p.layout === "auto" ? "warn" : "");
     if (p.patrol !== undefined)
       $("patrolChk").checked = !!p.patrol;
+    if (p.ink_on !== undefined)
+      $("inkChk").checked = !!p.ink_on;
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
     const now = $("now");
     now.textContent =
@@ -474,6 +480,8 @@ $("wallF").onclick = () => send("layout|wall|floor" + layTarget());
 $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 $("patrolChk").onchange = () =>
   send("layout|patrol|" + ($("patrolChk").checked ? "on" : "off") + layTarget());
+$("inkChk").onchange = () =>
+  send("dash|ink|" + ($("inkChk").checked ? "on" : "off"));
 
 // --- Drag-to-draw regions on the Window view ---------------------------
 let drawMode = null, drawStart = null, lastImg = null;

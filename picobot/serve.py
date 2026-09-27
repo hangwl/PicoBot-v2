@@ -111,6 +111,7 @@ class BotHost:
         self.calibrator: Optional[CalibrationRunner] = None
         self._map_res_ts = 0.0
         self._map_res = None
+        self._show_ink = False
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -278,25 +279,43 @@ class BotHost:
         return mm.region_source
 
     def _resolved_map_entry(self):
-        """The map this session currently believes we're on."""
+        """The map this session currently believes we're on.
+
+        Evidence order: the running bot's resolution, then a live
+        fingerprint match (what's actually on screen), and only then the
+        ``active_map`` pin — a stale pin must not shadow the real map.
+        """
         if self.bot is not None and self.bot._map is not None:
             return self.bot._map
-        if self._active_map_override:
-            return self.maps.get(self._active_map_override)
-        entry = None
+        img = colors = None
+        if self.bot is not None:
+            img = self.bot.minimap_frame()
+            colors = self.bot.minimap.colors
         feed = self._get_feed()
-        img = feed.minimap_img() if feed is not None else None
-        if img is not None:
+        if img is None and feed is not None:
+            img = feed.minimap_img()
+            colors = feed.minimap.colors
+        if img is not None and colors is not None:
             from .vision.minimap import fingerprint
 
-            c = feed.minimap.colors
-            fp = fingerprint(
-                img,
-                ignore_colors=(c.player, c.other_player, c.rune),
-                include_colors=(c.ink or c.border,),
-            )
-            entry = self.maps.match(fp, self.bot_config.map_match_threshold)
-        return entry
+            try:
+                fp = fingerprint(
+                    img,
+                    ignore_colors=(
+                        colors.player, colors.other_player, colors.rune,
+                    ),
+                    include_colors=(colors.ink or colors.border,),
+                )
+                entry = self.maps.match(
+                    fp, self.bot_config.map_match_threshold
+                )
+            except Exception:
+                entry = None
+            if entry is not None:
+                return entry
+        if self._active_map_override:
+            return self.maps.get(self._active_map_override)
+        return None
 
     def _resolved_map_cached(self):
         """``_resolved_map_entry`` throttled to ~2s for per-frame use."""
@@ -317,35 +336,51 @@ class BotHost:
         entry's own rotation, else the global config fallback.
         """
         bot = self.bot
+        # bot._map stays None until the first travel leg resolves it —
+        # fall back to the live resolution so map overlays (walls, floor)
+        # don't vanish the moment the bot starts.
+        entry = (bot._map if bot is not None else None) or (
+            self._resolved_map_cached()
+        )
+        # Read walls/floor off the store's current object — a save +
+        # reload swaps instances and bot._map can lag behind.
+        if entry is not None:
+            entry = self.maps.get(entry.name) or entry
+        rot = (
+            entry.rotation
+            if entry is not None
+            else (bot.effective_rotation() if bot else self.bot_config.rotation)
+        )
+        region = None
         if bot is not None:
-            entry = bot._map
-            rot = bot.effective_rotation()
-        else:
-            entry = self._resolved_map_cached()
-            rot = entry.rotation if entry else self.bot_config.rotation
-        walls = floor = None
-        if entry is not None and entry.walls:
-            region = None
-            if bot is not None:
-                region = bot.minimap.region
-            if region is None:
-                feed = self._get_feed()
-                region = feed.minimap.region if feed is not None else None
-            w, h = (region[2], region[3]) if region else (0, 0)
-            if w:
-                walls = [
-                    int(min(max(float(v), 0.0), 1.0) * w)
-                    for v in (entry.walls.get("left"), entry.walls.get("right"))
-                    if isinstance(v, (int, float))
-                ] or None
+            region = bot.minimap.region
+        if region is None:
+            feed = self._get_feed()
+            region = feed.minimap.region if feed is not None else None
+        w, h = (region[2], region[3]) if region else (0, 0)
+
+        def px(v, span):
+            v = float(v)
+            return int(round(v * span)) if 0.0 <= v <= 1.0 else int(round(v))
+
+        walls = floor = anchors = None
+        if entry is not None and entry.walls and w:
+            walls = [
+                px(v, w)
+                for v in (entry.walls.get("left"), entry.walls.get("right"))
+                if isinstance(v, (int, float))
+            ] or None
             fy = entry.walls.get("floor")
             if h and isinstance(fy, (int, float)):
-                floor = int(min(max(float(fy), 0.0), 1.0) * h)
+                floor = px(fy, h)
+        if entry is not None and entry.rotation.anchors and w and h:
+            anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
         return {
             "map": entry.name if entry else None,
             "no_rotation": not bool(rot.anchors),
             "walls": walls,
             "floor": floor,
+            "anchors": anchors,
             "patrol": bool(rot.patrol),
         }
 
@@ -606,7 +641,13 @@ class BotHost:
         if bot is not None:
             snap = bot.viz_snapshot() or {}
             snap["layout"] = self._layout_source()
-            snap.update(self._map_meta())
+            meta = self._map_meta()
+            if not meta.get("anchors"):
+                # The bot's own viz anchors win; meta fills them only
+                # when the bot hasn't resolved the map yet.
+                meta.pop("anchors", None)
+            snap.update(meta)
+            self._attach_ink(snap, bot.minimap)
             return snap
         feed = self._get_feed()
         if feed is None:
@@ -614,13 +655,26 @@ class BotHost:
         img = feed.minimap_img()
         if img is None:
             return {"state": "IDLE"}
-        return {
+        snap = {
             "img": img,
             "player": feed.minimap.player_pos(img),
             "state": "IDLE",
             "layout": self._layout_source(),
             **self._map_meta(),
         }
+        self._attach_ink(snap, feed.minimap)
+        return snap
+
+    def _attach_ink(self, snap: dict, mm) -> None:
+        """When enabled, attach the platform-ink mask for the overlay."""
+        snap["ink_on"] = self._show_ink
+        img = snap.get("img")
+        if not self._show_ink or img is None or mm is None:
+            return
+        from .vision.minimap import color_mask
+
+        ink = mm.colors.ink or mm.colors.border
+        snap["ink_mask"] = color_mask(img, ink, 10)
 
     # -- Dashboard commands ------------------------------------------------------
     def _handle_command(self, msg: str) -> bool:
@@ -644,6 +698,8 @@ class BotHost:
             self.streamer.set_mode(msg.split("|", 2)[2])
         elif msg.startswith("dash|fps|"):
             self._fps_set(msg.split("|", 2)[2])
+        elif msg in ("dash|ink|on", "dash|ink|off"):
+            self._show_ink = msg.endswith("on")
         elif msg == "layout|save" or msg.startswith("layout|save|"):
             self._layout_save(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg == "layout|clear" or msg.startswith("layout|clear|"):

@@ -154,6 +154,7 @@ class FloorZoneTests(unittest.TestCase):
 
         bot = _bot([(20, 120)] * 10, target=(20, 140))
         bot._map = MapEntry(name="m", walls={"floor": 0.8})
+        bot.maps = Mock(**{"get.return_value": None})
         with patch("time.time", side_effect=iter(range(1, 10000))):
             self.assertTrue(_drive(bot))     # aligned → accept
         bot.down_jump.assert_not_called()
@@ -163,6 +164,7 @@ class FloorZoneTests(unittest.TestCase):
 
         bot = _bot([(20, 120)] * 10, target=(60, 140))
         bot._map = MapEntry(name="m", walls={"floor": 0.8})
+        bot.maps = Mock(**{"get.return_value": None})
         with patch("time.time", side_effect=iter(range(1, 10000))):
             self.assertFalse(_drive(bot))
         bot.down_jump.assert_not_called()
@@ -177,6 +179,7 @@ class FloorZoneTests(unittest.TestCase):
         bot.is_window_focused = Mock(return_value=True)
         bot.sleep = Mock(return_value=False)
         bot._map = MapEntry(name="m", walls={"floor": 0.8})
+        bot.maps = Mock(**{"get.return_value": None})
         bot.minimap = Mock()
         bot.minimap.region = (0, 0, 200, 150)
         bot.player_pos = Mock(return_value=(50, 122))  # at/below floor
@@ -272,6 +275,7 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         from picobot.bot.skills import Skill, SkillBook
         bot.skills = SkillBook({"main": Skill("main", "a")})
         bot._map = None
+        bot.maps = Mock(**{"get.return_value": None})
         bot._anchor_idx = 0
         bot._weave_dir = None
         bot._weave_bounds = None

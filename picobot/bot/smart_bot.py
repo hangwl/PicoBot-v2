@@ -384,9 +384,25 @@ class SmartBot(BotBase):
         self.sleep(0.3)
         return True
 
+    def _current_map_entry(self) -> Optional[MapEntry]:
+        """The resolved map, refreshed against the store.
+
+        Dashboard boundary edits save + reload the map file, which swaps
+        the ``MapEntry`` objects — ``self._map`` can point at the stale
+        pre-reload instance, so walls set mid-run would be invisible
+        until the next ``_resolve_map``. This re-reads the store's copy.
+        """
+        if self._map is None:
+            return None
+        return self.maps.get(self._map.name) or self._map
+
+    def _map_walls(self) -> Optional[dict]:
+        entry = self._current_map_entry()
+        return entry.walls if entry is not None else None
+
     def _floor_px(self) -> Optional[int]:
         """Resolved per-map floor y, or None when no floor is set."""
-        walls = self._map.walls if self._map is not None else None
+        walls = self._map_walls()
         if walls and walls.get("floor") is not None:
             return self._ry(walls["floor"])
         return None
@@ -823,7 +839,7 @@ class SmartBot(BotBase):
             # facing is inward — overrides platform bounds and prevents
             # wall-banging. Per-map walls (absolute x) replace the global
             # edge margins; absent sides fall back to wall_zone_px.
-            walls = self._map.walls if self._map is not None else None
+            walls = self._map_walls()
             map_w = self._region_wh()[0]
             left_wall = (
                 self._rx(walls["left"])
@@ -922,7 +938,7 @@ class SmartBot(BotBase):
         # Head toward the checkpoint; walls still override the heading.
         dx = tx - pos[0]
         direction = self._weave_dir or ("right" if dx >= 0 else "left")
-        walls = self._map.walls if self._map is not None else None
+        walls = self._map_walls()
         map_w = self._region_wh()[0]
         left_wall = (
             self._rx(walls["left"])
