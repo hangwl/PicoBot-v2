@@ -16,9 +16,14 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "wander_seconds": 15,
     "skill_gap_seconds": [0.5, 1.0],
     "nav_threshold_px": 5,
-    "nav_up_px": 20,
+    "nav_up_flash_px": 14,
+    "nav_rope_lift_px": 20,
+    "nav_up_side_dx_px": 16,
     "nav_jump_px": 8,
-    "nav_gap_px": 25,
+    "nav_gap_px": 20,
+    "nav_double_gap_px": 32,
+    "nav_reach_file": "nav_reach.json",
+    "linger_hops": [0, 2],
     "dwell_weave": true,
     "weave_double_chance": 0.4,
     "weave_range_px": 24,
@@ -74,9 +79,12 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 - Vertical jumps that produce no progress twice in a row end the leg
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.
-- `nav_up_px` / `nav_jump_px` / `nav_gap_px` (minimap px) bound the
-  pathfinding graph: highest up-jump, widest plain-jump gap, widest
-  flash-jump gap. See [bot-behavior.md](bot-behavior.md#pathfinding-navgraphpy-navigatorpy).
+- `nav_*_px` are **starting** move reaches in minimap px (conservative);
+  the bot learns real values from observed moves and stores them in
+  `nav_reach_file` (gitignored, per character). Delete that file to
+  relearn. See [bot-behavior.md](bot-behavior.md#moves--learned-reach-navgraphpy-reachpy-navigatorpy).
+- `linger_hops` — weave hops at each anchor before moving on, random in
+  `[lo, hi]`.
 - `pause_on_lie_detector` is a stub seam — keep it off.
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest

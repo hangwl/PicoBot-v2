@@ -107,7 +107,7 @@ def _offset_meta(snap: dict, dx: int, dy: int) -> None:
         ]
     if snap.get("anchors"):
         snap["anchors"] = [(x + dx, y + dy) for x, y in snap["anchors"]]
-    for key in ("nav_edges", "nav_route"):
+    for key in ("nav_edges", "nav_plan", "nav_route"):
         if snap.get(key):
             snap[key] = [
                 (k, a + dx, b + dy, c + dx, d + dy)
@@ -155,8 +155,12 @@ class BotHost:
         self._nav_show = False
         self._nav_preview = None      # (legs, expires_at)
         from .bot.navgraph import GraphCache
+        from .bot.reach import ReachModel, base_reach
 
         self._nav_cache = GraphCache()
+        self.reach = ReachModel(
+            base_reach(self.bot_config), path=self.bot_config.nav_reach_file
+        )
 
         self.bot = None
         self.bot_thread: Optional[threading.Thread] = None
@@ -251,6 +255,7 @@ class BotHost:
 
     def shutdown(self) -> None:
         self.stop_bot()
+        self.reach.save(force=True)
         if self.calibrator:
             self.calibrator.stop()
         self.streamer.stop()
@@ -303,6 +308,7 @@ class BotHost:
                 minimap=feed.minimap if feed is not None else None,
                 monitor=feed.monitor if feed is not None else None,
                 identity=self.identity,
+                reach=self.reach,
                 notify_callback=self.telegram.send_message,
                 event_bus=bus,
             )
@@ -415,10 +421,14 @@ class BotHost:
             prev = self._nav_preview
             if prev is not None and time.monotonic() < prev[1]:
                 nav_route = [(l.kind, l.x0, l.y0, l.x1, l.y1) for l in prev[0]]
+        nav_plan = None
         if bot is not None and bot.viz.get("route"):
             nav_route = list(bot.viz["route"])
+        if bot is not None and bot.viz.get("plan"):
+            nav_plan = list(bot.viz["plan"])
         return {
             "nav_edges": nav_edges,
+            "nav_plan": nav_plan,
             "nav_route": nav_route,
             "map": entry.name if entry else None,
             "map_via": res.via,
@@ -432,7 +442,7 @@ class BotHost:
         }
 
     def _nav_graph(self, entry, region):
-        return self._nav_cache.get(entry, region, self.bot_config)
+        return self._nav_cache.get(entry, region, self.reach)
 
     def _nav_command(self, msg: str) -> None:
         """nav|show|on|off, nav|preview|x,y (minimap px) — route preview

@@ -603,10 +603,10 @@ class HostCommandTests(unittest.TestCase):
             self.assertTrue(self.host._handle_command("nav|preview|80,84"))
             meta = self.host._map_meta()
         kinds = [leg[0] for leg in meta["nav_route"]]
-        self.assertIn("up_jump", kinds)
+        self.assertTrue({"up_flash", "rope_lift"} & set(kinds))
         self.assertTrue(any(e[0] == "down_jump" for e in meta["nav_edges"]))
         evts = [e["msg"] for e in self.host.bus.history() if e["kind"] == "nav"]
-        self.assertTrue(any("up_jump" in m for m in evts))
+        self.assertTrue(any("route:" in m for m in evts))
 
     def test_nav_show_off_hides_overlay(self):
         with tempfile.TemporaryDirectory() as tmp:

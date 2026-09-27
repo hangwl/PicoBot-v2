@@ -1,8 +1,10 @@
 """Execute NavGraph routes with the bot's movement primitives.
 
-Each transfer (up/down jump, drop, gap jump) is verified by where the
-player actually lands; a miss replans from the real position instead of
-blindly continuing the old route.
+:meth:`Navigator.step` plans from the player's *actual* position and
+performs one leg, so a missed landing is corrected on the next step
+instead of blindly continuing a stale route. Every jump-type move reports
+its takeoff/landing to the :class:`ReachModel`, which is how move reach
+is learned.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import time
 from typing import Optional, Tuple
 
 from .navgraph import Leg, NavGraph
+from .reach import MOVES
 
 Point = Tuple[float, float]
 
@@ -23,43 +26,60 @@ class Navigator:
         graph: NavGraph,
         *,
         jitter: float = 0.15,
-        max_replans: int = 3,
         rng: Optional[random.Random] = None,
         align_px: float = 3.0,
     ) -> None:
         self.bot = bot
         self.graph = graph
         self.jitter = jitter
-        self.max_replans = max_replans
         self.rng = rng or random.Random()
         self.align_px = align_px
+        self._seed = self.rng.random()
 
-    # -- Entry ----------------------------------------------------------------------
-    def go(self, goal: Point) -> bool:
-        """Travel to ``goal`` (minimap px); True when standing there."""
+    # -- Entry points ---------------------------------------------------------------
+    def step(self, goal: Point) -> str:
+        """One leg toward ``goal``: ``arrived`` | ``moved`` | ``failed`` |
+        ``noroute`` | ``lost`` (no player position)."""
         bot = self.bot
+        pos = self._pos()
+        if pos is None:
+            return "lost"
         goal_plat = self.graph.locate(*goal)
-        for attempt in range(self.max_replans + 1):
-            pos = self._settle()
-            if pos is None:
-                return False
-            if self._arrived(pos, goal, goal_plat):
-                return True
-            legs = self.graph.route(pos, goal, jitter=self.jitter, rng=self.rng)
-            if legs is None:
-                bot.log(f"Nav: no route from {pos} to {goal}")
-                return False
-            bot.event("nav", "route: " + " → ".join(l.kind for l in legs))
-            if attempt:
-                bot.log(f"Nav: replanned from {pos} (attempt {attempt})")
-            bot.viz["route"] = [(l.kind, l.x0, l.y0, l.x1, l.y1) for l in legs]
-            if all(self._leg(leg) for leg in legs):
-                pos = self._settle()
-                if pos is not None and self._arrived(pos, goal, goal_plat):
-                    return True
+        if self._arrived(pos, goal, goal_plat):
+            return "arrived"
+        # Same jitter draws for the whole segment — re-planning each step
+        # must not flip between near-equal alternatives.
+        rng = random.Random(hash((round(goal[0]), round(goal[1]), self._seed)))
+        exclude = () if bot.rope_lift_remaining() <= 1.0 else ("rope_lift",)
+        legs = self.graph.route(pos, goal, jitter=self.jitter, rng=rng, exclude=exclude)
+        if legs is None:
+            return "noroute"
+        bot.viz["route"] = [(l.kind, l.x0, l.y0, l.x1, l.y1) for l in legs]
+        if not self._leg(legs[0]):
+            return "failed"
+        pos = self._pos()
+        return "arrived" if pos is not None and self._arrived(pos, goal, goal_plat) else "moved"
+
+    def go(self, goal: Point, max_failures: int = 3, max_steps: int = 40) -> bool:
+        """Step until ``goal`` is reached; False on no route, repeated
+        failures, or an unsafe condition."""
+        bot = self.bot
+        failures = 0
+        for _ in range(max_steps):
             if not bot.should_continue() or bot.unsafe_reason() is not None:
                 return False
-        bot.log("Nav: giving up after replans")
+            status = self.step(goal)
+            if status == "arrived":
+                return True
+            if status in ("noroute", "lost"):
+                bot.log(f"Nav: {status} toward {goal}")
+                return False
+            if status == "failed":
+                failures += 1
+                bot.log(f"Nav: missed a landing — replanning ({failures})")
+                if failures > max_failures:
+                    bot.log("Nav: giving up after replans")
+                    return False
         return False
 
     def _arrived(self, pos: Point, goal: Point, goal_plat) -> bool:
@@ -79,36 +99,53 @@ class Navigator:
         if not self._walk_to(leg.x0, exact=True):
             return False
         want = self.graph.locate(leg.x1, leg.y1)
-        if leg.kind == "up_jump":
-            self._up_jump()
-        elif leg.kind == "down_jump":
+        start = self._settle(quick=True)
+        direction = "right" if leg.x1 > leg.x0 else "left"
+        kind = leg.kind
+        if kind == "rope_lift":
+            if not self._rope_lift():
+                return False
+        elif kind == "up_flash":
+            self.bot._up_flash(direction if abs(leg.x1 - leg.x0) > 2 else None)
+        elif kind == "up_side_flash":
+            bot._up_side_flash(direction)
+        elif kind == "down_jump":
             bot.down_jump()
-        elif leg.kind == "drop":
-            self._run_off(leg)
-        elif leg.kind in ("jump", "flash"):
-            self._gap_jump(leg)
+        elif kind == "drop":
+            self._hold_until(direction, lambda p: p[1] > leg.y0 + self.graph.snap_px, 1.5)
+        elif kind in ("jump", "flash", "double_flash"):
+            self._gap_jump(leg, direction)
         pos = self._settle()
-        return pos is not None and self.graph.locate(*pos) == want
+        ok = pos is not None and self.graph.locate(*pos) == want
+        if kind in MOVES and start is not None and pos is not None:
+            self.graph.reach.observe(
+                kind,
+                planned=(abs(leg.x1 - leg.x0), leg.y0 - leg.y1),
+                observed=(abs(pos[0] - start[0]), start[1] - pos[1]),
+                ok=ok,
+            )
+        return ok
 
     def _walk_to(self, x: float, exact: bool = False) -> bool:
-        pos = self._settle(quick=True)
+        pos = self._pos()
         if pos is None:
             return False
         tol = self.align_px if exact else self.bot.config.nav_threshold_px
         if abs(pos[0] - x) <= tol:
             return True
-        far = abs(pos[0] - x) > 30 and not exact
-        style = "mixed" if far else "walk"
         return bool(self.bot.move_to_point(
-            int(round(x)), pos[1], threshold=int(tol), style=style
+            int(round(x)), pos[1], threshold=int(tol), style="mixed",
         ))
 
-    def _up_jump(self) -> None:
-        """Up-jump, riding out a rope-lift cooldown instead of failing."""
-        deadline = time.time() + 5.0
-        while self.bot.up_jump() is False and time.time() < deadline:
-            if self.bot.sleep(0.2):
-                return
+    def _rope_lift(self) -> bool:
+        """Rope lift, waiting out a short remaining cooldown."""
+        bot = self.bot
+        wait = bot.rope_lift_remaining()
+        if wait > 1.5:
+            return False
+        if wait > 0 and bot.sleep(wait + 0.05):
+            return False
+        return bool(bot.rope_lift())
 
     def _hold_until(self, direction: str, done, timeout: float, action=None) -> None:
         bot = self.bot
@@ -126,25 +163,16 @@ class Navigator:
         finally:
             bot.hid.key_up(direction)
 
-    def _run_off(self, leg: Leg) -> None:
-        direction = "right" if leg.x1 > leg.x0 else "left"
-        self._hold_until(
-            direction, lambda p: p[1] > leg.y0 + self.graph.snap_px, 1.5
-        )
-
-    def _gap_jump(self, leg: Leg) -> None:
+    def _gap_jump(self, leg: Leg, direction: str) -> None:
         bot = self.bot
-        direction = "right" if leg.x1 > leg.x0 else "left"
         sign = 1 if direction == "right" else -1
-
-        def jump():
-            if leg.kind == "flash":
-                bot._flash_hop()
-            else:
-                bot.hid.press(bot.config.jump_key)
-
+        action = {
+            "jump": lambda: bot.hid.press(bot.config.jump_key),
+            "flash": bot._flash_hop,
+            "double_flash": bot._double_flash,
+        }[leg.kind]
         self._hold_until(
-            direction, lambda p: (p[0] - leg.x1) * sign >= 0, 1.5, action=jump
+            direction, lambda p: (p[0] - leg.x1) * sign >= 0, 1.5, action=action
         )
 
     # -- Perception ------------------------------------------------------------------

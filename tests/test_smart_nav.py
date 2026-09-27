@@ -370,6 +370,30 @@ class MovementRuleTests(unittest.TestCase):
         self.assertTrue(any("walking instead" in c.args[0] for c in bot.log.call_args_list))
 
 
+class RoamFallbackTests(unittest.TestCase):
+    """No anchors: keep moving around where grinding started instead of
+    standing still spamming attacks."""
+
+    def test_grind_without_rotation_weaves_around_origin(self):
+        bot = _weave_bot((50, 50))
+        bot.player_pos = Mock(return_value=(50, 50))
+        bot._weave_around = Mock()
+        bot._attack_cycle = Mock()
+        bot.grind_once()
+        bot.grind_once()
+        self.assertEqual(bot._weave_around.call_count, 2)
+        bot._weave_around.assert_called_with(50, 50)
+        bot._attack_cycle.assert_not_called()
+        bot.player_pos.assert_called_once()           # origin fixed
+
+    def test_dwell_weave_off_keeps_stationary_attacks(self):
+        bot = _weave_bot((50, 50))
+        bot.config.dwell_weave = False
+        bot._attack_cycle = Mock()
+        bot.grind_once()
+        bot._attack_cycle.assert_called_once()
+
+
 class ArrivalSkillTests(unittest.TestCase):
     def test_placed_anchor_falls_back_to_summons(self):
         from picobot.bot.skills import Skill, SkillBook
@@ -638,9 +662,9 @@ class PatrolTests(unittest.TestCase):
 
     def test_dwell_dispatches_to_patrol(self):
         bot = self._bot((60, 50), self._rot())
-        bot._patrol_tick = Mock()
+        bot._patrol = Mock()
         bot.dwell_tick()
-        bot._patrol_tick.assert_called_once()
+        bot._patrol.tick.assert_called_once()
 
     def test_dwell_is_open_ended_for_patrol(self):
         # ≥2 anchors: dwell expires only via patrol handoff — mid-patrol

@@ -3,16 +3,18 @@
 Nodes are points on platforms: segment ends plus the x-positions where a
 move to another platform is possible. Edges:
 
-- ``walk``      — along one platform between neighbouring points.
-- ``down_jump`` — drop through a platform onto the next one below.
-- ``up_jump``   — rise onto the next platform above (≤ ``up_px``).
-- ``drop``      — walk off a platform's end onto what's below.
-- ``jump``/``flash`` — hop across a horizontal gap to another platform's
-  end (``flash`` when wider than a plain jump covers).
+- ``walk`` — along one platform (executed as flash weaves when long).
+- ``down_jump`` onto the next platform below; ``drop`` off an end.
+- Upward: ``up_flash`` / ``rope_lift`` onto the platform directly above;
+  ``up_side_flash`` (up flash, then a sideways flash) up-and-over onto a
+  higher platform across a gap.
+- Horizontal gaps: ``jump``, ``flash``, ``double_flash``.
 
-All coordinates are minimap px. Costs are rough seconds, so routes trade
-walking distance against the time a jump takes. ``jitter`` perturbs edge
-costs per query — near-equal routes vary like a player's would.
+Whether a jump-type edge exists comes from the :class:`ReachModel`
+envelopes (learned from observed moves); edges beyond the proven
+envelope but within its exploration limit cost more. Coordinates are
+minimap px; costs are rough seconds. ``jitter`` perturbs costs per query
+so near-equal routes vary.
 """
 
 from __future__ import annotations
@@ -20,11 +22,19 @@ from __future__ import annotations
 import heapq
 import random
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Collection, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from .reach import ReachModel
 
 Segment = Tuple[float, float, float, float]
 
-COSTS = {"down_jump": 0.7, "up_jump": 1.1, "drop": 0.6, "jump": 0.6, "flash": 0.8}
+COSTS = {
+    "down_jump": 0.7, "drop": 0.6,
+    "jump": 0.6, "flash": 0.8, "double_flash": 1.1,
+    "up_flash": 1.0, "up_side_flash": 1.3, "rope_lift": 1.2,
+}
+EXPLORE_PENALTY = 1.6
+LEVEL_PX = 4.0          # max rise for a "horizontal" gap move
 
 
 @dataclass(frozen=True)
@@ -56,6 +66,7 @@ class Leg:
     y0: float
     x1: float
     y1: float
+    cost: float = 0.0
 
 
 @dataclass
@@ -69,26 +80,22 @@ class NavGraph:
     def __init__(
         self,
         segments: Iterable[Segment],
+        reach: ReachModel,
         *,
-        up_px: float = 20.0,
-        jump_px: float = 8.0,
-        gap_px: float = 25.0,
-        rise_px: float = 4.0,
         walk_speed: float = 40.0,
         snap_px: float = 8.0,
         edge_inset_px: float = 4.0,
+        takeoff_inset_px: float = 3.0,
     ) -> None:
-        self.edge_inset_px = edge_inset_px
         self.platforms: List[Platform] = [
             Platform.from_segment(s) for s in segments
             if abs(s[2] - s[0]) >= 1.0
         ]
-        self.up_px = up_px
-        self.jump_px = jump_px
-        self.gap_px = gap_px
-        self.rise_px = rise_px
+        self.reach = reach
         self.walk_speed = walk_speed
         self.snap_px = snap_px
+        self.edge_inset_px = edge_inset_px
+        self.takeoff_inset_px = takeoff_inset_px
         self.nodes: List[Tuple[int, float]] = []
         self._index: Dict[Tuple[int, float], int] = {}
         self.edges: List[List[_Edge]] = []
@@ -144,6 +151,16 @@ class NavGraph:
         if a != b:
             self.edges[a].append(_Edge(b, kind, cost))
 
+    def _move(self, i: int, xa: float, j: int, xb: float, kind: str,
+              dx: float, rise: float) -> bool:
+        """Add a jump-type edge if ``kind``'s reach covers (dx, rise)."""
+        fit = self.reach.fits(kind, dx, max(0.0, rise))
+        if fit is None:
+            return False
+        cost = COSTS[kind] * (1.0 if fit else EXPLORE_PENALTY)
+        self._link(self._node(i, xa), self._node(j, xb), kind, cost)
+        return True
+
     def _build(self) -> None:
         plats = self.platforms
         for i, p in enumerate(plats):
@@ -151,19 +168,8 @@ class NavGraph:
             self._node(i, p.x1)
         for i, p in enumerate(plats):
             for j, q in enumerate(plats):
-                if i == j:
-                    continue
-                lo, hi = max(p.x0, q.x0), min(p.x1, q.x1)
-                if lo <= hi:
-                    inset = min(self.edge_inset_px, (hi - lo) / 4.0)
-                    for x in {lo + inset, hi - inset, (lo + hi) / 2.0}:
-                        if self.below(x, p.y_at(x), exclude=i) != j:
-                            continue
-                        self._link(self._node(i, x), self._node(j, x),
-                                   "down_jump", COSTS["down_jump"])
-                        if q.y_at(x) - p.y_at(x) <= self.up_px:
-                            self._link(self._node(j, x), self._node(i, x),
-                                       "up_jump", COSTS["up_jump"])
+                if i != j:
+                    self._link_stacked(i, p, j, q)
             for end, step in ((p.x0, -1.0), (p.x1, 1.0)):
                 self._link_off_end(i, end, step)
         for i in range(len(plats)):
@@ -175,23 +181,44 @@ class NavGraph:
                 self._link(na, nb, "walk", cost)
                 self._link(nb, na, "walk", cost)
 
+    def _link_stacked(self, i: int, p: Platform, j: int, q: Platform) -> None:
+        lo, hi = max(p.x0, q.x0), min(p.x1, q.x1)
+        if lo > hi:
+            return
+        inset = min(self.edge_inset_px, (hi - lo) / 4.0)
+        for x in {lo + inset, hi - inset, (lo + hi) / 2.0}:
+            yp = p.y_at(x)
+            if self.below(x, yp, exclude=i) == j:
+                self._link(self._node(i, x), self._node(j, x),
+                           "down_jump", COSTS["down_jump"])
+            elif self.above(x, yp, exclude=i) == j:
+                rise = yp - q.y_at(x)
+                for kind in ("up_flash", "rope_lift"):
+                    self._move(i, x, j, x, kind, 0.0, rise)
+
     def _link_off_end(self, i: int, end: float, step: float) -> None:
         p = self.platforms[i]
-        src = self._node(i, end)
         ey = p.y_at(end)
+        src = self._node(i, end)
         land = self.below(end + 2.0 * step, ey, exclude=i)
         if land is not None:
-            lx = end + 2.0 * step
-            self._link(src, self._node(land, lx), "drop", COSTS["drop"])
+            self._link(src, self._node(land, end + 2.0 * step), "drop", COSTS["drop"])
+        takeoff = end - step * min(self.takeoff_inset_px, (p.x1 - p.x0) / 4.0)
         for j, q in enumerate(self.platforms):
             if j == i:
                 continue
             near = q.x0 if step > 0 else q.x1
-            gap = (near - end) * step
+            if (near - end) * step <= 0:
+                continue
+            land_x = near + step * min(self.edge_inset_px, (q.x1 - q.x0) / 4.0)
+            dx = abs(land_x - takeoff)
             rise = ey - q.y_at(near)
-            if 0 < gap <= self.gap_px and rise <= self.rise_px:
-                kind = "jump" if gap <= self.jump_px else "flash"
-                self._link(src, self._node(j, near), kind, COSTS[kind])
+            if rise <= LEVEL_PX:
+                for kind in ("jump", "flash", "double_flash"):
+                    self._move(i, takeoff, j, land_x, kind, dx, rise)
+            else:
+                self._move(i, takeoff, j, land_x, "up_side_flash", dx, rise)
+                self._move(i, takeoff, j, land_x, "up_flash", dx, rise)
 
     # -- Queries ------------------------------------------------------------------
     def point(self, node: int) -> Tuple[float, float]:
@@ -200,12 +227,11 @@ class NavGraph:
 
     def transfer_legs(self) -> List[Leg]:
         """Every non-walk edge — for the dashboard overlay."""
-        out = []
-        for a, edges in enumerate(self.edges):
-            for e in edges:
-                if e.kind != "walk":
-                    out.append(Leg(e.kind, *self.point(a), *self.point(e.to)))
-        return out
+        return [
+            Leg(e.kind, *self.point(a), *self.point(e.to), e.cost)
+            for a, edges in enumerate(self.edges)
+            for e in edges if e.kind != "walk"
+        ]
 
     def route(
         self,
@@ -214,9 +240,11 @@ class NavGraph:
         *,
         jitter: float = 0.0,
         rng: Optional[random.Random] = None,
+        exclude: Collection[str] = (),
     ) -> Optional[List[Leg]]:
-        """Cheapest legs from ``start`` to ``goal``; None when either point
-        is off the drawn platforms or no route exists."""
+        """Cheapest legs from ``start`` to ``goal`` avoiding ``exclude``d
+        move kinds; None when either point is off the drawn platforms or
+        no route exists."""
         sp, gp = self.locate(*start), self.locate(*goal)
         if sp is None or gp is None:
             return None
@@ -236,10 +264,10 @@ class NavGraph:
 
         def neighbours(u: int) -> Sequence[_Edge]:
             base = self.edges[u] if u < n else []
-            return list(base) + extra.get(u, [])
+            return [e for e in list(base) + extra.get(u, []) if e.kind not in exclude]
 
         dist = {s: 0.0}
-        prev: Dict[int, Tuple[int, str]] = {}
+        prev: Dict[int, Tuple[int, str, float]] = {}
         heap = [(0.0, s)]
         while heap:
             d, u = heapq.heappop(heap)
@@ -252,7 +280,7 @@ class NavGraph:
                 nd = d + max(c, 1e-6)
                 if nd < dist.get(e.to, float("inf")):
                     dist[e.to] = nd
-                    prev[e.to] = (u, e.kind)
+                    prev[e.to] = (u, e.kind, e.cost)
                     heapq.heappush(heap, (nd, e.to))
         if g not in prev:
             return None
@@ -267,11 +295,15 @@ class NavGraph:
         legs: List[Leg] = []
         u = g
         while u != s:
-            p, kind = prev[u]
-            legs.append(Leg(kind, *pos(p), *pos(u)))
+            p, kind, cost = prev[u]
+            legs.append(Leg(kind, *pos(p), *pos(u), cost))
             u = p
         legs.reverse()
         return _merge_walks(legs)
+
+    def route_cost(self, start, goal, **kw) -> float:
+        legs = self.route(start, goal, **kw)
+        return float("inf") if legs is None else sum(l.cost for l in legs)
 
 
 def _merge_walks(legs: List[Leg]) -> List[Leg]:
@@ -281,46 +313,37 @@ def _merge_walks(legs: List[Leg]) -> List[Leg]:
             continue
         if out and leg.kind == "walk" and out[-1].kind == "walk":
             last = out.pop()
-            leg = Leg("walk", last.x0, last.y0, leg.x1, leg.y1)
+            leg = Leg("walk", last.x0, last.y0, leg.x1, leg.y1, last.cost + leg.cost)
         out.append(leg)
     return out
 
 
-class GraphCache:
-    """One NavGraph per (map, platforms, region size, jump params)."""
-
-    def __init__(self) -> None:
-        self._key = None
-        self._graph: Optional[NavGraph] = None
-
-    def get(self, entry, region, config=None) -> Optional[NavGraph]:
-        if entry is None or not entry.platforms or not region:
-            return None
-        key = (
-            entry.name, tuple(tuple(s) for s in entry.platforms),
-            region[2], region[3],
-            None if config is None else (
-                config.nav_up_px, config.nav_jump_px, config.nav_gap_px
-            ),
-        )
-        if key != self._key:
-            self._key, self._graph = key, graph_for(entry, region, config)
-        return self._graph
-
-
-def graph_for(entry, region, config=None) -> Optional[NavGraph]:
+def graph_for(entry, region, reach: ReachModel) -> Optional[NavGraph]:
     """NavGraph from a map entry's normalized platforms in ``region`` px."""
     if entry is None or not entry.platforms or not region:
         return None
     w, h = region[2], region[3]
     segs = [(s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in entry.platforms]
-    kw = {}
-    if config is not None:
-        kw = dict(
-            up_px=config.nav_up_px, jump_px=config.nav_jump_px,
-            gap_px=config.nav_gap_px,
+    return NavGraph(segs, reach)
+
+
+class GraphCache:
+    """One NavGraph per (map, platforms, region size, reach estimates)."""
+
+    def __init__(self) -> None:
+        self._key = None
+        self._graph: Optional[NavGraph] = None
+
+    def get(self, entry, region, reach: ReachModel) -> Optional[NavGraph]:
+        if entry is None or not entry.platforms or not region:
+            return None
+        key = (
+            entry.name, tuple(tuple(s) for s in entry.platforms),
+            region[2], region[3], reach.snapshot(),
         )
-    return NavGraph(segs, **kw)
+        if key != self._key:
+            self._key, self._graph = key, graph_for(entry, region, reach)
+        return self._graph
 
 
 __all__ = ["COSTS", "GraphCache", "Leg", "NavGraph", "Platform", "graph_for"]

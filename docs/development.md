@@ -32,9 +32,12 @@ installed the repo's own venv interpreter works:
 - `test_serve.py` — host commands, frame payloads, panel assembly
   (`assemble_panel`/`_offset_meta`), layout drags.
 - `test_framelog.py` — debug capture episodes, snapshots, pruning.
-- `test_navgraph.py` — graph edges, routes, jitter variety.
-- `test_navigator.py` — route execution against a small physics sim
-  (landing checks, replans, cooldown ride-out).
+- `test_navgraph.py` — envelope-driven edges (up/rope/up-side/double
+  flash), exploration + ceilings, jitter variety.
+- `test_navigator.py` — one-move steps against a physics sim: landings,
+  replans, rope-lift cooldown, reach learning.
+- `test_reach.py` — grow/shrink/ceiling rules, persistence.
+- `test_patrol.py` — full-loop plans, continuous motion, linger, bans.
 - `test_remote.py` — command worker (ordering, loop never blocked),
   binary frame subscription/drop-if-busy, HTTP template.
 - `test_screen.py` — per-thread mss instances.

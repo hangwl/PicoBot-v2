@@ -29,6 +29,8 @@ from .inputs import HidController
 from .monitor import MapMonitor
 from .navgraph import GraphCache, NavGraph
 from .navigator import Navigator
+from .patrol import Patrol
+from .reach import ReachModel, base_reach
 from .machine import Machine
 from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step, resolve_coord
@@ -42,6 +44,9 @@ _UNSET = object()
 
 class SmartBot(BotBase):
     _hop_px: float = 14.0   # learned minimap px one flash weave covers
+    _patrol: Optional[Patrol] = None
+    _reach: Optional[ReachModel] = None
+    _roam_origin = None
     def __init__(
         self,
         controller: HidController,
@@ -51,6 +56,7 @@ class SmartBot(BotBase):
         minimap: Optional[MinimapAnalyzer] = None,
         monitor: Optional[MapMonitor] = None,
         identity: Optional[MapIdentity] = None,
+        reach: Optional[ReachModel] = None,
         log_callback=None,
         notify_callback=None,
         event_bus=None,
@@ -85,6 +91,9 @@ class SmartBot(BotBase):
         )
         self._identity_version = -1
         self._nav_cache = GraphCache()
+        self._reach = reach or ReachModel(
+            base_reach(config), path=config.nav_reach_file
+        )
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0
         self._travel_target: Optional[int] = None
@@ -304,6 +313,8 @@ class SmartBot(BotBase):
             self._weave_dir = None
             self._weave_bounds = None
             self._route = []
+            if self._patrol is not None:
+                self._patrol.reset()
         if res.via == "ocr":
             self._apply_stored_layout(entry)
 
@@ -365,6 +376,66 @@ class SmartBot(BotBase):
         self.sleep(human_between(0.3, 0.22, 0.45))
         return True
 
+    def rope_lift_remaining(self) -> float:
+        """Seconds until the rope-lift skill is usable (inf = none bound)."""
+        if not self.config.up_jump_skill_key:
+            return float("inf")
+        last = getattr(self, "_last_up_skill", 0.0)
+        return max(0.0, self.config.up_jump_skill_cooldown - (time.time() - last))
+
+    def rope_lift(self) -> bool:
+        """Press the rope-lift skill; False when unbound or cooling down."""
+        if self.rope_lift_remaining() > 0 or not self.is_window_focused():
+            return False
+        self._last_up_skill = time.time()
+        self.hid.press(self.config.up_jump_skill_key)
+        self.sleep(human_between(0.45, 0.35, 0.6))
+        return True
+
+    def _up_flash(self, direction: Optional[str] = None) -> None:
+        """Jump, then Up + jump mid-air — the upward flash jump. Holding a
+        ``direction`` adds the sideways drift of a diagonal takeoff."""
+        jk = self._flash_key()
+        if direction:
+            self.hid.key_down(direction)
+        try:
+            self.hid.press(jk)
+            self.sleep(human_between(0.12, 0.08, 0.18))
+            self.hid.key_down("up")
+            self.hid.press(jk)
+            self.sleep(human_between(0.45, 0.35, 0.6))
+            self.hid.key_up("up")
+        finally:
+            if direction:
+                self.hid.key_up(direction)
+
+    def _up_side_flash(self, direction: str) -> None:
+        """Double flash: upward flash, then a sideways flash mid-air —
+        up and over onto a higher platform across a gap."""
+        jk = self._flash_key()
+        self.hid.key_down(direction)
+        try:
+            self.hid.press(jk)
+            self.sleep(human_between(0.12, 0.08, 0.18))
+            self.hid.key_down("up")
+            self.hid.press(jk)
+            self.sleep(human_between(0.16, 0.11, 0.22))
+            self.hid.key_up("up")
+            self.hid.press(jk)
+            self.sleep(human_between(0.42, 0.3, 0.6))
+        finally:
+            self.hid.key_up(direction)
+
+    def _double_flash(self) -> None:
+        """Two sideways flashes in one airtime (caller holds the direction)."""
+        jk = self._flash_key()
+        self.hid.press(jk)
+        self.sleep(human_between(0.17, 0.11, 0.26))
+        self.hid.press(jk)
+        self.sleep(human_between(0.2, 0.14, 0.28))
+        self.hid.press(jk)
+        self.sleep(human_between(0.42, 0.3, 0.6))
+
     def _current_map_entry(self) -> Optional[MapEntry]:
         """The resolved map, refreshed against the store.
 
@@ -377,10 +448,22 @@ class SmartBot(BotBase):
             return None
         return self.maps.get(self._map.name) or self._map
 
+    @property
+    def reach(self) -> ReachModel:
+        if self._reach is None:
+            self._reach = ReachModel(base_reach(self.config))
+        return self._reach
+
+    @property
+    def patrol(self) -> Patrol:
+        if self._patrol is None:
+            self._patrol = Patrol(self)
+        return self._patrol
+
     def _nav_graph(self) -> Optional[NavGraph]:
         """Movement graph of the current map's drawn platforms, or None."""
         return self._nav_cache.get(
-            self._current_map_entry(), self.minimap.region, self.config
+            self._current_map_entry(), self.minimap.region, self.reach
         )
 
     def _map_walls(self) -> Optional[dict]:
@@ -811,6 +894,7 @@ class SmartBot(BotBase):
         now = time.time()
         self._weave_dir = None
         self._weave_bounds = None
+        self._roam_origin = None
         if rot.anchors and self._anchor_idx < len(rot.anchors):
             anchor = rot.anchors[self._anchor_idx]
             if anchor.face:
@@ -820,7 +904,7 @@ class SmartBot(BotBase):
             self._dwell_end = (
                 float("inf") if len(rot.anchors) >= 2 else now + dwell
             )
-            if random.random() < rot.rest_chance:
+            if len(rot.anchors) < 2 and random.random() < rot.rest_chance:
                 self._rest_until = now + min(dwell * 0.6, human_between(12, 5, 25, 0.4))
                 self.log("Taking a breather")
             else:
@@ -864,7 +948,7 @@ class SmartBot(BotBase):
             if self._use_skill(buff):
                 self.sleep(human_between(0.6, 0.4, 0.9))
         if len(self.effective_rotation().anchors) >= 2:
-            self._patrol_tick()
+            self.patrol.tick()
         elif self.config.dwell_weave:
             self._weave_attack()
         else:
@@ -881,9 +965,12 @@ class SmartBot(BotBase):
         if not rot.anchors or self._anchor_idx >= len(rot.anchors):
             self._attack_once()
             return
-        cfg = self.config
         anchor = rot.anchors[self._anchor_idx]
-        ax, ay = self._rx(anchor.x), self._ry(anchor.y)
+        self._weave_around(self._rx(anchor.x), self._ry(anchor.y))
+
+    def _weave_around(self, ax: float, ay: float) -> None:
+        """One flash weave bouncing across the platform under (ax, ay)."""
+        cfg = self.config
         img = self.minimap_frame()
         pos = self.minimap.player_pos(img) if img is not None else None
         self.viz["player"] = pos
@@ -1129,10 +1216,23 @@ class SmartBot(BotBase):
         self._attack_once()
 
     def grind_once(self) -> None:
-        """Legacy no-rotation tick: due buffs, then a randomized attack."""
+        """No-rotation tick: due buffs, then keep moving — weave-hop
+        around where grinding started (``dwell_weave: false`` attacks in
+        place)."""
         if not self.is_window_focused() or not self.should_continue():
             return
-        self._attack_cycle()
+        if not self.config.dwell_weave:
+            self._attack_cycle()
+            return
+        for buff in self.skills.due_buffs():
+            if self._use_skill(buff):
+                self.sleep(human_between(0.6, 0.4, 0.9))
+        if self._roam_origin is None:
+            self._roam_origin = self.player_pos()
+        if self._roam_origin is None:
+            self._attack_once()
+            return
+        self._weave_around(*self._roam_origin)
 
     def random_wander(self) -> None:
         """Bounded random walk for ``wander_seconds``, then return home."""
@@ -1197,6 +1297,7 @@ class SmartBot(BotBase):
         except KeyboardInterrupt:
             self.log("Smart bot interrupted")
         finally:
+            self.reach.save(force=True)
             if self._own_monitor:
                 self.monitor.stop()
             self.hid.release_all()

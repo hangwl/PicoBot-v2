@@ -48,6 +48,13 @@ what was tried and what was learned in `docs/learnings.md` instead.
   woven after the flash triggers** (never before: it eats the re-press
   window). Walk only for short final approaches. Delays are log-normal
   (`timing.human_between`/`human_delay`), never flat `uniform`.
+- **Always on the move**: with ≥2 anchors the bot follows a full
+  traversal plan, one move per tick, anchors as pass-through waypoints
+  (short linger only). No dwell timers or stationary attack loops in
+  patrol.
+- **Move reach is learned**, not hard-coded: planner edges come from
+  `ReachModel` envelopes; every jump-type move reports takeoff/landing.
+  Upward: `up_flash` (Up + jump mid-air), `up_side_flash`, `rope_lift`.
 - **Calibration save preserves** walls/platforms/`map_name`/skills —
   `merge_recording` exists because a fresh `MapEntry` wiped layouts.
 - Region/coords: client-area px for rects; 0–1 normalized in map files.
@@ -63,7 +70,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Area | Files |
 |---|---|
 | Bot loop / FSM | `picobot/bot/smart_bot.py`, `bot/states/` |
-| Pathfinding | `bot/navgraph.py` (graph + Dijkstra), `bot/navigator.py` (execution) |
+| Pathfinding | `bot/navgraph.py` (graph + Dijkstra), `bot/navigator.py` (execution), `bot/reach.py` (learned reach), `bot/patrol.py` (continuous loop) |
 | Map-change monitor + identity | `bot/monitor.py`, `bot/identity.py`, `vision/transition.py` |
 | Map store + identity | `bot/maps.py`, `vision/minimap.py`, `vision/mapname.py` |
 | Recording | `bot/calibrate.py` |

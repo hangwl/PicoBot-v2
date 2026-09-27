@@ -92,11 +92,14 @@ def _line(img: np.ndarray, x0, y0, x1, y1, color) -> None:
 
 
 NAV_COLORS = {                                  # BGR
-    "up_jump": (80, 220, 80),       # green
     "down_jump": (0, 140, 255),     # orange
     "drop": (0, 90, 200),           # dark orange
     "jump": (255, 80, 255),         # magenta
     "flash": (200, 60, 200),        # purple
+    "double_flash": (160, 40, 160),  # dark purple
+    "up_flash": (80, 220, 80),      # green
+    "up_side_flash": (140, 255, 140),  # light green
+    "rope_lift": (40, 160, 40),     # dark green
 }
 
 
@@ -117,6 +120,8 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
         _line(out, *seg, (255, 200, 40))                  # cyan platforms
     for kind, *seg in meta.get("nav_edges") or []:
         _line(out, *seg, NAV_COLORS.get(kind, (200, 200, 200)))
+    for kind, *seg in meta.get("nav_plan") or []:
+        _line(out, *seg, (60, 170, 170))                  # olive loop plan
     for kind, *seg in meta.get("nav_route") or []:
         _line(out, *seg, (0, 255, 255))                   # yellow route
         _line(out, seg[0] + 1, seg[1], seg[2] + 1, seg[3], (0, 255, 255))

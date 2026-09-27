@@ -28,10 +28,11 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
   - **Window** — the full client area (used for Draw minimap/title).
   - **Place anchors** — click to add a patrol checkpoint (snaps to the
     drawn platform), shift-click to remove the nearest; Undo / Clear.
-  - **Route** — overlays the movement graph (green up-jump, orange
-    down-jump/drop, magenta/purple jump/flash); click the Panel view to
-    preview the route from the player (yellow). The bot's active route
-    is drawn in yellow whenever it travels.
+  - **Route** — overlays the movement graph (greens: up flash / up-side
+    flash / rope lift; oranges: down-jump / drop; purples: jump / flash /
+    double flash); click the Panel view to preview a route (yellow).
+    While patrolling, the full loop plan is drawn olive and the current
+    segment yellow.
   - fps selector persists `view_fps` (default 10, 1–30).
 - **Bot** — Start/Stop.
 - **Calibrate** — Record / Mark anchor (F9) / Save. See

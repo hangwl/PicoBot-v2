@@ -1,50 +1,54 @@
 # Bot behavior
 
-## Checkpoint patrol (the only multi-anchor mode)
+## Continuous patrol (`patrol.py`)
 
-With ≥2 anchors the bot plans a route and *weave-attacks* toward each
-checkpoint — it never stands still:
+With ≥2 anchors and drawn platforms the bot is always on the move:
 
-- `_plan_route` orders anchors nearest-neighbour **from the player's
-  current position** (not the declared order), excluding the anchor being
-  stood on, sweeping the reachable level first.
-- Every patrol tick attacks: arrival bookkeeping, blind frames, and
-  stall-skips all fire an attack before returning — there are no dead
-  ticks.
-- Arriving pops the checkpoint, fires its `on_arrive` skills (or, for
-  anchors placed without a list, any registered summon that is off
-  cooldown), and keeps moving.
-- Route exhausted → replan from wherever the player ended up.
-- Checkpoints on another level — or on another drawn platform at the
-  same height — hand off to TRAVEL (see Pathfinding below).
-- **Stall guard**: a checkpoint unreachable for ~20s is skipped with a
-  log line; failed legs and stalled heads are banned ~30–45s so one bad
-  anchor can't hold the route.
-- Single-anchor maps still weave in place; `dwell_weave: false` parks.
+- **Full traversal plan**: anchors are ordered greedily by *route cost*
+  (seconds over the movement graph, ±20% jitter so loops vary), skipping
+  the anchor being stood on. The whole loop's legs are published and
+  drawn on the Panel view (olive); the current segment is yellow.
+- **One move per tick**, re-planned from the player's actual position,
+  so a missed landing is corrected on the next tick. Safety checks run
+  between moves.
+- **Anchors are waypoints**: arriving fires `on_arrive` skills (or, for
+  placed anchors, any summon that is off cooldown), then lingers
+  `linger_hops` (default 0–2, random) weave hops and moves on. No dwell
+  timers, no breathers.
+- Loop finished → re-plan from wherever the player is.
+- **Bans**: no route → skipped at once; 3 missed landings → skipped.
+  Banned anchors sit out 30s.
+- Hand-authored `legs` for a pair still win (ropes aren't in the graph).
+- Fallbacks: no drawn platforms (or standing off them) → the older
+  straight-line patrol; one anchor → weave on its platform; no anchors →
+  weave around where grinding started (`dwell_weave: false` attacks in
+  place).
 
-## Pathfinding (`navgraph.py`, `navigator.py`)
+## Moves & learned reach (`navgraph.py`, `reach.py`, `navigator.py`)
 
-TRAVEL legs are planned over a movement graph built from the map's
-**drawn platforms** (so drawing them is what enables pathfinding):
+The movement graph links drawn platforms with every move whose **reach**
+covers the gap:
 
-- Nodes: platform ends plus transfer points (inset 4px from overlap
-  edges). Edges: `walk`; `down_jump` onto the next platform below;
-  `up_jump` onto the next platform above within `nav_up_px`; `drop` off
-  an end; `jump`/`flash` across gaps within `nav_jump_px`/`nav_gap_px`
-  (target no more than 4px higher). Costs are rough seconds.
-- Dijkstra with ±15% cost jitter per query, so near-equal routes vary.
-- `Navigator` walks to each transfer point (±3px), performs the move,
-  waits for the landing, and checks the player is on the expected
-  platform. A miss replans from the actual position (up to 3 times).
-  Rope-lift cooldowns are waited out rather than counted as failures.
-- Hand-authored `legs` for a pair still win (ropes aren't in the graph
-  yet); without drawn platforms the old leg/`walk_to` path runs.
-- The active route is drawn on the Panel view in yellow; the dashboard's
-  **Route** button shows the graph and previews routes on click.
+| Move | Input | Use |
+|---|---|---|
+| walk | flash weaves (walk near the goal) | along a platform |
+| `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps |
+| `up_flash` | jump, then Up + jump mid-air | platform directly above |
+| `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
+| `rope_lift` | `up_jump_skill_key` | tall rises; cooldown-aware |
+| `down_jump` / `drop` | down + jump; walk off an end | lower platforms |
 
-Tune `nav_up_px`/`nav_jump_px`/`nav_gap_px` (minimap px) if routes
-include moves your character can't make — the Route preview shows
-exactly which edges exist.
+- Reach = sideways `dx` and upward `rise` in minimap px. Starting values
+  are conservative (`nav_*` config keys).
+- Every executed jump-type move reports takeoff and landing: success
+  grows the envelope to what was observed; a miss inside it shrinks it;
+  a miss on an exploratory attempt sets a ceiling. The planner may try
+  up to 1.15× the proven reach at a cost penalty, so reach grows from
+  the conservative start. Learned values persist in `nav_reach_file`.
+- Rope lift: a remaining cooldown ≤1.5s is waited out; longer excludes
+  rope lift from that step's plan (up-flash chains instead).
+- The dashboard's **Route** button shows every edge (colours per move)
+  and previews routes on click.
 
 ## Movement rule & attack weaving
 

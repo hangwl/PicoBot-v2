@@ -48,9 +48,16 @@ class BotConfig:
     nav_threshold_px: int = 5             # minimap px tolerance for "arrived"
     nav_stuck_limit: int = 40             # identical polls before rope-escape
     wander_edge_margin_px: int = 20       # turn around this close to map edge
-    nav_up_px: float = 20.0               # highest platform an up-jump reaches
+    # Starting move reach (minimap px) — conservative; learned upward
+    # from observed moves into nav_reach_file.
+    nav_up_flash_px: float = 14.0         # rise of an upward flash jump
+    nav_rope_lift_px: float = 20.0        # rise of the rope-lift skill
+    nav_up_side_dx_px: float = 16.0       # sideways reach of up→side flash
     nav_jump_px: float = 8.0              # widest gap a plain jump clears
-    nav_gap_px: float = 25.0              # widest gap a flash jump clears
+    nav_gap_px: float = 20.0              # widest gap a flash jump clears
+    nav_double_gap_px: float = 32.0       # widest gap a double flash clears
+    nav_reach_file: str = "nav_reach.json"
+    linger_hops: Tuple[int, int] = (0, 2)  # weave hops at each anchor
 
     # -- Dwell weave -------------------------------------------------------------
     dwell_weave: bool = True              # move + weave attacks at anchors
@@ -121,7 +128,8 @@ class BotConfig:
                 setattr(cfg, name, bool(data[name]))
         floats = (
             "buff_interval_seconds", "stationary_seconds", "wander_seconds",
-            "up_jump_skill_cooldown", "nav_up_px", "nav_jump_px", "nav_gap_px",
+            "up_jump_skill_cooldown", "nav_up_flash_px", "nav_rope_lift_px",
+            "nav_up_side_dx_px", "nav_jump_px", "nav_gap_px", "nav_double_gap_px",
             "weave_double_chance",
         )
         for name in floats:
@@ -142,6 +150,11 @@ class BotConfig:
         if "up_jump_skill_key" in data:
             v = data["up_jump_skill_key"]
             cfg.up_jump_skill_key = str(v) if v else None
+        if data.get("nav_reach_file"):
+            cfg.nav_reach_file = str(data["nav_reach_file"])
+        if "linger_hops" in data:
+            lo, hi = data["linger_hops"]
+            cfg.linger_hops = (max(0, int(lo)), max(int(lo), int(hi)))
         if "skill_gap_seconds" in data:
             lo, hi = data["skill_gap_seconds"]
             cfg.skill_gap_seconds = (float(lo), float(hi))
