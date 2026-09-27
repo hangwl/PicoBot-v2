@@ -18,6 +18,7 @@ dependencies = [
     "mss>=9.0.2",
     "numpy>=1.26",
     "pillow>=12.3.0",
+    "rapidocr>=3.9",
 ]
 
 [project.optional-dependencies]

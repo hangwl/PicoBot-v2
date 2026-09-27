@@ -78,6 +78,22 @@ class _VisionFeed:
         l, t, r, b = self.window.client_rect()
         return self.screen.capture((l, t, r - l, b - t))
 
+    def name_img(self, strip_height: int = 26, name_region=None):
+        """BGR capture of the map-title strip above the minimap."""
+        from .vision.mapname import name_strip_region
+
+        region = name_region or (
+            name_strip_region(self.minimap.region, strip_height)
+            if self.minimap.region
+            else None
+        )
+        if region is None:
+            return None
+        x, y, w, h = region
+        return self.screen.capture(
+            (self.window.client_left + x, self.window.client_top + y, w, h)
+        )
+
     def close(self) -> None:
         self.screen.close()
 
@@ -114,6 +130,9 @@ class BotHost:
         # Latest live-fingerprint evidence: (entry|None, distance) + raw fp.
         self._live_match = (None, float("inf"))
         self._live_fp: Optional[str] = None
+        # Latest OCR evidence: (entry|None, raw title text).
+        self._live_ocr = (None, None)
+        self._ocr_reader = None
 
 
         callbacks = RemoteCallbacks(
@@ -321,8 +340,34 @@ class BotHost:
                 live, dist, fp = None, float("inf"), None
         self._live_match = (live, dist)
         self._live_fp = fp
+        # OCR'd title text is a second, independent identity signal —
+        # an exact stored-name match beats any pixel-level evidence.
+        ocr_entry, ocr_text = None, None
+        if self.bot_config.name_ocr:
+            reader = getattr(self.bot, "map_name", None)
+            if self.bot is not None and callable(reader):
+                try:
+                    ocr_text = reader()
+                except Exception:
+                    ocr_text = None
+            elif feed is not None:
+                strip = feed.name_img(
+                    self.bot_config.name_strip_height,
+                    self.bot_config.minimap_name_region,
+                )
+                ocr_text = self._name_reader().read(strip)
+            if not isinstance(ocr_text, str) or not ocr_text.strip():
+                ocr_text = None
+            if ocr_text:
+                try:
+                    ocr_entry = self.maps.match_name(ocr_text)
+                except Exception:
+                    ocr_entry = None
+        self._live_ocr = (ocr_entry, ocr_text)
         if self.bot is not None and self.bot._map is not None:
             return self.bot._map
+        if ocr_entry is not None:
+            return ocr_entry
         if live is not None:
             return live
         if self._active_map_override:
@@ -415,6 +460,7 @@ class BotHost:
         return {
             "map": entry.name if entry else None,
             "map_conf": conf,
+            "map_title": self._live_ocr[1],
             "no_rotation": not bool(rot.anchors),
             "walls": walls,
             "floor": floor,
@@ -827,17 +873,34 @@ class BotHost:
             return False
         return True
 
+    def _name_reader(self):
+        """Lazily-built RapidOCR reader (first load ~1s, engine shared)."""
+        if self._ocr_reader is None:
+            from .vision.mapname import MapNameReader
+
+            self._ocr_reader = MapNameReader()
+        return self._ocr_reader
+
     def _send_maps(self) -> None:
-        # Refresh the live-fingerprint evidence so the dashboard shows
-        # what's actually on screen, not just the resolution.
+        # Refresh the live evidence so the dashboard shows what's
+        # actually on screen, not just the resolution.
         self._resolved_map_cached()
         live, dist = self._live_match
+        ocr_entry, ocr_text = self._live_ocr
         thresh = self.bot_config.map_match_threshold
         payload = {
             "event": "maps",
             "maps": self.maps.names(),
             "active": self._active_map_override,
-            "detected": live.name if live else None,
+            "detected": (
+                ocr_entry.name if ocr_entry is not None
+                else live.name if live else None
+            ),
+            "via": (
+                "ocr" if ocr_entry is not None
+                else "fp" if live is not None else None
+            ),
+            "title": ocr_text,
             "score": (
                 round(max(0.0, 1.0 - dist / thresh), 2)
                 if live is not None and thresh > 0 else None
@@ -1127,6 +1190,16 @@ class BotHost:
                     ignore_colors=(c.player, c.other_player, c.rune),
                     include_mask=structure_mask(img, c),
                 ) or None
+        map_name = None
+        if feed is not None and self.bot_config.name_ocr:
+            try:
+                strip = feed.name_img(
+                    self.bot_config.name_strip_height,
+                    self.bot_config.minimap_name_region,
+                )
+                map_name = self._name_reader().read(strip)
+            except Exception:
+                map_name = None
         try:
             entry = self.calibrator.finish(
                 name,
@@ -1135,6 +1208,10 @@ class BotHost:
                 key_map={
                     s.key: s for s in self.bot_config.skills.values()
                 },
+                # Saving re-records anchors only — walls/platforms/
+                # title must survive from the existing file.
+                existing=self.maps.get(name),
+                map_name=map_name,
             )
             path = self.maps.save(entry)
             self.maps.reload()

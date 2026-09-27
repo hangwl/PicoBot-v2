@@ -45,6 +45,31 @@ def _key_groups(
     return groups
 
 
+def merge_recording(
+    entry: MapEntry,
+    existing: Optional[MapEntry],
+    map_name: Optional[str] = None,
+) -> MapEntry:
+    """Preserve what a recording can't observe on an existing map.
+
+    Recording only produces anchors + inferred skills — drawn walls/
+    platforms, the OCR'd title, and user-tuned skill bindings would be
+    wiped by a plain save. Existing skills win over freshly inferred
+    ``key_*`` skills of the same name.
+    """
+    if existing is not None:
+        entry.walls = existing.walls
+        entry.platforms = existing.platforms
+        merged = dict(entry.skills)
+        merged.update(existing.skills)
+        entry.skills = merged
+        if not map_name:
+            map_name = existing.map_name
+    if map_name:
+        entry.map_name = map_name
+    return entry
+
+
 class TraceRecorder:
     """Pure calibration logic: feed position samples + mark events.
 
@@ -323,6 +348,8 @@ class CalibrationRunner:
         fingerprint: Optional[str] = None,
         minimap_region=None,
         key_map: Optional[Dict[str, Skill]] = None,
+        existing: Optional[MapEntry] = None,
+        map_name: Optional[str] = None,
     ) -> MapEntry:
         recorder = self.recorder
         img = self.last_img
@@ -363,6 +390,7 @@ class CalibrationRunner:
             minimap_region=minimap_region,
             key_map=key_map,
         )
+        merge_recording(entry, existing, map_name)
         self._emit("cal", f"saved map '{name}'")
         if not entry.rotation.anchors:
             self._emit(
@@ -444,6 +472,18 @@ def main() -> None:
         ),
         include_mask=structure_mask(first, minimap.colors),
     ) or None
+    map_name = None
+    try:
+        from ..vision.mapname import MapNameReader, name_strip_region
+
+        if minimap.region:
+            x, y, w, h = name_strip_region(minimap.region)
+            strip = screen.capture(
+                (window.client_left + x, window.client_top + y, w, h)
+            )
+            map_name = MapNameReader().read(strip)
+    except Exception:
+        pass
     done = {"flag": False}
     keyboard.on_press_key(
         args.mark_key, lambda e: print(f"anchor {recorder.mark()}")
@@ -479,9 +519,11 @@ def main() -> None:
         minimap_region=minimap.region,
         key_map={s.key: s for s in bot_config.skills.values()},
     )
-    path = MapStore(args.maps_dir or bot_config.maps_dir).save(entry)
-    print(f"Saved {len(entry.rotation.anchors)} anchors, "
-          f"{len(entry.rotation.legs)} legs -> {path}")
+    # Don't clobber drawn walls/platforms/title on an existing map.
+    store = MapStore(args.maps_dir or bot_config.maps_dir)
+    merge_recording(entry, store.get(args.name), map_name)
+    path = store.save(entry)
+    print(f"Saved {len(entry.rotation.anchors)} anchors -> {path}")
     print("Edit the file to set real skill cooldowns/kinds.")
 
 

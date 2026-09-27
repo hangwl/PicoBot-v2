@@ -84,6 +84,10 @@ class BotConfig:
     active_map: Optional[str] = None      # force a map by name (skip auto-match)
     map_match_threshold: float = 15.0     # fingerprint distance bound (0-255)
     marker_inset_px: int = 4              # marker scans ignore this many rim px
+    name_ocr: bool = True                 # OCR the map-name strip (preferred ID)
+    minimap_name_region: Optional[Tuple[int, int, int, int]] = None
+    name_strip_height: int = 26           # inner-strip fallback when minimap
+                                          # is flush with the window's top edge
 
     def __post_init__(self) -> None:
         if not self.skills:
@@ -101,7 +105,7 @@ class BotConfig:
         bools = (
             "stationary_mode", "enable_random_wander",
             "stop_when_players_appear", "stop_when_rune_appears",
-            "pause_on_lie_detector", "dwell_weave",
+            "pause_on_lie_detector", "dwell_weave", "name_ocr",
         )
         for name in bools:
             if name in data:
@@ -115,7 +119,7 @@ class BotConfig:
                 setattr(cfg, name, float(data[name]))
         ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px",
                 "marker_inset_px", "weave_range_px", "weave_edge_margin_px",
-                "wall_zone_px")
+                "wall_zone_px", "name_strip_height")
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))
@@ -138,6 +142,11 @@ class BotConfig:
             if len(r) != 4:
                 raise ValueError("minimap_region must be [x, y, w, h]")
             cfg.minimap_region = tuple(int(v) for v in r)
+        if "minimap_name_region" in data and data["minimap_name_region"]:
+            r = data["minimap_name_region"]
+            if len(r) != 4:
+                raise ValueError("minimap_name_region must be [x, y, w, h]")
+            cfg.minimap_name_region = tuple(int(v) for v in r)
         if isinstance(data.get("skills"), dict) and data["skills"]:
             cfg.skills = {
                 name: Skill.from_dict(name, spec)

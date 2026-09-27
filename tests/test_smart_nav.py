@@ -593,6 +593,7 @@ class ResolveMapTests(unittest.TestCase):
         bot.viz = {"map": None}
         bot.log = Mock()
         bot.event = Mock()
+        bot.map_name = Mock(return_value=None)       # OCR off/unreadable
         bot.minimap_fingerprint = Mock(return_value="g2:" + "ff" * 512)
         bot._apply_stored_layout = Mock()
         return bot
@@ -654,6 +655,38 @@ class ResolveMapTests(unittest.TestCase):
             bot.maps = store
             bot._resolve_map()
         self.assertEqual(bot._map.name, "pinned")
+
+    def test_ocr_match_wins_in_auto_mode(self):
+        bot = self._bot()
+        bot.config.active_map = None
+        bot.config.auto_select_map = True
+        bot.map_name = Mock(return_value="Limina : 1-5 East")
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(
+                name="east", map_name="Limina : 1-5 East",
+                fingerprint="g2:" + "00" * 512,   # fp disagrees — OCR wins
+            ))
+            store.save(MapEntry(
+                name="close_fp", fingerprint="g2:" + "ff" * 512
+            ))
+            bot.maps = store
+            bot._resolve_map()
+        self.assertEqual(bot._map.name, "east")
+
+    def test_ocr_displaces_unverifiable_pin(self):
+        # Pin has no fingerprint to check — but the OCR'd title text
+        # literally names a different stored map, so the pin loses.
+        bot = self._bot()
+        bot.config.active_map = "pinned"
+        bot.map_name = Mock(return_value="Arcana : Cave")
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="pinned"))
+            store.save(MapEntry(name="cave", map_name="Arcana : Cave"))
+            bot.maps = store
+            bot._resolve_map()
+        self.assertEqual(bot._map.name, "cave")
 
 
 class TargetSnapTests(unittest.TestCase):

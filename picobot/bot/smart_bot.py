@@ -16,6 +16,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from ..vision.game_window import GameWindow
+from ..vision.mapname import MapNameReader, name_strip_region
 from ..vision.minimap import (
     MinimapAnalyzer,
     fingerprint,
@@ -79,6 +80,8 @@ class SmartBot(BotBase):
         self._arrive_pending: List[Tuple[Skill, float]] = []
         self._minimap_warned = False
         self._map_warned = False
+        self._name_reader = MapNameReader()
+        self._name_cache: Tuple[float, Optional[str]] = (0.0, None)
         self._last_up_skill = 0.0
         self._weave_dir: Optional[str] = None
         self._weave_bounds: Optional[Tuple[int, int]] = None
@@ -97,7 +100,7 @@ class SmartBot(BotBase):
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
-            "target": None, "map": None,
+            "target": None, "map": None, "title": None,
         }
 
     def _viz_state(self, name: str) -> None:
@@ -231,6 +234,66 @@ class SmartBot(BotBase):
             for s in entry.platforms
         ]
 
+    # -- Map-name OCR ----------------------------------------------------------
+    def _name_region(self):
+        if self.config.minimap_name_region:
+            return self.config.minimap_name_region
+        region = self.minimap.region
+        if region is None:
+            return None
+        return name_strip_region(region, self.config.name_strip_height)
+
+    def name_img(self):
+        """BGR capture of the map-name strip (above the minimap)."""
+        region = self._name_region()
+        if region is None:
+            return None
+        x, y, w, h = region
+        return self.screen.capture(
+            (self.window.client_left + x, self.window.client_top + y, w, h)
+        )
+
+    def map_name(self, force: bool = False) -> Optional[str]:
+        """OCR'd map title, cached a few seconds (it only changes on
+        map transitions). None = OCR off / engine missing / unreadable."""
+        if not self.config.name_ocr:
+            return None
+        now = time.time()
+        ts, cached = self._name_cache
+        if not force and now - ts < 5.0:
+            return cached
+        name = self._name_reader.read(self.name_img())
+        self._name_cache = (now, name)
+        if name and name != cached:
+            self.event("vision", f"map name: {name}")
+        self.viz["title"] = name
+        return name
+
+    def _live_map(self, img=None):
+        """(entry, via, fp, ocr_text) — the screen's best-guess identity.
+
+        OCR'd title text wins (an exact name match); the structural
+        fingerprint is the fallback. When both fire and disagree the
+        OCR result is kept — the title literally names the map — but
+        the conflict is logged so a misread can be spotted.
+        """
+        name = self.map_name()
+        ocr_entry = self.maps.match_name(name) if name else None
+        fp = self.minimap_fingerprint(img)
+        fp_entry, _ = self.maps.match_scored(
+            fp, self.config.map_match_threshold
+        )
+        if ocr_entry is not None:
+            if fp_entry is not None and fp_entry.name != ocr_entry.name:
+                self.log(
+                    f"map id conflict — OCR '{name}' → {ocr_entry.name}, "
+                    f"fingerprint → {fp_entry.name}; using OCR"
+                )
+            return ocr_entry, "ocr", fp, name
+        if fp_entry is not None:
+            return fp_entry, "fp", fp, name
+        return None, None, fp, name
+
     def minimap_fingerprint(self, img=None) -> Optional[str]:
         if img is None:
             img = self.minimap_frame()
@@ -320,42 +383,42 @@ class SmartBot(BotBase):
         return bool(self.effective_rotation().anchors)
 
     def _resolve_map(self, img=None) -> None:
-        """Pin ``active_map`` or auto-select by minimap fingerprint."""
+        """Pin ``active_map`` or auto-select by OCR/fingerprint."""
         cfg = self.config
         if not (cfg.auto_select_map or cfg.active_map):
             return
         entry = None
+        live, via, fp, ocr_text = self._live_map(img)
         if cfg.active_map:
             entry = self.maps.get(cfg.active_map)
             if entry is None and not self._map_warned:
                 self.log(f"Map '{cfg.active_map}' not found in {cfg.maps_dir}/")
                 self._map_warned = True
-            elif entry is not None and entry.fingerprint:
+            elif (
+                entry is not None
+                and live is not None
+                and live.name != entry.name
+            ):
                 # The pin is rotation scope, not identity — when the
                 # screen verifiably shows a different map, the live
                 # evidence wins so a stale pin can't hold a dead layout.
-                fp = self.minimap_fingerprint(img)
-                if fp:
-                    live, dist = self.maps.match_scored(
-                        fp, cfg.map_match_threshold
-                    )
+                # OCR'd title text is explicit identity and always wins;
+                # a fingerprint-only match only beats a pin whose own
+                # stored fingerprint disagrees with the screen.
+                proven = via == "ocr"
+                if not proven and entry.fingerprint and fp:
                     pinned_dist = fingerprint_distance(
                         fp, entry.fingerprint
                     )
-                    if (
-                        live is not None
-                        and live.name != entry.name
-                        and pinned_dist > cfg.map_match_threshold
-                    ):
-                        self.log(
-                            f"Pin '{entry.name}' disagrees with the "
-                            f"screen — switching to {live.name}"
-                        )
-                        entry = live
+                    proven = pinned_dist > cfg.map_match_threshold
+                if proven:
+                    self.log(
+                        f"Pin '{entry.name}' disagrees with the "
+                        f"screen ({via}) — switching to {live.name}"
+                    )
+                    entry = live
         else:
-            # Structure-masked minimap fingerprint match.
-            fp = self.minimap_fingerprint(img)
-            entry = self.maps.match(fp, cfg.map_match_threshold)
+            entry = live
         if entry is not self._map:
             self._map = entry
             self.viz["map"] = entry.name if entry else None

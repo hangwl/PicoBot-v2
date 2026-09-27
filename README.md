@@ -67,7 +67,9 @@ override the remembered values and are persisted the same way.
   and candidate `on_arrive` skills are still inferred from how long you
   stood at a mark and which keys you pressed there. Marks taken mid-air
   or off a platform warn immediately, and saved anchors are snapped onto
-  the nearest drawn platform so targets stay reachable. Headless
+  the nearest drawn platform so targets stay reachable. Saving over an
+  existing map preserves its drawn walls/platforms, stored title, and
+  skill bindings — re-recording only replaces the anchors. Headless
   alternative:
   `python -m picobot.bot.calibrate --window "Eluna (x64)" --name my_map`
   (F9 = mark, ESC = save).
@@ -80,16 +82,25 @@ override the remembered values and are persisted the same way.
 
 Each map is a JSON file in `maps/` holding a rotation graph — anchors (farming
 spots) and legs (walk / flash-jump / climb steps between them), plus skill
-bindings. Map identity is a minimap **structure fingerprint**
-(`fingerprint`, `g2:` scheme) — only platform/line geometry feeds the
-hash, so translucent minimap backgrounds and panel art can't drift
-matching as the character moves. A fingerprint **watchdog** confirms real
-map changes before acting: a miss only counts when the new scene is
-self-consistent across consecutive frames, so loading screens and fades
-can never accumulate into a false positive. On a confirmed change the
-minimap region is dropped (unless it came from config) and the map is
-re-resolved — a stale layout can't persist past a real transition, and a
-pinned map's own stored fingerprint can disprove the pin.
+bindings. Map identity uses two independent signals, checked per
+resolution:
+
+1. **OCR** — the map-name strip above the minimap is read with RapidOCR
+   and substring-matched (normalized) against each map's `map_name`.
+   It's an exact text signal, immune to minimap cosmetics entirely.
+2. **Structure fingerprint** (`fingerprint`, `g2:` scheme) — only
+   platform/line geometry feeds the hash, so translucent minimap
+   backgrounds and panel art can't drift matching as the character moves.
+
+OCR wins when both fire; disagreements are logged so a misread is
+visible. A fingerprint **watchdog** confirms real map changes before
+acting: a miss only counts when the new scene is self-consistent across
+consecutive frames, so loading screens and fades can never accumulate
+into a false positive. On a confirmed change the minimap region is
+dropped (unless it came from config) and the map is re-resolved — a
+stale layout can't persist past a real transition, and a pinned map's
+own stored fingerprint (or an OCR'd different title) can disprove the
+pin.
 `minimap_region` is the minimap layout remembered at calibration time — when
 the map is identified, the bot restores that region, so auto-detection drift
 can't accumulate on known maps (delete the key to force re-detection). When
@@ -229,7 +240,10 @@ toggles, minimap colors/region, flash jump, map store:
     "active_map": null,
     "auto_select_map": true,
     "map_match_threshold": 15.0,
-    "marker_inset_px": 4
+    "marker_inset_px": 4,
+    "name_ocr": true,
+    "name_strip_height": 26,
+    "minimap_name_region": null
   }
 }
 ```
@@ -248,6 +262,13 @@ Notes:
   area** (i.e. below the OS title bar — captures never include the title bar
   or window borders). Set it if
   auto-detection fails on your client.
+- `name_ocr` (default true) reads the map-title strip above the minimap
+  with RapidOCR — the preferred identity signal. `name_strip_height` is
+  the fallback band height when the minimap is flush with the window's
+  top edge; `minimap_name_region` pins an exact strip rect for clients
+  that draw the title elsewhere. Saving a calibration stores the OCR'd
+  title as the map's `map_name`, which is what `match_name` compares
+  against — a map saved without it simply skips OCR matching.
 - `marker_inset_px` (default 4) crops that many pixels off the minimap rim
   before marker (player/rune/other-player) detection — frame and panel-chrome
   pixels can't register as markers, and marker positions are the centroid of

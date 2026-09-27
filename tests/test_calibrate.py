@@ -196,5 +196,67 @@ class CalibrationRunnerSnapTests(unittest.TestCase):
         )
 
 
+class MergeRecordingTests(unittest.TestCase):
+    """Saving a recording over an existing map must preserve the drawn
+    layout — walls/platforms/title/skills aren't re-recorded."""
+
+    def test_preserves_walls_platforms_title_and_skills(self):
+        from picobot.bot.calibrate import merge_recording
+        from picobot.bot.maps import MapEntry
+        from picobot.bot.rotation import Rotation, Anchor
+        from picobot.bot.skills import Skill
+
+        fresh = MapEntry(
+            name="m1",
+            rotation=Rotation(anchors=[Anchor("a0", 0.3, 0.5)]),
+            skills={"key_f1": Skill("key_f1", "f1", 5.0, "attack")},
+            fingerprint="g2:aa",
+        )
+        existing = MapEntry(
+            name="m1",
+            walls={"left": 0.2, "right": 0.8, "floor": 0.8},
+            platforms=[[0.05, 0.25, 0.5, 0.25]],
+            map_name="Limina : 1-5 East",
+            skills={"nova": Skill("nova", "f1", 9.0, "attack")},
+        )
+        merged = merge_recording(fresh, existing, map_name=None)
+        self.assertEqual(merged.walls, existing.walls)
+        self.assertEqual(merged.platforms, existing.platforms)
+        self.assertEqual(merged.map_name, "Limina : 1-5 East")
+        self.assertIn("key_f1", merged.skills)
+        self.assertIn("nova", merged.skills)
+        self.assertEqual(merged.fingerprint, "g2:aa")  # fresh fp wins
+
+    def test_fresh_map_name_beats_stored_title(self):
+        from picobot.bot.calibrate import merge_recording
+        from picobot.bot.maps import MapEntry
+
+        fresh = MapEntry(name="m1")
+        existing = MapEntry(name="m1", map_name="Old Name")
+        merged = merge_recording(fresh, existing, map_name="New Name")
+        self.assertEqual(merged.map_name, "New Name")
+
+    def test_runner_finish_merges_existing(self):
+        from picobot.bot.calibrate import CalibrationRunner
+        from picobot.bot.maps import MapEntry
+
+        runner = CalibrationRunner(
+            frame_fn=lambda: None,
+            pos_fn=lambda img: None,
+            event=lambda k, m, d=None: None,
+        )
+        runner.recorder = TraceRecorder((200, 150))
+        runner.recorder.sample((50, 95))
+        runner.recorder.mark()
+        runner.last_img = None
+        existing = MapEntry(
+            name="m1", walls={"left": 0.2, "floor": 0.8},
+            platforms=[[0.0, 0.6, 1.0, 0.6]],
+        )
+        entry = runner.finish("m1", existing=existing)
+        self.assertEqual(entry.walls, existing.walls)
+        self.assertEqual(entry.platforms, existing.platforms)
+
+
 if __name__ == "__main__":
     unittest.main()

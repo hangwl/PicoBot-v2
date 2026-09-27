@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from ..vision.mapname import normalize_name
 from ..vision.minimap import fingerprint_distance
 from .rotation import Rotation
 from .skills import Skill
@@ -185,6 +186,23 @@ class MapStore:
         if best is None or best_dist >= threshold:
             return None, best_dist
         return best, best_dist
+
+    def match_name(self, ocr_text: Optional[str]) -> Optional[MapEntry]:
+        """Match on the OCR'd map title (normalized), else None.
+
+        The stored ``map_name`` only needs to appear inside the OCR'd
+        text — the strip may also pick up neighbouring UI text. Longest
+        stored name wins, so overlapping names stay unambiguous.
+        """
+        norm = normalize_name(ocr_text)
+        if not norm:
+            return None
+        best, best_len = None, 0
+        for entry in self.load_all():
+            en = normalize_name(entry.map_name)
+            if en and en in norm and len(en) > best_len:
+                best, best_len = entry, len(en)
+        return best
 
     def save(self, entry: MapEntry) -> Path:
         """Write the map file; returns its path."""
