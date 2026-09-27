@@ -249,7 +249,7 @@ toggles, minimap colors/region, flash jump, map store:
     "map_match_threshold": 15.0,
     "marker_inset_px": 4,
     "name_ocr": true,
-    "name_scan_px": 90,
+    "name_scan_px": 160,
     "minimap_name_region": null
   }
 }
@@ -270,10 +270,14 @@ Notes:
   or window borders). Set it if
   auto-detection fails on your client.
 - `name_ocr` (default true) reads the map-title band with RapidOCR —
-  the preferred identity signal. `name_scan_px` (default 90) is how far
-  into the minimap region the title scan reaches (panel-embedded titles
-  need ~70px); `minimap_name_region` pins an exact band rect for clients
-  that draw the title elsewhere. The dashboard's **Title** view shows
+  the preferred identity signal. The band is the full client width from
+  the window top down to `name_scan_px` (default 160) into the minimap
+  region; segmentation then isolates the title text — the panel's
+  divider line (a contiguous bright run, not a coverage guess) anchors
+  where the title zone ends. `minimap_name_region` pins an exact band
+  rect for clients that draw the title elsewhere — set it with the
+  dashboard's **Draw title** drag on the Window view. The **Title** view
+  shows
   the segmented band with the accepted text lines boxed — verify the
   crop before trusting OCR. Saving a calibration stores the OCR'd title
   as the map's `map_name`, which is what `match_name` compares against —

@@ -114,7 +114,7 @@ def title_lines(
     min_line_px: int = 15,
     col_gap: int = 4,
     icon_fill: float = 0.5,
-    divider_cover: float = 0.8,
+    divider_run: int = 120,
 ) -> list:
     """Segment white-text title lines out of a header band.
 
@@ -128,17 +128,25 @@ def title_lines(
       columns are split on ``col_gap``-wide gaps and dense runs
       (``fill > icon_fill``) are dropped — icons are filled blocks,
       text is sparse. Works at any panel width.
-    - Stops at the divider row (≥``divider_cover`` of width) when the
-      panel border encloses the map, so map content can't be mistaken
-      for text.
+    - Stops at the divider row — the first row with a contiguous
+      bright run ≥ ``divider_run`` px (a solid panel separator vs.
+      ~15px glyph runs) — so map content can't be mistaken for text.
     """
     if not isinstance(band, np.ndarray) or band.size == 0:
         return []
     white = band.min(axis=2) > white_thresh
     w = white.shape[1]
-    # Divider: first row that's near-white across most of the width.
-    cover = white.mean(axis=1)
-    div = int(np.argmax(cover >= divider_cover)) if cover.max() >= divider_cover else white.shape[0]
+    # Divider: first row carrying a *contiguous* bright run — the panel
+    # separator is one solid line, text rows are sparse. Anchored to
+    # structure, not to where the minimap region claims the title is.
+    div = white.shape[0]
+    for y in range(white.shape[0]):
+        row = white[y]
+        # longest contiguous True run
+        idx = np.flatnonzero(np.diff(np.concatenate(([False], row, [False]))))
+        if len(idx) >= 2 and (idx[1::2] - idx[0::2]).max() >= divider_run:
+            div = y
+            break
     white = white[:div]
     if white.size == 0:
         return []

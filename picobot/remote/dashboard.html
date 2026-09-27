@@ -148,6 +148,7 @@
       </div>
       <div class="row" style="margin-top:8px">
         <button id="drawMinimap">Draw minimap</button>
+        <button id="drawTitle" title="drag a rect around the title text on the Window view — overrides auto title detection">Draw title</button>
         <label>drag a rect on the Window view</label>
       </div>
       <div class="row" style="margin-top:8px">
@@ -583,12 +584,14 @@ $("platClear").onclick = () => send("layout|plat|clear" + layTarget());
 let drawMode = null, drawStart = null, lastImg = null;
 const viewEl = $("view");
 
-function armDraw() {
-  drawMode = drawMode ? null : "minimap";  // click again to cancel
+function armDraw(kind) {
+  drawMode = drawMode ? null : kind;  // click again to cancel
   if (drawMode) send("dash|view|window");
-  $("drawMinimap").className = drawMode ? "armed" : "";
+  $("drawMinimap").className = drawMode === "minimap" ? "armed" : "";
+  $("drawTitle").className = drawMode === "title" ? "armed" : "";
 }
-$("drawMinimap").onclick = () => armDraw();
+$("drawMinimap").onclick = () => armDraw("minimap");
+$("drawTitle").onclick = () => armDraw("title");
 
 const viewXY = e => {
   const r = viewEl.getBoundingClientRect();
@@ -645,7 +648,7 @@ viewEl.addEventListener("pointerup", e => {
   const h = Math.round(Math.abs(ey - drawStart[1]));
   drawStart = null;
   if (w >= 10 && h >= 10)
-    send(`layout|region|minimap|${x},${y},${w},${h}`);
+    send(`layout|region|${drawMode}|${x},${y},${w},${h}`);
   armDraw();  // toggles off
 });
 $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.target.value); };

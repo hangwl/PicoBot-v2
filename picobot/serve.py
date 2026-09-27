@@ -629,6 +629,16 @@ class BotHost:
             return
         if len(rect) != 4 or rect[2] < 10 or rect[3] < 10:
             return
+        if which == "title":
+            # Hand-drawn title band — wins over auto detection entirely.
+            self.bot_config.minimap_name_region = rect
+            bot_cfg = getattr(self.config, "bot", None) or {}
+            bot_cfg["minimap_name_region"] = list(rect)
+            self.config.bot = bot_cfg
+            save_config(self.config)
+            self._map_dirty = True
+            self.bus.emit("vision", f"title region set: {list(rect)}")
+            return
         if which != "minimap":
             return
         for mm in self._analyzers():

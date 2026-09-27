@@ -86,9 +86,10 @@ class BotConfig:
     marker_inset_px: int = 4              # marker scans ignore this many rim px
     name_ocr: bool = True                 # OCR the map-name strip (preferred ID)
     minimap_name_region: Optional[Tuple[int, int, int, int]] = None
-    name_scan_px: int = 90                # how far into the minimap region the
-                                          # title scan reaches (titles inside
-                                          # the panel border need ~70px)
+    name_scan_px: int = 160               # how far into the minimap region the
+                                          # title scan reaches — generous so the
+                                          # divider row is always in the band;
+                                          # segmentation cuts it back out
 
     def __post_init__(self) -> None:
         if not self.skills:

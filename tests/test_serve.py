@@ -662,9 +662,20 @@ class HostCommandTests(unittest.TestCase):
         self.host._feed = feed
         self.host._handle_command("layout|region|minimap|a,b,c,d")
         self.host._handle_command("layout|region|minimap|1,2,3,4")  # too small
-        self.host._handle_command("layout|region|title|5,8,300,40")
+        self.host._handle_command("layout|region|garbage|5,8,300,40")
         feed.minimap.set_region.assert_not_called()
         self.save_mock.assert_not_called()
+
+    def test_layout_region_title_saves_name_region(self):
+        feed = Mock()
+        self.host._feed = feed
+        self.host._handle_command("layout|region|title|5,8,300,40")
+        self.assertEqual(self.host.bot_config.minimap_name_region,
+                         (5, 8, 300, 40))
+        self.assertEqual(self.host.config.bot["minimap_name_region"],
+                         [5, 8, 300, 40])
+        self.save_mock.assert_called()
+        self.assertTrue(self.host._map_dirty)
 
     def test_skills_set_persists_and_broadcasts(self):
         self.assertTrue(self.host._handle_command(
