@@ -4,7 +4,8 @@ Map identity decides which saved layout (anchors, platforms, walls,
 floor, region) is live. Three pieces, each built on a signal translucent
 UI can't fake:
 
-1. **Map change** — the loading blackout (`vision/transition.py`).
+1. **Map change** — the loading blackout (`vision/transition.py`),
+   sampled by the `MapMonitor` thread (`bot/monitor.py`).
 2. **Where the minimap is** — the panel's opaque white frame
    (`find_frame` in `vision/minimap.py`).
 3. **Which map** — the OCR'd title, voted and fuzzy-matched
@@ -37,12 +38,21 @@ Why not pixel fingerprints: see [learnings.md](learnings.md).
 
 ## 1. Map change — loading blackout
 
-Every transfer blacks out the whole client (all pixels 0) for ~1s.
-`TransitionDetector` watches each minimap capture: a frame is dark when
-its 99th-percentile value ≤ 12 (the panel's white frame keeps dark
-*scenes* well above that). States: `normal` → `dark` (after 0.25s,
-emits `loading`) → `settling` (first lit frame) → `normal` after 0.6s
-lit (emits `arrived`; waits out the fade-in).
+Every transfer blacks out the whole client (all pixels 0) — for as
+little as ~0.43s (Limina 1-1 ↔ 1-2). `TransitionDetector` watches
+minimap captures: a frame is dark when its 99th-percentile value ≤ 12
+(the panel's white frame keeps dark *scenes* well above that). States:
+`normal` → `dark` (after 0.15s, emits `loading`) → `settling` (first lit
+frame) → `normal` after 0.6s lit (emits `arrived`; waits out the
+fade-in).
+
+**`MapMonitor`** is the only caller: a dedicated thread with its own
+screen grabber sampling the minimap at 20 Hz, independent of the bot's
+cadence and the dashboard view. It also locates the panel (every 0.25s
+while unknown), relocates a moved panel, and pumps title reads. The
+feed and the bot only capture frames for their own use. The host's feed
+owns the monitor and shares it with the bot; a standalone bot runs its
+own.
 
 - While loading, `MinimapAnalyzer.loading` is True: the bot's hazard
   check reports `map transfer (loading screen)` and aborts the leg; no
@@ -81,7 +91,7 @@ other UI text. `minimap_name_region` pins a band rect instead.
 text lines; drop dense icon columns; extend over faded tails.
 
 **Reads** run on a `TitleOCR` worker thread (~2s each on CPU); the
-frame thread only captures the band (`MapIdentity.pump`). A request
+monitor only captures the band (`MapIdentity.pump`). A request
 starts a vote:
 
 - a read matching a stored map with score ≥ 0.97 is accepted at once;

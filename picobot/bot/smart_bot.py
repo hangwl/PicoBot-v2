@@ -16,7 +16,6 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from ..vision.game_window import GameWindow
-from ..vision.mapname import name_strip_region
 from ..vision.minimap import (
     MinimapAnalyzer,
     platform_row_at,
@@ -27,6 +26,7 @@ from .base import BotBase
 from .config import BotConfig
 from .identity import MapIdentity
 from .inputs import HidController
+from .monitor import MapMonitor
 from .machine import Machine
 from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step, resolve_coord
@@ -46,6 +46,7 @@ class SmartBot(BotBase):
         config: BotConfig | None = None,
         *,
         minimap: Optional[MinimapAnalyzer] = None,
+        monitor: Optional[MapMonitor] = None,
         identity: Optional[MapIdentity] = None,
         log_callback=None,
         notify_callback=None,
@@ -74,6 +75,11 @@ class SmartBot(BotBase):
             on_event=lambda k, m: self.event(k, m),
         )
         self.maps = self.identity.store
+        self._own_monitor = monitor is None
+        self.monitor = monitor or MapMonitor(
+            window, minimap, self.identity,
+            config=config, on_event=lambda k, m: self.event(k, m),
+        )
         self._identity_version = -1
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0
@@ -146,38 +152,27 @@ class SmartBot(BotBase):
         return self.screen.capture((l, t, r - l, b - t))
 
     def minimap_frame(self):
-        """BGR capture of the minimap, or None if the panel isn't found.
+        """BGR capture of the minimap, or None until the panel is located.
 
-        Also drives map-change detection (loading blackout), title reads,
-        and applies identity changes — all on the calling (bot) thread.
+        Map-change detection, panel location and title reads run on the
+        :class:`MapMonitor` thread; this applies identity changes on the
+        bot thread.
         """
-        if self.minimap.region is None:
-            window_img = self._window_capture()
-            if window_img is None or self.minimap.locate(window_img) is None:
-                if not self._minimap_warned:
-                    self.log(
-                        "Minimap not found — check the minimap is open "
-                        "and minimap_colors.border matches its frame."
-                    )
-                    self._minimap_warned = True
-                return None
-            self._minimap_warned = False
-        x, y, w, h = self.minimap.region
+        self._sync_map()
+        region = self.minimap.region
+        if region is None:
+            if not self._minimap_warned and not self.minimap.loading:
+                self.log(
+                    "Minimap not found — check the minimap is open "
+                    "and minimap_colors.border matches its frame."
+                )
+                self._minimap_warned = True
+            return None
+        self._minimap_warned = False
+        x, y, w, h = region
         img = self.screen.capture(
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
-        if img is not None and self.minimap.note_frame(
-            img, context=lambda: {"window": self._window_capture()}
-        ):
-            self.event("vision", "arrived on a new map — re-detecting minimap")
-            self.identity.request("arrival", clear=True)
-        elif self.minimap.edge_lost and self.minimap.relocate(self._window_capture()):
-            self.event("vision", f"minimap panel moved: {list(self.minimap.region)}")
-            if self.identity.current.title is None:
-                self.identity.request("panel moved")
-        if not self.minimap.loading:
-            self.identity.pump(self.name_img)
-        self._sync_map()
         return self._stash_frame(img)
 
     def _stash_frame(self, img):
@@ -200,12 +195,7 @@ class SmartBot(BotBase):
     # -- Map-name OCR ----------------------------------------------------------
     def name_region(self):
         """Client-area rect of the title band, or None."""
-        if self.config.minimap_name_region:
-            return self.config.minimap_name_region
-        region = self.minimap.region
-        if region is None:
-            return None
-        return name_strip_region(region, self.config.name_scan_px)
+        return self.monitor.name_region()
 
     def name_img(self):
         region = self.name_region()
@@ -1135,16 +1125,20 @@ class SmartBot(BotBase):
     # -- Entry ---------------------------------------------------------------------
     def start(self) -> None:
         try:
-            self.window.activate()
-            self.sleep(1)
             if self.identity.current.title is None and not self.identity.pending:
                 self.identity.request("startup")
+            if self._own_monitor:
+                self.monitor.start()
+            self.window.activate()
+            self.sleep(1)
             self.minimap_frame()
             Machine(self).run()
             self.log("Smart bot stopped")
         except KeyboardInterrupt:
             self.log("Smart bot interrupted")
         finally:
+            if self._own_monitor:
+                self.monitor.stop()
             self.hid.release_all()
             self.cleanup()
 

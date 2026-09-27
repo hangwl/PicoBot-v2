@@ -48,9 +48,10 @@ See [map-detection.md](map-detection.md).
 
 ## Bot (`bot/`)
 
-`smart_bot.py` is a perception → decide → act loop. Its `minimap_frame()`
-tick drives blackout detection, pumps title reads into the shared
-`MapIdentity` (`identity.py`), and applies identity changes;
+`smart_bot.py` is a perception → decide → act loop. `monitor.py`'s
+`MapMonitor` thread samples the minimap at 20 Hz for blackouts, panel
+moves and title reads into the shared `MapIdentity` (`identity.py`); the
+bot's `minimap_frame()` captures and applies identity changes;
 a small FSM (`machine.py`, `states/`) owns behavior:
 
 - **Grind** — the farming state. ≥2 anchors → planned checkpoint patrol
@@ -90,8 +91,9 @@ warn < error; `hid`/serial chatter is debug).
 ## Data flow (dashboard frame)
 
 ```
-screen.capture → minimap_img() ──► note_frame() (blackout → arrival)
-             └──► identity.pump(name_img) ──► TitleOCR worker (on request)
+MapMonitor (20 Hz) → note_frame() (blackout → arrival, panel moves)
+                  └► identity.pump(name band) ──► TitleOCR worker
+feed/bot capture → minimap_img() ──► overlays, player position
 snap = viz/map meta + overlays ──► assemble_panel (title+map composite,
                                    ox/oy offset) ──► annotate ──► JPEG
                                                           └─► WS frame

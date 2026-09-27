@@ -19,6 +19,8 @@ installed the repo's own venv interpreter works:
 - `test_minimap.py` — transfer detection, `find_frame`, panel-moved
   relocation, region provenance, marker/blob detection.
 - `test_transition.py` — blackout detector states.
+- `test_monitor.py` — 20 Hz monitor: short blackouts, locate rate limit,
+  panel relocation, thread lifecycle.
 - `test_identity.py` — title voting, pin resolution, stale-read discard,
   worker thread.
 - `test_mapname.py` — title segmentation (divider cut, icon cut, sparse
@@ -62,11 +64,12 @@ oldest pruned past `debug_capture_max_events`). Every folder has a
 
 | Reason | When | Contents |
 |---|---|---|
-| `transition` | a confirmed loading blackout through arrival | pre-roll + episode frames `NNN.png`, `window_arrived.png`; per-frame `dark`/`state`/`event` |
+| `transition` | a confirmed loading blackout through arrival | pre-roll + episode frames `NNN.png` (20 Hz), `window_arrived.png`; per-frame `dark`/`state`/`event` |
+| `transition_flicker` | minimap went dark but never confirmed (near-miss) | same frames, `outcome: flicker` |
 | `ocr` / `ocr_nocrop` / `ocr_error` | every title OCR read | `band.png`, `crop.png`, text + per-line scores |
 | `frame_not_found` | `find_frame` failed on a lit window (≤ 1 per 30s) | `window.png` |
 
-Dark blips that never confirm are dropped. Captures are written on a background
+Captures are written on a background
 thread. Implementation: `picobot/vision/framelog.py`.
 
 ## Verifying vision changes

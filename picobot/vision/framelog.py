@@ -2,10 +2,10 @@
 
 Layout: ``<dir>/<timestamp>_<reason>/`` holding PNGs plus ``meta.json``.
 
-- Transition episodes: one per confirmed loading blackout. Pre-roll
+- Transition episodes: one per dark run on the minimap. Pre-roll
   frames, every frame through arrival plus a few after, and a
-  full-window capture at arrival. Dark blips that never confirm are
-  dropped.
+  full-window capture at arrival. Dark runs that never confirm are saved
+  as ``transition_flicker`` (near-misses).
 - Snapshots: one-shot events (OCR reads, frame-not-found).
 """
 
@@ -52,9 +52,9 @@ class FrameRecorder:
         self,
         directory: Optional[str | Path] = None,
         *,
-        pre: int = 10,
-        post: int = 10,
-        max_frames: int = 80,
+        pre: int = 20,
+        post: int = 20,
+        max_frames: int = 160,
         max_events: int = 100,
         on_saved: Optional[Callable[[str], None]] = None,
     ) -> None:
@@ -144,10 +144,9 @@ class FrameRecorder:
                 ep.images[f"{name}_{k}" if k != "window" else name] = v
 
     def _finish(self, ep: _Episode) -> None:
-        if ep.outcome != "arrived":
-            return
+        reason = "transition" if ep.outcome == "arrived" else "transition_flicker"
         meta = {**ep.meta, "outcome": ep.outcome}
-        self._submit("transition", ep.t, ep.images, ep.frames, meta)
+        self._submit(reason, ep.t, ep.images, ep.frames, meta)
 
     def _submit(self, reason, t, images, frames, meta) -> None:
         with self._lock:

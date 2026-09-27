@@ -68,6 +68,16 @@ captures above:
   never identify it; the stored region `[7,68,204,75]` is smaller than
   the real panel (216×90).
 
+### Missed transfers (2026-09-27, second capture batch)
+
+11/11 transfers in the batch were caught (idle, ~9 Hz feed), but live
+misses happened elsewhere: detection only ran when something captured
+the minimap — the bot between actions (0.3–1s gaps; PAUSE sleeps 1s)
+and the dashboard only in Panel view. Blackouts can be as short as
+0.43s. Replaying the 11 real transfers at bot cadence caught 22% (1% for
+the shortest); a dedicated 20 Hz `MapMonitor` catches 100%. Lesson: a
+trigger must own its sampling rate — never piggyback on consumers.
+
 ## Geometry
 
 - **Platform auto-detection** by ink colour, then colour-free

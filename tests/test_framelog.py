@@ -74,11 +74,15 @@ class FrameRecorderTests(unittest.TestCase):
         self.assertTrue((ev / "000.png").exists())
         self.assertEqual(len(calls), 1)
 
-    def test_dark_blip_is_not_saved(self):
+    def test_dark_blip_saved_as_flicker(self):
         a = self._analyzer()
-        self._feed(a, [_lit()] * 3 + [_black()] + [_lit()] * 6)
+        out = self._feed(a, [_lit()] * 3 + [_black()] + [_lit()] * 25)
+        self.assertNotIn(True, out)
         self.rec.flush()
-        self.assertEqual(_events(self.root), [])
+        (ev,) = _events(self.root)
+        self.assertTrue(ev.name.endswith("_transition_flicker"))
+        meta = json.loads((ev / "meta.json").read_text())
+        self.assertEqual(meta["outcome"], "flicker")
 
     def test_snapshot_and_pruning(self):
         rec = framelog.configure(self.root, max_events=2)

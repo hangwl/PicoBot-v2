@@ -15,7 +15,6 @@ from picobot.bot.rotation import Rotation, Anchor, Step
 from picobot.bot.smart_bot import SmartBot
 from picobot.bot.identity import MapIdentity
 from picobot.vision.minimap import MinimapAnalyzer
-from picobot.vision.transition import TransitionDetector
 
 
 class FakeHid:
@@ -657,54 +656,35 @@ class SyncMapTests(unittest.TestCase):
 
 
 class MinimapFrameTests(unittest.TestCase):
-    """minimap_frame drives transfer detection + title reads."""
+    """minimap_frame is a plain capture + identity sync on the bot thread;
+    detection belongs to the MapMonitor."""
 
-    def _bot(self, tmp, frames):
-        clock = [0.0]
+    def _bot(self, region):
         bot = SmartBot.__new__(SmartBot)
         bot.config = BotConfig()
-        bot.minimap = MinimapAnalyzer(
-            transition=TransitionDetector(clock=lambda: clock[0])
-        )
-        bot.minimap._region = (0, 0, 200, 150)
-        bot.minimap._region_source = "auto"
-        seq = list(frames)
-
-        def capture(rect):
-            clock[0] += 0.1
-            return seq.pop(0) if len(seq) > 1 else seq[0]
-
-        bot.screen = Mock(capture=Mock(side_effect=capture))
-        bot.window = Mock(client_left=0, client_top=0)
-        bot.identity = Mock(version=0)
-        bot._identity_version = 0
+        bot.minimap = MinimapAnalyzer()
+        bot.minimap._region = region
+        bot.screen = Mock(capture=Mock(return_value=np.zeros((90, 216, 3), np.uint8)))
+        bot.window = Mock(client_left=10, client_top=20)
+        bot._sync_map = Mock()
         bot._minimap_warned = False
         bot.viz = {"img": None}
-        bot.event = Mock()
         bot.log = Mock()
         return bot
 
-    def test_arrival_requests_title_and_drops_region(self):
-        black = np.zeros((150, 200, 3), np.uint8)
-        lit = np.full((150, 200, 3), 90, np.uint8)
-        with tempfile.TemporaryDirectory() as tmp:
-            bot = self._bot(tmp, [black] * 8 + [lit] * 12)
-            for _ in range(20):
-                bot.minimap_frame()
-                if bot.minimap.region is None:
-                    break
-        bot.identity.request.assert_called_once_with("arrival", clear=True)
-        self.assertIsNone(bot.minimap.region)
+    def test_captures_region_and_syncs(self):
+        bot = self._bot((7, 68, 216, 90))
+        self.assertIsNotNone(bot.minimap_frame())
+        bot.screen.capture.assert_called_once_with((17, 88, 216, 90))
+        bot._sync_map.assert_called_once()
 
-    def test_no_title_reads_while_loading(self):
-        black = np.zeros((150, 200, 3), np.uint8)
-        with tempfile.TemporaryDirectory() as tmp:
-            bot = self._bot(tmp, [black])
-            for _ in range(6):
-                bot.minimap_frame()
-        self.assertTrue(bot.minimap.loading)
-        # pumped only for the first pre-confirmation frames
-        self.assertLess(bot.identity.pump.call_count, 6)
+    def test_no_region_returns_none_without_locating(self):
+        bot = self._bot(None)
+        self.assertIsNone(bot.minimap_frame())
+        bot.screen.capture.assert_not_called()
+        bot.log.assert_called_once()
+        bot.minimap_frame()
+        bot.log.assert_called_once()          # warned once
 
 
 class TargetSnapTests(unittest.TestCase):

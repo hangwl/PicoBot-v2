@@ -33,7 +33,7 @@ class TransitionDetector:
         self,
         *,
         level: int = 12,
-        min_dark_s: float = 0.25,
+        min_dark_s: float = 0.15,
         settle_s: float = 0.6,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:

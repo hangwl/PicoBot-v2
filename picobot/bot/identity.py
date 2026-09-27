@@ -1,6 +1,6 @@
 """Map identity: OCR'd title (voted, fuzzy-matched) + the user's pin.
 
-The frame thread calls :meth:`MapIdentity.pump` with a band-capture
+The map monitor calls :meth:`MapIdentity.pump` with a band-capture
 callable; when a read is wanted the band is captured there (capture is
 cheap and thread-bound) and OCR runs on a worker thread (~2s per read).
 Consumers poll :attr:`MapIdentity.current` / :attr:`version`.

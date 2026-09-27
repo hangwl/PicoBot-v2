@@ -28,9 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 class _VisionFeed:
-    """Window/minimap capture used for previews and calibration.
-
-    Lazily created — pygetwindow/mss only exist on the host machine.
+    """Window/minimap captures for previews, calibration and layout
+    commands, plus the :class:`MapMonitor` thread that does map-change
+    detection and title reads. Lazily created — pygetwindow/mss only
+    exist on the host machine.
     """
 
     def __init__(
@@ -40,6 +41,7 @@ class _VisionFeed:
         identity=None,
         on_event=None,
     ) -> None:
+        from .bot.monitor import MapMonitor
         from .vision.game_window import GameWindow
         from .vision.minimap import MinimapAnalyzer
         from .vision.screen import ScreenGrabber
@@ -47,42 +49,28 @@ class _VisionFeed:
         self.window = GameWindow(window_title)
         self.screen = ScreenGrabber()
         self.config = bot_config
-        self.identity = identity
         self.minimap = MinimapAnalyzer(
             colors=bot_config.minimap_colors,
             region=bot_config.minimap_region,
             marker_inset=bot_config.marker_inset_px,
         )
-        self._on_event = on_event
+        self.monitor = MapMonitor(
+            self.window, self.minimap, identity,
+            config=bot_config, on_event=on_event,
+        )
+        self.monitor.start()
 
-    def minimap_img(self):
-        """Minimap capture; also drives blackout detection and title
-        reads while the bot isn't running."""
-        if self.minimap.region is None:
-            full = self.window_img()
-            if full is None or self.minimap.locate(full) is None:
-                return None
-        x, y, w, h = self.minimap.region
-        img = self.screen.capture(
+    def _capture(self, rect):
+        if rect is None:
+            return None
+        x, y, w, h = rect
+        return self.screen.capture(
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
-        if img is not None and self.minimap.note_frame(
-            img, context=lambda: {"window": self.window_img()}
-        ):
-            if self._on_event:
-                self._on_event("vision", "arrived on a new map — re-detecting minimap")
-            if self.identity is not None:
-                self.identity.request("arrival", clear=True)
-        elif self.minimap.edge_lost and self.minimap.relocate(self.window_img()):
-            if self._on_event:
-                self._on_event(
-                    "vision", f"minimap panel moved: {list(self.minimap.region)}"
-                )
-            if self.identity is not None and self.identity.current.title is None:
-                self.identity.request("panel moved")
-        if self.identity is not None and not self.minimap.loading:
-            self.identity.pump(self.name_img)
-        return img
+
+    def minimap_img(self):
+        """Minimap capture, or None until the monitor locates the panel."""
+        return self._capture(self.minimap.region)
 
     def window_img(self):
         l, t, r, b = self.window.client_rect()
@@ -90,24 +78,13 @@ class _VisionFeed:
 
     def name_region(self):
         """Client-area rect of the title band, or None."""
-        from .vision.mapname import name_strip_region
-
-        if self.config.minimap_name_region:
-            return self.config.minimap_name_region
-        if self.minimap.region is None:
-            return None
-        return name_strip_region(self.minimap.region, self.config.name_scan_px)
+        return self.monitor.name_region()
 
     def name_img(self):
-        region = self.name_region()
-        if region is None:
-            return None
-        x, y, w, h = region
-        return self.screen.capture(
-            (self.window.client_left + x, self.window.client_top + y, w, h)
-        )
+        return self._capture(self.name_region())
 
     def close(self) -> None:
+        self.monitor.stop()
         self.screen.close()
 
 
@@ -303,6 +280,7 @@ class BotHost:
                 self.window_title,
                 self.bot_config,
                 minimap=feed.minimap if feed is not None else None,
+                monitor=feed.monitor if feed is not None else None,
                 identity=self.identity,
                 notify_callback=self.telegram.send_message,
                 event_bus=bus,

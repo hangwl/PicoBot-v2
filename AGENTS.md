@@ -29,8 +29,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Map identity**: `MapEntry.name` = user alias; `MapEntry.map_name` =
   OCR'd in-game title only — it's what identity matches. One
   `MapIdentity` is shared by host and bot; don't add parallel resolvers.
-- **Map change = loading blackout** (`vision/transition.py`). Never use
-  pixel-content change as a trigger — translucent UI defeats it.
+- **Map change = loading blackout** (`vision/transition.py`), sampled
+  only by the `MapMonitor` thread (20 Hz, own grabber). Never feed
+  `note_frame` from the bot/feed, and never use pixel-content change as
+  a trigger — translucent UI defeats it.
 - **OCR is request-driven** (startup, arrival, pin, title band) and runs
   on the `TitleOCR` worker — never per-frame, never on the frame thread.
 - **Manual geometry is authoritative**: drawn platforms/walls/floor drive
@@ -52,6 +54,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Area | Files |
 |---|---|
 | Bot loop / FSM | `picobot/bot/smart_bot.py`, `bot/states/` |
+| Map-change monitor + identity | `bot/monitor.py`, `bot/identity.py`, `vision/transition.py` |
 | Map store + identity | `bot/maps.py`, `vision/minimap.py`, `vision/mapname.py` |
 | Recording | `bot/calibrate.py` |
 | Host + dashboard cmds | `serve.py`, `remote/control.py` |
