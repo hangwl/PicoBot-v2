@@ -89,30 +89,26 @@ def blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
     return int(xs.mean()), int(ys.mean())
 
 
-def largest_blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
-    """Centroid of the largest connected component in ``mask``.
-
-    Unlike :func:`blob_centroid`, scattered noise pixels can't drag the
-    result toward a meaningless midpoint — only the biggest contiguous
-    blob wins. Returns None if the mask is empty.
-    """
+def _largest_blob(mask: np.ndarray):
+    """Largest connected component as (centroid_x, centroid_y, y_max)."""
     ys, xs = np.nonzero(mask)
     if xs.size == 0:
         return None
     h, w = mask.shape
     visited = np.zeros_like(mask, dtype=bool)
-    best: Optional[Tuple[int, int, int]] = None  # (count, x, y)
+    best = None  # (count, cx, cy_mean, y_max)
     for sy, sx in zip(ys.tolist(), xs.tolist()):
         if visited[sy, sx]:
             continue
         stack = [(sy, sx)]
         visited[sy, sx] = True
-        cx = cy = count = 0
+        cx = cy = count = ymax = 0
         while stack:
             y, x = stack.pop()
             count += 1
             cx += x
             cy += y
+            ymax = max(ymax, y)
             for ny in (y - 1, y, y + 1):
                 for nx in (x - 1, x, x + 1):
                     if (
@@ -122,8 +118,19 @@ def largest_blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
                         visited[ny, nx] = True
                         stack.append((ny, nx))
         if best is None or count > best[0]:
-            best = (count, cx // count, cy // count)
-    return (best[1], best[2])
+            best = (count, cx // count, cy // count, ymax)
+    return best[1], best[2], best[3]
+
+
+def largest_blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
+    """Centroid of the largest connected component in ``mask``.
+
+    Unlike :func:`blob_centroid`, scattered noise pixels can't drag the
+    result toward a meaningless midpoint — only the biggest contiguous
+    blob wins. Returns None if the mask is empty.
+    """
+    blob = _largest_blob(mask)
+    return (blob[0], blob[1]) if blob is not None else None
 
 
 def fingerprint(
@@ -374,17 +381,31 @@ class MinimapAnalyzer:
         return img[i:-i, i:-i], i
 
     def _marker(
-        self, minimap_img: np.ndarray, bgr: Tuple[int, int, int], tolerance: int
+        self,
+        minimap_img: np.ndarray,
+        bgr: Tuple[int, int, int],
+        tolerance: int,
+        *,
+        feet: bool = False,
     ) -> Optional[Tuple[int, int]]:
         inner, off = self._interior(minimap_img)
         mask = erode3(color_mask(inner, bgr, tolerance))
-        c = largest_blob_centroid(mask)
-        return (c[0] + off, c[1] + off) if c is not None else None
+        blob = _largest_blob(mask)
+        if blob is None:
+            return None
+        cx, cy, ymax = blob
+        # "feet" = the icon's bottom row. The marker glyph is anchored at
+        # its bottom tip — the point touching the platform — so feet-space
+        # positions sit on the platform ink rather than floating ~half an
+        # icon above it the way a centroid does.
+        return (cx + off, (ymax if feet else cy) + off)
 
     def player_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10
     ) -> Optional[Tuple[int, int]]:
-        return self._marker(minimap_img, self.colors.player, tolerance)
+        return self._marker(
+            minimap_img, self.colors.player, tolerance, feet=True
+        )
 
     def rune_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10

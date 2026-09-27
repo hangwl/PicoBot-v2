@@ -132,6 +132,11 @@ you verified in the dashboard carries over to the bot at Start:
   **Floor** does the same vertically: stand on the bottom platform and
   the bot stops attempting down-jumps at/below it. **Clear** removes
   all boundaries; the map field targets a different map.
+- Player positions are **feet-anchored**: `player_pos` reports the
+  marker icon's bottom row — the point touching the platform — so
+  recorded anchors and the Floor boundary land on the platform ink
+  rather than floating at icon-center height. (Floor placement also
+  snaps to the nearest platform line.)
 - **Patrol mode** (`"patrol": true` on a map's rotation, or the
   **patrol anchors** checkbox): anchors become checkpoints — instead of
   parking at one, the dwell weaves *toward the next anchor* and advances

@@ -522,15 +522,18 @@ class BotHost:
             self._send_maps()
             self.bus.emit("map", f"walls cleared for {entry.name}")
             return
-        pos = region = None
+        pos = region = img = mm = None
         bot = self.bot
         if bot is not None:
-            pos = bot.player_pos()
+            img = bot.minimap_frame()
+            pos = bot.player_pos(img)
             region = bot.minimap.region
+            mm = bot.minimap
         feed = self._get_feed()
         if pos is None and feed is not None:
             img = feed.minimap_img()
             pos = feed.minimap.player_pos(img) if img is not None else None
+            mm = feed.minimap
         if not region and feed is not None:
             region = feed.minimap.region
         if pos is None or not region:
@@ -544,6 +547,12 @@ class BotHost:
             return
         walls = dict(entry.walls or {})
         v = pos[1] if side == "floor" else pos[0]
+        if side == "floor" and img is not None:
+            # Snap onto the platform ink under the player — the drawn
+            # boundary should sit on the floor line, not hover above it.
+            snapped = mm.platform_y(img, pos[0], pos[1], max_snap=10)
+            if isinstance(snapped, int):
+                v = snapped
         walls[side] = round(max(0.0, min(1.0, v / span)), 4)
         entry.walls = walls
         self.maps.save(entry)
