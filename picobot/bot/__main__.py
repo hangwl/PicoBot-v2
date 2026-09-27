@@ -24,13 +24,17 @@ def main() -> None:
         default=None,
         help="Game window title (defaults to config's default_target_window)",
     )
+    parser.add_argument(
+        "--debug-frames", action="store_true",
+        help="save detection debug captures to debug_capture_dir",
+    )
     args = parser.parse_args()
 
     configure_logging()
     app_config = load_config()
     window_title = args.window or AppConfig().default_target_window
     bot_config = BotConfig.from_dict(getattr(app_config, "bot", None))
-    framelog.configure_from(bot_config)
+    framelog.configure_from(bot_config, args.debug_frames)
 
     bot = SmartBot.connect(args.port, window_title, bot_config)
     try:

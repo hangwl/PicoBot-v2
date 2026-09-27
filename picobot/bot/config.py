@@ -91,7 +91,6 @@ class BotConfig:
                                           # segmentation cuts it back out
 
     # -- Debug ------------------------------------------------------------------
-    debug_capture: bool = True            # save frames around detection events
     debug_capture_dir: str = "debug/frames"
     debug_capture_max_events: int = 100   # oldest event folders are pruned
 
@@ -112,7 +111,6 @@ class BotConfig:
             "stationary_mode", "enable_random_wander",
             "stop_when_players_appear", "stop_when_rune_appears",
             "pause_on_lie_detector", "dwell_weave", "name_ocr",
-            "debug_capture",
         )
         for name in bools:
             if name in data:

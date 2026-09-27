@@ -236,10 +236,11 @@ def configure(directory: Optional[str | Path], **kwargs) -> FrameRecorder:
     return _recorder
 
 
-def configure_from(bot_config, on_saved=None) -> FrameRecorder:
-    """Install the recorder per a ``BotConfig``'s ``debug_capture*`` keys."""
+def configure_from(bot_config, enabled: bool, on_saved=None) -> FrameRecorder:
+    """Install the recorder (``--debug-frames``) using a ``BotConfig``'s
+    ``debug_capture_dir``/``debug_capture_max_events``."""
     return configure(
-        bot_config.debug_capture_dir if bot_config.debug_capture else None,
+        bot_config.debug_capture_dir if enabled else None,
         max_events=bot_config.debug_capture_max_events,
         on_saved=on_saved,
     )

@@ -120,6 +120,8 @@ class BotHost:
         serial_port: Optional[str],
         window_title: str,
         config: Optional[AppConfig] = None,
+        *,
+        debug_frames: bool = False,
     ) -> None:
         from .bot import BotConfig
         from .bot.calibrate import CalibrationRunner
@@ -130,6 +132,7 @@ class BotHost:
         self.bot_config = BotConfig.from_dict(getattr(self.config, "bot", None))
         self.window_title = window_title
         self.serial_port = serial_port
+        self.debug_frames = debug_frames
         self.bus = EventBus()
         self.telegram = TelegramHandler(self.config.bot_token, self.config.chat_id)
         self.maps = MapStore(self.bot_config.maps_dir)
@@ -202,10 +205,15 @@ class BotHost:
 
         framelog.configure_from(
             self.bot_config,
+            self.debug_frames,
             on_saved=lambda p: self.bus.emit(
                 "vision", f"frames captured: {p}", level="debug"
             ),
         )
+        if self.debug_frames:
+            self.bus.emit(
+                "status", f"debug frames → {self.bot_config.debug_capture_dir}"
+            )
         self.identity.request("startup")
         self.remote.start()
         self.http = EmbeddedHTTPServer(
@@ -1158,6 +1166,10 @@ def main() -> None:
     parser.add_argument("--window", default=None, help="game window title")
     parser.add_argument("--ws", type=int, default=None, help="WS port")
     parser.add_argument("--http", type=int, default=None, help="HTTP port")
+    parser.add_argument(
+        "--debug-frames", action="store_true",
+        help="save detection debug captures to debug_capture_dir",
+    )
     args = parser.parse_args()
 
     configure_logging()
@@ -1184,7 +1196,7 @@ def main() -> None:
     if args.window and args.window != config.default_target_window:
         config.default_target_window = args.window
         save_config(config)
-    BotHost(port, window_title, config).run()
+    BotHost(port, window_title, config, debug_frames=args.debug_frames).run()
 
 
 if __name__ == "__main__":

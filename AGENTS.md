@@ -10,6 +10,7 @@ minimap and works a perception-driven farming rotation. Docs live in
 ```bash
 .venv/bin/python -m pytest tests/ -x -q   # test suite (~300 tests)
 .venv/bin/python -m picobot               # run host (WS :8765, HTTP :8000)
+.venv/bin/python -m picobot --debug-frames   # + save debug captures to debug/frames/
 ```
 
 - The `.python-version` shim (`3.14`) may not be installed — use

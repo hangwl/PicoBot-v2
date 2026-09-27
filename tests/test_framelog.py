@@ -84,6 +84,29 @@ class FrameRecorderTests(unittest.TestCase):
         meta = json.loads((ev / "meta.json").read_text())
         self.assertEqual(meta["outcome"], "flicker")
 
+    def test_configure_from_requires_flag(self):
+        from picobot.bot.config import BotConfig
+
+        cfg = BotConfig.from_dict({"debug_capture_dir": str(self.root)})
+        self.assertFalse(framelog.configure_from(cfg, False).enabled)
+        rec = framelog.configure_from(cfg, True)
+        self.assertTrue(rec.enabled)
+        self.assertEqual(rec.directory, self.root)
+
+    def test_serve_flag_reaches_host(self):
+        from unittest.mock import patch
+
+        from picobot import serve
+
+        for argv, want in ((["picobot"], False),
+                           (["picobot", "--debug-frames"], True)):
+            with patch("sys.argv", argv), \
+                 patch.object(serve, "BotHost") as host, \
+                 patch.object(serve, "configure_logging"), \
+                 patch.object(serve, "save_config"):
+                serve.main()
+            self.assertEqual(host.call_args.kwargs["debug_frames"], want)
+
     def test_snapshot_and_pruning(self):
         rec = framelog.configure(self.root, max_events=2)
         for i in range(4):

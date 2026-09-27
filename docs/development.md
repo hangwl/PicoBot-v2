@@ -57,7 +57,9 @@ installed the repo's own venv interpreter works:
 
 ## Debug frame captures
 
-With `debug_capture` on (default), the host and headless bot save
+Off by default. Run with `--debug-frames`
+(`python -m picobot --debug-frames`, or the same flag on
+`python -m picobot.bot`) and the host / headless bot save
 detection evidence to `debug/frames/<timestamp>_<reason>/` (gitignored,
 oldest pruned past `debug_capture_max_events`). Every folder has a
 `meta.json`.
