@@ -9,6 +9,9 @@ move to another platform is possible. Edges:
   ``up_side_flash`` (up flash, then a sideways flash) up-and-over onto a
   higher platform across a gap.
 - Horizontal gaps: ``jump``, ``flash``, ``double_flash``.
+- ``rope_lift`` targets the **highest** platform within its grab range
+  (``rope_max_px``, ~90 in-game) — the skill always grabs the topmost
+  platform in range, so no edge points at a lower one.
 
 Wall zones (``Bounds``, already padded) clip platforms: nothing is
 planned inside a zone, and clipped ends are closed — no drop or gap move
@@ -117,6 +120,7 @@ class NavGraph:
         snap_px: float = 8.0,
         edge_inset_px: float = 4.0,
         takeoff_inset_px: float = 3.0,
+        rope_max_px: Optional[float] = None,
     ) -> None:
         plats = [
             Platform.from_segment(s) for s in segments
@@ -131,6 +135,10 @@ class NavGraph:
         self.snap_px = snap_px
         self.edge_inset_px = edge_inset_px
         self.takeoff_inset_px = takeoff_inset_px
+        # Hard grab range: the rope's base reach (nav_rope_lift_px).
+        self.rope_max_px = (
+            reach.base["rope_lift"].rise if rope_max_px is None else rope_max_px
+        )
         self.nodes: List[Tuple[int, float]] = []
         self._index: Dict[Tuple[int, float], int] = {}
         self.edges: List[List[_Edge]] = []
@@ -147,6 +155,20 @@ class NavGraph:
             if py > y + 1.0 and (best is None or py < best[0]):
                 best = (py, i)
         return best[1] if best else None
+
+    def highest_above(
+        self, x: float, y: float, max_rise: float, exclude: int = -1
+    ) -> Optional[Tuple[int, float]]:
+        """(platform, rise) of the highest platform above ``y`` at column
+        ``x`` within ``max_rise`` — the rope-lift grab target."""
+        best = None
+        for j, q in enumerate(self.platforms):
+            if j == exclude or not q.spans(x):
+                continue
+            rise = y - q.y_at(x)
+            if 1.0 < rise <= max_rise and (best is None or rise > best[1]):
+                best = (j, rise)
+        return best
 
     def above(self, x: float, y: float, exclude: int = -1) -> Optional[int]:
         """Nearest platform strictly above ``y`` at column ``x``."""
@@ -208,6 +230,8 @@ class NavGraph:
             for end, step, open_ in ((p.x0, -1.0, p.open0), (p.x1, 1.0, p.open1)):
                 if open_:
                     self._link_off_end(i, end, step)
+        for i, p in enumerate(plats):
+            self._link_rope_tiers(i, p)
         for i in range(len(plats)):
             pts = sorted(
                 (x, n) for n, (pi, x) in enumerate(self.nodes) if pi == i
@@ -229,8 +253,18 @@ class NavGraph:
                            "down_jump", COSTS["down_jump"])
             elif self.above(x, yp, exclude=i) == j:
                 rise = yp - q.y_at(x)
-                for kind in ("up_flash", "rope_lift"):
-                    self._move(i, x, j, x, kind, 0.0, rise)
+                self._move(i, x, j, x, "up_flash", 0.0, rise)
+
+    def _link_rope_tiers(self, i: int, p: Platform) -> None:
+        """Rope lift grabs the highest platform within ``rope_max_px``."""
+        for n, (pi, x) in enumerate(self.nodes):
+            if pi != i:
+                continue
+            target = self.highest_above(x, p.y_at(x), self.rope_max_px, exclude=i)
+            if target is None:
+                continue
+            j, rise = target
+            self._move(i, x, j, x, "rope_lift", 0.0, rise)
 
     def _link_off_end(self, i: int, end: float, step: float) -> None:
         p = self.platforms[i]

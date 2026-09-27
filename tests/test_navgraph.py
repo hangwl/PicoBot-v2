@@ -32,12 +32,28 @@ class NavGraphTests(unittest.TestCase):
         self.assertEqual(kinds(legs), ["up_flash", "up_flash"])
         self.assertEqual((legs[-1].x1, legs[-1].y1), (80, 66))
 
-    def test_rope_lift_preferred_whenever_available(self):
-        g = NavGraph([FLOOR, MID, TOP], reach())
-        self.assertEqual(kinds(g.route((10, 100), (80, 66))), ["rope_lift", "rope_lift"])
+    def test_rope_lift_grabs_highest_platform_in_range(self):
+        # FLOOR → TOP directly (38px, highest within the 90px grab range);
+        # no rope edge stops at MID, and the 100px platform is out of range.
+        g = NavGraph([FLOOR, MID, TOP, (60, 0, 100, 0)],
+                     reach(rope_lift=Reach(3, 90)))
+        floor_rope = [l for l in g.transfer_legs()
+                      if l.kind == "rope_lift" and l.y0 == 100]
+        # Highest platform per column: TOP where it overhangs, MID elsewhere,
+        # never the platform 100px up (beyond the grab range).
+        self.assertEqual({l.y1 for l in floor_rope}, {84.0, 66.0})
+        self.assertEqual(kinds(g.route((10, 100), (80, 66))), ["rope_lift"])
         self.assertEqual(
             kinds(g.route((10, 100), (80, 66), exclude=("rope_lift",))),
             ["up_flash", "up_flash"],
+        )
+
+    def test_rope_lift_preferred_whenever_available(self):
+        g = NavGraph([FLOOR, MID], reach())
+        self.assertEqual(kinds(g.route((10, 100), (80, 84))), ["rope_lift"])
+        self.assertEqual(
+            kinds(g.route((10, 100), (80, 84), exclude=("rope_lift",))),
+            ["up_flash"],
         )
 
     def test_tall_rise_needs_rope_lift(self):

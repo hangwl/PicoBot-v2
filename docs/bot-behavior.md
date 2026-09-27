@@ -48,16 +48,19 @@ covers the gap:
 | `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps |
 | `up_flash` | jump, then Up + jump mid-air | platform directly above |
 | `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
-| `rope_lift` | `up_jump_skill_key` | tall rises; cooldown-aware |
+| `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column; preferred while ready |
 | `down_jump` / `drop` | down + jump; walk off an end | lower platforms |
 
 - Reach = sideways `dx` and upward `rise` in minimap px. Starting values
-  are conservative (`nav_*` config keys).
-- Every executed jump-type move reports takeoff and landing: success
-  grows the envelope to what was observed; a miss inside it shrinks it;
-  a miss on an exploratory attempt sets a ceiling. The planner may try
-  up to 1.15× the proven reach at a cost penalty, so reach grows from
-  the conservative start. Learned values persist in `nav_reach_file`.
+  are realistic guesses (`nav_*` config keys); the **Measure moves**
+  dashboard button replaces them with real numbers — the bot performs
+  each move a few times and records the observed takeoff→landing into
+  `nav_reach_file` (see [layout.md](layout.md#measuring-moves)).
+- Farming keeps learning: success grows the envelope to what was
+  observed; the planner may explore up to 1.3× the proven reach at a
+  cost penalty; the **second consecutive** miss shrinks the envelope
+  (one miss may be input timing) and an exploratory miss sets a ceiling.
+  Delete `nav_reach_file` to relearn.
 - Rope lift is **preferred over up-flash whenever it's ready** (cheapest
   rise). While it's cooling down it's left out of the plan and the bot
   up-flashes instead — it never waits on the cooldown. A lift that

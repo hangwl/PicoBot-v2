@@ -56,14 +56,15 @@ what was tried and what was learned in `docs/learnings.md` instead.
   **Every flash move weaves attacks; no attack outside a flash move** in
   moving paths.
 - **Wall zones bind all movement** (graph clipping, weave, floor), each
-  padded by `wall_pad_px`. Rope lift is preferred for rises when ready.
+  padded by `wall_pad_px`. Rope lift is preferred for rises when ready
+  and grabs the **highest** platform within `nav_rope_lift_px`.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Landings are scored tolerantly (platform span + row slack) — a
   successful move must never shrink the envelope. Upward: `up_flash`
   (Up + jump mid-air), `up_side_flash`, `rope_lift`.
-- **Calibration save preserves** walls/platforms/`map_name`/skills —
-  `merge_recording` exists because a fresh `MapEntry` wiped layouts.
+- **Layout save preserves** walls/platforms/`map_name`/skills — a fresh
+  `MapEntry` must never wipe drawn geometry.
 - Region/coords: client-area px for rects; 0–1 normalized in map files.
   Panel-view frames carry `ox`/`oy` offsets — shift overlay meta and
   subtract it on canvas drags.
@@ -80,12 +81,12 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Pathfinding | `bot/navgraph.py` (graph + Dijkstra), `bot/navigator.py` (execution), `bot/reach.py` (learned reach), `bot/patrol.py` (continuous loop) |
 | Map-change monitor + identity | `bot/monitor.py`, `bot/identity.py`, `vision/transition.py` |
 | Map store + identity | `bot/maps.py`, `vision/minimap.py`, `vision/mapname.py` |
-| Recording | `bot/calibrate.py` |
+| Move measurement | `bot/measure.py` |
 | Host + dashboard cmds | `serve.py`, `remote/control.py` |
 | Frame pipeline | `remote/streamer.py` (`assemble_panel`, `annotate`) |
 | Dashboard UI | `remote/dashboard.html` |
 | Debug frame capture | `vision/framelog.py` → `debug/frames/` |
 
 See `docs/` for the full picture: `architecture.md`, `map-detection.md`,
-`calibration.md`, `bot-behavior.md`, `dashboard.md`, `configuration.md`,
+`layout.md`, `bot-behavior.md`, `dashboard.md`, `configuration.md`,
 `development.md`, `learnings.md` (what was tried and why it changed).

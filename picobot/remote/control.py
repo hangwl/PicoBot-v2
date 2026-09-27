@@ -29,7 +29,7 @@ __all__ = [
 # WS message prefixes routed to the dashboard command sink rather than the
 # Pico's hid|... payload path.
 DASHBOARD_PREFIXES = (
-    "bot|", "map|", "cal|", "dash|", "host|",
+    "bot|", "map|", "measure|", "dash|", "host|",
     "events|", "config|", "layout|", "skills|", "movekeys|", "nav|",
 )
 

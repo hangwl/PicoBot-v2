@@ -232,7 +232,7 @@ class ConnectSerialTests(unittest.TestCase):
 
     def test_dashboard_prefixes_cover_all_commands(self):
         for prefix in (
-            "bot|", "map|", "cal|", "dash|", "host|",
+            "bot|", "map|", "measure|", "dash|", "host|",
             "events|", "config|", "layout|", "skills|", "movekeys|",
         ):
             self.assertIn(prefix, DASHBOARD_PREFIXES)
@@ -944,32 +944,12 @@ class HostCommandTests(unittest.TestCase):
         self.host._feed = feed
         self.assertEqual(self.host._layout_source(), "stored")
 
-    def test_cal_finish_blank_name_uses_resolved_map(self):
-        cal = Mock()
-        cal.finish = Mock(side_effect=lambda n, **kw: MapEntry(name=n))
-        self.host.calibrator = cal
-        feed = Mock()
-        feed.minimap_img.return_value = None
-        feed.minimap.region = (0, 0, 100, 100)
-        self.host._feed = feed
-        with tempfile.TemporaryDirectory() as tmp:
-            self._use_store(tmp, pin="detected_map")
-            self.host.maps.save(MapEntry(name="detected_map"))
-            self.host.identity.refresh()
-            self.host._cal_finish("")
-            self.assertEqual(MapStore(tmp).names(), ["detected_map"])
-        self.assertEqual(cal.finish.call_args[0][0], "detected_map")
-
-    def test_cal_finish_explicit_name_wins(self):
-        cal = Mock()
-        cal.finish = Mock(side_effect=lambda n, **kw: MapEntry(name=n))
-        self.host.calibrator = cal
-        self.host._get_feed = Mock(return_value=None)
-        with tempfile.TemporaryDirectory() as tmp:
-            self._use_store(tmp)
-            self.host._cal_finish("my_map")
-            self.assertEqual(MapStore(tmp).names(), ["my_map"])
-        self.assertEqual(cal.finish.call_args[0][0], "my_map")
+    def test_measure_start_requires_stopped_bot(self):
+        self.host.bot = Mock()
+        self.host._measure_start()
+        errs = [e["msg"] for e in self.host.bus.history() if e["kind"] == "error"]
+        self.assertTrue(any("stop the bot" in m for m in errs))
+        self.assertIsNone(self.host.measurer)
 
     def test_serial_auto_probes_then_connects(self):
         done = []

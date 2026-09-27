@@ -5,12 +5,14 @@ and upward (``rise``), in minimap px. Defaults are conservative; each
 executed move reports where it took off and landed:
 
 - success → the envelope grows to what was observed (it's proven);
-- failure at or inside the envelope → the envelope shrinks below the
-  attempted size;
+- failure at or inside the envelope → the second consecutive failure
+  shrinks the envelope below the attempted size (one miss may be input
+  timing, not reach);
 - failure beyond it (an exploratory attempt) → a ceiling stops retrying.
 
 The planner may explore up to ``explore`` × the envelope (capped by the
-ceiling) at a cost penalty, so estimates grow from conservative starts.
+ceiling) at a cost penalty, so estimates grow from conservative starts
+or from a measurement run.
 """
 
 from __future__ import annotations
@@ -53,7 +55,7 @@ class ReachModel:
         base: Dict[str, Reach],
         *,
         path: Optional[str | Path] = None,
-        explore: float = 1.15,
+        explore: float = 1.3,
         shrink: float = 0.95,
     ) -> None:
         self.base = dict(base)
@@ -61,6 +63,7 @@ class ReachModel:
         self.ceiling: Dict[str, Reach] = {}
         self.explore = explore
         self.shrink = shrink
+        self._fail_streak: Dict[str, int] = {}
         self.path = Path(path) if path else None
         self._dirty = False
         self._saved_at = 0.0
@@ -109,6 +112,8 @@ class ReachModel:
         actual displacement (absolute dx; rise positive = upward)."""
         if move not in self.est:
             return
+        if ok:
+            self._fail_streak[move] = 0
         e = self.est[move]
         before = (e.dx, e.rise)
         c0 = self.ceiling.get(move)
@@ -122,7 +127,20 @@ class ReachModel:
             if not horizontal:
                 e.rise = max(e.rise, orise)
         else:
+            streak = self._fail_streak.get(move, 0) + 1
+            self._fail_streak[move] = streak
             c = self.ceiling.setdefault(move, Reach(float("inf"), float("inf")))
+            if streak < 2:
+                # One miss may be input timing — cap retries but keep the
+                # proven envelope.
+                if horizontal or move == "up_side_flash":
+                    c.dx = min(c.dx, pdx * 0.97)
+                if not horizontal:
+                    c.rise = min(c.rise, prise * 0.97)
+                self.version += 1
+                self._dirty = True
+                self.save()
+                return
             if horizontal or move == "up_side_flash":
                 if pdx <= e.dx:
                     e.dx = max(self.base[move].dx * 0.5, pdx * self.shrink)

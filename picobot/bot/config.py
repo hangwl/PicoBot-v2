@@ -46,12 +46,12 @@ class BotConfig:
     vert_jump_interval: float = 0.9       # min gap between vertical jump tries
     # Starting move reach (minimap px) — conservative; learned upward
     # from observed moves into nav_reach_file.
-    nav_up_flash_px: float = 14.0         # rise of an upward flash jump
-    nav_rope_lift_px: float = 20.0        # rise of the rope-lift skill
-    nav_up_side_dx_px: float = 16.0       # sideways reach of up→side flash
-    nav_jump_px: float = 8.0              # widest gap a plain jump clears
-    nav_gap_px: float = 20.0              # widest gap a flash jump clears
-    nav_double_gap_px: float = 32.0       # widest gap a double flash clears
+    nav_up_flash_px: float = 26.0         # rise of an upward flash jump
+    nav_rope_lift_px: float = 90.0        # rope-lift max grab range (highest platform in range)
+    nav_up_side_dx_px: float = 30.0       # sideways reach of up→side flash
+    nav_jump_px: float = 10.0             # widest gap a plain jump clears
+    nav_gap_px: float = 30.0              # widest gap a flash jump clears
+    nav_double_gap_px: float = 48.0       # widest gap a double flash clears
     nav_reach_file: str = "nav_reach.json"
     anchor_float_px: float = 4.0           # anchors hover this far above the platform line
     flash_repress_seconds: float = 0.15    # jump -> flash re-press gap

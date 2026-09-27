@@ -80,7 +80,7 @@ override the remembered values and are persisted the same way.
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | Components, layers, data flow, directory map |
 | [docs/map-detection.md](docs/map-detection.md) | Blackout trigger, panel detection, title OCR, pins |
-| [docs/calibration.md](docs/calibration.md) | Anchor recording, layout drawing, map format |
+| [docs/layout.md](docs/layout.md) | Layout drawing, anchor placement, move measurement, map format |
 | [docs/bot-behavior.md](docs/bot-behavior.md) | Patrol routes, weaving, skills, safety |
 | [docs/dashboard.md](docs/dashboard.md) | Panels, views, event levels, WS protocol |
 | [docs/configuration.md](docs/configuration.md) | `config.json` reference |

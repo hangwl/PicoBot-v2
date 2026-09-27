@@ -16,9 +16,9 @@ def _model(**kw):
 class ReachModelTests(unittest.TestCase):
     def test_defaults_from_config(self):
         r = base_reach(BotConfig())
-        self.assertEqual(r["flash"].dx, 20.0)
-        self.assertEqual(r["up_flash"].rise, 14.0)
-        self.assertEqual(r["rope_lift"].rise, 20.0)
+        self.assertEqual(r["flash"].dx, 30.0)
+        self.assertEqual(r["up_flash"].rise, 26.0)
+        self.assertEqual(r["rope_lift"].rise, 90.0)
 
     def test_fits_proven_exploratory_and_out(self):
         m = _model()
@@ -34,10 +34,18 @@ class ReachModelTests(unittest.TestCase):
         self.assertEqual(m.get("up_flash").rise, 17)
         self.assertEqual(m.get("up_flash").dx, 6.0)    # drift not learned
 
-    def test_failure_inside_envelope_shrinks(self):
+    def test_second_consecutive_failure_shrinks(self):
         m = _model()
         m.observe("flash", planned=(18, 0), observed=(10, -5), ok=False)
+        self.assertEqual(m.get("flash").dx, 20.0)      # one miss: no shrink
+        m.observe("flash", planned=(18, 0), observed=(10, -5), ok=False)
         self.assertAlmostEqual(m.get("flash").dx, 18 * 0.95)
+        m.observe("flash", planned=(10, 0), observed=(14, 0), ok=True)
+        self.assertAlmostEqual(m.get("flash").dx, 18 * 0.95)  # stays shrunk
+        m.observe("flash", planned=(16, 0), observed=(9, -5), ok=False)
+        self.assertAlmostEqual(m.get("flash").dx, 18 * 0.95)  # streak restarted
+        m.observe("flash", planned=(16, 0), observed=(9, -5), ok=False)
+        self.assertEqual(m.get("flash").dx, 15.2)             # floor: half base
 
     def test_exploratory_failure_sets_ceiling_only(self):
         m = _model()
@@ -59,6 +67,7 @@ class ReachModelTests(unittest.TestCase):
             m = _model(path=path)
             m.observe("flash", planned=(22, 0), observed=(27, 0), ok=True)
             m.observe("up_flash", planned=(0, 16), observed=(0, 2), ok=False)
+            m.observe("up_flash", planned=(0, 16), observed=(0, 2), ok=False)
             m.save(force=True)
             data = json.loads(path.read_text())
             self.assertIsNone(data["ceiling"]["up_flash"]["dx"])   # inf → null
@@ -66,13 +75,16 @@ class ReachModelTests(unittest.TestCase):
             self.assertEqual(again.get("flash").dx, 27)
             self.assertEqual(again.snapshot(), m.snapshot())
 
-    def test_version_changes_only_on_estimate_change(self):
+    def test_version_changes_on_estimate_or_ceiling_change(self):
         m = _model()
         v = m.version
         m.observe("flash", planned=(10, 0), observed=(12, 0), ok=True)
-        self.assertEqual(m.version, v)                   # 12 < 20 proven
-        m.observe("flash", planned=(10, 0), observed=(24, 0), ok=True)
+        self.assertEqual(m.version, v)                   # 12 < 30 proven
+        m.observe("flash", planned=(10, 0), observed=(34, 0), ok=True)
         self.assertEqual(m.version, v + 1)
+        v = m.version
+        m.observe("up_flash", planned=(0, 16), observed=(0, 2), ok=False)
+        self.assertEqual(m.version, v + 1)               # ceiling capped
 
 
 if __name__ == "__main__":

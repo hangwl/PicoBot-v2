@@ -12,7 +12,7 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
   window title; persisted to `config.json`.
 - **Map** — the single source of truth: selector pins a map
   (`active_map`), `auto-detect` defers to live identity, `+ new map…`
-  names the next calibration save. `detected:` shows
+  names the next layout save. `detected:` shows
   `alias (ocr|pin) · title "…" 98%` — the resolved map, how it was
   resolved, the accepted title and its match score, and `reading title…`
   while a vote is in progress.
@@ -36,7 +36,7 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
   - fps selector persists `view_fps` (default 10, 1–30).
 - **Bot** — Start/Stop.
 - **Calibrate** — Record / Mark anchor (F9) / Save. See
-  [calibration.md](calibration.md).
+  [layout.md](layout.md).
 - **Skills** — registry for attacks, buffs, summons, movement keys.
 - **Remote input** — arrow pad + key buttons (rune solving from a phone).
 - **Events** — structured log with severity tabs.

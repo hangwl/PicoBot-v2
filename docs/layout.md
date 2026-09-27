@@ -1,4 +1,4 @@
-# Calibration & map layout
+# Map layout, anchors & move measurement
 
 ## Placing anchors (preferred)
 
@@ -15,34 +15,30 @@ Placed anchors have no `on_arrive` list — at arrival the bot fires any
 registered **summon** skill that is off cooldown instead. Order doesn't
 matter: the patrol plans its own route.
 
-## Recording anchors (optional)
+## Placing anchors
 
-Dashboard **Calibrate** panel (or headless
-`python -m picobot.bot.calibrate --window "Eluna (x64)" --name my_map`,
-F9 = mark, ESC = save):
+Draw the platforms first, then on the Panel view press **Place anchors**
+and click each patrol checkpoint. Clicks snap to the drawn platform under
+them and float `anchor_float_px` above it — the same height as the
+player icon (within 12px; a click with nothing under it stays put and the
+log says so). Shift-click removes the nearest anchor; **Undo**/**Clear**
+act on the Map selection. Anchors are named `a0`, `a1`, … (lowest free
+number) and stored normalized in the map's `rotation.anchors`; removing
+one drops and reindexes any hand-authored `legs`.
 
-1. **Record** starts a session.
-2. Walk to each farming spot and press **Mark anchor** (or F9).
-3. **Save** writes/updates the map file.
+Placed anchors have no `on_arrive` list — at arrival the bot fires any
+registered **summon** skill that is off cooldown instead. Order doesn't
+matter: the patrol plans its own route.
 
-Recording captures **anchor positions only** — movement between
-checkpoints is generated live at runtime, not replayed. What is inferred
-for free at each mark:
+## Measuring moves
 
-- **Dwell range** — how long you stood there.
-- **`on_arrive` skills** — keys pressed in the ~8s arrival window,
-  resolved through registered skill bindings.
-- **`minimap_region` + OCR title** (`map_name`) — identity data captured
-  at save (the title comes from the identity's latest accepted read). If
-  no title has been read a `notify` event warns (the map then can't be
-  auto-identified until a save captures it).
-
-Marks taken mid-air or off a platform warn immediately; saved anchors are
-snapped onto the nearest drawn platform so targets stay reachable.
-
-**Saving preserves.** `merge_recording` carries over everything recording
-can't observe — walls, floor, platforms, `map_name`, tuned skills —
-re-recording only replaces anchors.
+The movement graph starts from conservative reach guesses. Press
+**Measure moves** (bot stopped, character on an open platform with the
+platforms drawn): the bot performs each move type — flash, double flash,
+jump, rope lift, up flash — in the safest direction and records the real
+takeoff→landing into `nav_reach.json`. The Route overlay immediately
+shows the connections the new reach unlocks. Farming keeps refining the
+numbers (successes grow an envelope; two consecutive misses shrink it).
 
 ## Drawing layout (dashboard)
 
@@ -84,11 +80,11 @@ truth, no per-section map names.
 
 ## Legs (hand-authored, optional)
 
-Recording no longer captures movement legs. Between checkpoints the bot
-navigates directly with weave-attacking `walk_to` (+ `up_jump`/
-`down_jump` for level gaps) and composes shortest paths over recorded
-legs when a pair exists. Author a `legs` entry manually only for moves
-the fallback can't manage — e.g., a rope climb:
+The movement graph covers platform moves (walks, flashes, up/double
+flashes, rope lift, drops) — see
+[bot-behavior.md](bot-behavior.md#moves--learned-reach-navgraphpy-reachpy-navigatorpy).
+Author a `legs` entry manually only for moves the graph can't express
+yet — e.g., a rope or ladder climb:
 
 ```json
 "legs": [{"from": 0, "to": 1, "steps": [

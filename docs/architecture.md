@@ -63,8 +63,7 @@ a small FSM (`machine.py`, `states/`) owns behavior:
 
 `rotation.py` models the map's anchor/leg graph; `maps.py` is the JSON
 store plus identity matching; `skills.py` is the per-skill cooldown
-scheduler (attack/buff/summon kinds); `calibrate.py` is the anchor
-recorder. Movement geometry (platforms, walls, floor) is **hand-drawn in
+scheduler (attack/buff/summon kinds). Movement geometry (platforms, walls, floor) is **hand-drawn in
 the dashboard** — auto-detection of translucent minimap lines proved too
 fragile and was deliberately abandoned.
 
@@ -72,7 +71,7 @@ fragile and was deliberately abandoned.
 
 `serve.py`'s `BotHost` is the app: it owns the serial transport, the
 `_VisionFeed` (idle-mode perception), the bot lifecycle, map store,
-calibration runner, and the dashboard command surface (`map|set`,
+move measurer, and the dashboard command surface (`map|set`,
 `cal|*`, `layout|*`, `skills|*`, `dash|view|*`, …).
 
 `remote/control.py` relays `hid|…` payloads (dashboard input pad, the
@@ -110,7 +109,6 @@ picobot/
 │   ├── states/         # FSM states: Grind, Travel, Pause
 │   ├── __main__.py     # headless bot entry
 │   ├── base.py         # lifecycle + event sink
-│   ├── calibrate.py    # anchor recorder (+ CLI)
 │   ├── config.py       # BotConfig (config.json["bot"])
 │   ├── inputs.py       # HidController (ACK'd payloads, held-key tracking)
 │   ├── machine.py      # FSM runtime

@@ -183,18 +183,12 @@
       </div>
     </div>
     <details class="panel" open>
-      <summary>Calibrate</summary>
+      <summary>Measure moves</summary>
       <div class="row">
-        <label>saves onto the Map selection — pick "+ new map" there to name a fresh map, or leave auto to update the detected one</label>
+        <button id="measureStart" class="primary">Measure moves</button>
+        <button id="measureStop">Stop</button>
       </div>
-      <div class="row" style="margin-top:8px">
-        <button id="calStart" class="primary">Record</button>
-        <button id="calMark">Mark anchor (F9)</button>
-        <button id="calFinish">Save &amp; stop</button>
-        <button id="calCancel">Discard</button>
-      </div>
-      <div style="margin-top:6px"><label id="calStat">not recording</label></div>
-      <div style="margin-top:4px"><label>visit each farming spot in-game; press F9 (or Mark) to drop an anchor; Save writes the map file — movement between anchors is generated, not recorded</label></div>
+      <div style="margin-top:6px"><label id="measureStat">stop the bot, stand on an open platform, then measure — real jump ranges are saved to nav_reach.json</label></div>
     </details>
   </div>
   <div class="col" style="flex:1.4 1 340px">
@@ -283,7 +277,6 @@ const logEl = $("log");
 const SEV = { debug: 0, info: 1, warn: 2, error: 3 };
 let logMinSev = 1;                 // "info" tab is the default view
 const logBuf = [];                 // events kept for tab re-renders
-let calActive = false;
 
 function lineDiv(ev) {
   const d = document.createElement("div");
@@ -406,20 +399,11 @@ function showFrame(p) {
 
 function handleDash(p) {
   if (p.event === "evt") {
-    if (p.kind === "calstat") {
-      const d = p.data || {};
-      $("calStat").textContent =
-        `recording — ${d.anchors} anchor(s) · ${d.samples} samples · ${Math.floor(d.elapsed)}s`;
-      return;
-    }
+    if (p.kind === "measure" && !p.msg.startsWith("measurement"))
+      $("measureStat").textContent = p.msg;
     log(p.kind, p.msg, p.level, p.t);
     if (p.kind === "bot")
       chip("bot", "bot: " + p.msg, p.msg === "started" ? "on" : "");
-    if (p.kind === "cal") {
-      if (p.msg.includes("started")) calActive = true;
-      if (/(saved|failed|cancelled)/.test(p.msg)) calActive = false;
-      syncCal();
-    }
   } else if (p.event === "history") {
     logBuf.length = 0;
     logEl.innerHTML = "";
@@ -557,16 +541,6 @@ function fillSel(sel, placeholder, pairs, current) {
     sel.appendChild(o);
   }
 }
-
-function syncCal() {
-  $("calStart").disabled = calActive;
-  $("calStart").textContent = calActive ? "● Recording…" : "Record";
-  $("calMark").disabled = !calActive;
-  $("calFinish").disabled = !calActive;
-  $("calCancel").disabled = !calActive;
-  if (!calActive) $("calStat").textContent = "not recording";
-}
-syncCal();
 
 const send = m => { if (ws.readyState === 1) ws.send(m); };
 $("startBot").onclick = () => send("bot|start");
@@ -734,12 +708,8 @@ $("portSel").onchange = e => { if (e.target.value) send("host|serial|" + e.targe
 $("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target.value); };
 $("portAuto").onclick = () => send("host|serial|auto");
 $("connRefresh").onclick = () => send("host|state");
-$("calStart").onclick = () => { calActive = true; send("cal|start"); };
-$("calMark").onclick = () => send("cal|mark");
-$("calFinish").onclick = () => {
-  send("cal|finish" + layTarget()); calActive = false;
-};
-$("calCancel").onclick = () => { send("cal|cancel"); calActive = false; };
+$("measureStart").onclick = () => send("measure|start");
+$("measureStop").onclick = () => send("measure|stop");
 
 // Remote input pad: tap sends down + up (~90ms hold, human-ish).
 function press(key) {

@@ -131,7 +131,6 @@ class BotHost:
         debug_frames: bool = False,
     ) -> None:
         from .bot import BotConfig
-        from .bot.calibrate import CalibrationRunner
         from .bot.identity import MapIdentity
         from .bot.maps import MapStore
 
@@ -164,7 +163,7 @@ class BotHost:
 
         self.bot = None
         self.bot_thread: Optional[threading.Thread] = None
-        self.calibrator: Optional[CalibrationRunner] = None
+        self.measurer = None
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -242,7 +241,6 @@ class BotHost:
         )
         self.http.start()
         self.streamer.start()
-        self._hook_keyboard()
         self.bus.emit("status", f"dashboard: http://0.0.0.0:{self.config.http_port}")
         logger.info("BotHost running (ws :%s, http :%s)",
                     self.remote.ws_port, self.config.http_port)
@@ -256,8 +254,8 @@ class BotHost:
     def shutdown(self) -> None:
         self.stop_bot()
         self.reach.save(force=True)
-        if self.calibrator:
-            self.calibrator.stop()
+        if self.measurer:
+            self.measurer.stop()
         self.streamer.stop()
         self.remote.stop()
         if getattr(self, "http", None):
@@ -942,18 +940,11 @@ class BotHost:
             self._send_maps()
         elif msg.startswith("map|set|"):
             self._set_map(msg.split("|", 2)[2])
-        elif msg == "cal|start":
-            self._cal_start()
-        elif msg == "cal|mark":
-            if self.calibrator:
-                self.calibrator.mark()
-        elif msg.startswith("cal|finish"):
-            name = msg.split("|", 2)[2] if msg.count("|") >= 2 else ""
-            self._cal_finish(name)
-        elif msg == "cal|cancel":
-            if self.calibrator:
-                self.calibrator.stop()
-                self.bus.emit("cal", "recording cancelled")
+        elif msg == "measure|start":
+            self._measure_start()
+        elif msg == "measure|stop":
+            if self.measurer:
+                self.measurer.stop()
         elif msg.startswith("dash|view|"):
             self.streamer.set_mode(msg.split("|", 2)[2])
         elif msg.startswith("dash|fps|"):
@@ -1244,92 +1235,42 @@ class BotHost:
         self._send_config()
 
     # -- Calibration -------------------------------------------------------------
-    def _cal_start(self) -> None:
+    # -- Move measurement -------------------------------------------------------
+    def _measure_start(self) -> None:
+        if self.bot is not None or (self.bot_thread and self.bot_thread.is_alive()):
+            self.bus.emit("error", "stop the bot before measuring moves")
+            return
+        if self.measurer and self.measurer.running():
+            return
         feed = self._get_feed()
         if feed is None:
-            self.bus.emit("error", "calibration needs the game window")
+            self.bus.emit("error", "measuring needs the game window")
             return
-        from .bot.calibrate import CalibrationRunner
+        from .bot import HidController, SmartBot
+        from .bot.measure import MoveMeasurer
 
-        def _snap(img, x, y):
-            # Snap onto the map's drawn platforms. ``y`` back means "no
-            # geometry here to verify against"; None means "off a drawn
-            # platform" — the runner warns on the latter.
-            from .vision.minimap import platform_covered, platform_row_at
+        def send(payload: str) -> bool:
+            self.bus.emit("hid", payload)
+            return self.remote.enqueue_hid_payload(
+                payload, wait_ack=True, timeout=1.5
+            )
 
-            entry = self._resolved_entry()
-            segs = self._platforms_px(entry) if entry is not None else []
-            if not segs or not platform_covered(segs, x):
-                return y
-            return platform_row_at(segs, x, y)
-
-        self.calibrator = CalibrationRunner(
-            feed.minimap_img,
-            feed.minimap.player_pos,
-            event=lambda k, m, d=None: self.bus.emit(k, m, d),
-            snap_fn=_snap,
+        bot = SmartBot(
+            HidController(send),
+            self.window_title,
+            self.bot_config,
+            minimap=feed.minimap,
+            monitor=feed.monitor,
+            identity=self.identity,
+            reach=self.reach,
+            notify_callback=self.telegram.send_message,
+            event_bus=self.bus,
         )
-        img = feed.minimap_img()
-        wh = (img.shape[1], img.shape[0]) if img is not None else (200, 150)
-        self.calibrator.start(wh)
-
-    def _cal_finish(self, name: str) -> None:
-        if not self.calibrator:
-            return
-        res = self.identity.current
-        if not name:
-            resolved = self._resolved_entry()
-            name = resolved.name if resolved is not None else "unnamed"
-            self.bus.emit("cal", f"auto-named map: {name}")
-        feed = self._get_feed()
-        map_name = res.title if res.title_map in (None, name) else None
-        if self.bot_config.name_ocr and not map_name:
-            self.bus.emit(
-                "notify",
-                "map title not read yet — saved without map_name; title "
-                "matching will skip this map until a save captures it "
-                "(check the Title view)",
-            )
-        try:
-            entry = self.calibrator.finish(
-                name,
-                minimap_region=feed.minimap.region if feed else None,
-                key_map={
-                    s.key: s for s in self.bot_config.skills.values()
-                },
-                # Saving re-records anchors only — walls/platforms/
-                # title must survive from the existing file.
-                existing=self.maps.get(name),
-                map_name=map_name,
-            )
-            path = self.maps.save(entry)
-            self.maps.reload()
-            self.identity.refresh()
-            self.bus.emit("cal", f"map saved: {path}")
-            self._send_maps()
-        except Exception as exc:
-            self.bus.emit("error", f"calibration save failed: {exc}")
-
-    def _hook_keyboard(self) -> None:
-        """Global key hook so calibration can attribute skill presses."""
-        try:
-            import keyboard
-
-            def on_press(event):
-                if (
-                    self.calibrator
-                    and self.calibrator.running
-                    and event.event_type == "down"
-                ):
-                    # F9 marks an anchor without leaving the game window.
-                    if event.name == "f9":
-                        self.calibrator.mark()
-                    self.calibrator.record_key(event.name)
-
-            keyboard.hook(on_press)
-        except Exception as exc:
-            logger.info("keyboard hook unavailable: %s", exc)
-
+        self.measurer = MoveMeasurer(
+            bot, on_event=lambda k, m: self.bus.emit(k, m)
+        )
+        self.measurer.start()
+        self.bus.emit("measure", "measuring — watch the character work each move")
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="picobot.serve")
