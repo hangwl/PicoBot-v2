@@ -50,7 +50,6 @@ def _bot(positions, target=(50, 50), threshold=4, stuck_limit=40):
     bot.minimap.player_pos = Mock(
         side_effect=lambda img: seq.pop(0) if len(seq) > 1 else seq[0]
     )
-    bot.minimap.platform_y = Mock(return_value=None)  # no ink by default
     img = object()
     bot.minimap_frame = Mock(return_value=img)
     bot._img_hazard = Mock(return_value=None)
@@ -63,8 +62,18 @@ def _bot(positions, target=(50, 50), threshold=4, stuck_limit=40):
     bot.down_jump = Mock()
     bot.viz = {"target": None}
     bot._map = None
+    bot.maps = Mock(**{"get.return_value": None})
     bot._target = target
     return bot
+
+
+def _plats(x0, x1, y=1.0 / 3.0):
+    """A drawn platform segment (px) -> normalized map `platforms` value.
+
+    Region in these harnesses is always 200x150, so y is a normalized
+    fraction: pass the px row / 150.
+    """
+    return [[x0 / 200.0, y, x1 / 200.0, y]]
 
 
 def _drive(bot):
@@ -265,7 +274,6 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot.minimap = Mock()
         bot.minimap.region = (0, 0, 200, 150)
         bot.minimap.player_pos = Mock(return_value=pos)
-        bot.minimap.platform_extent = Mock(return_value=bounds)
         bot.minimap_frame = Mock(return_value=object())
         bot.is_window_focused = Mock(return_value=True)
         bot._stop_event = threading.Event()
@@ -274,7 +282,15 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot.event = Mock()
         from picobot.bot.skills import Skill, SkillBook
         bot.skills = SkillBook({"main": Skill("main", "a")})
-        bot._map = None
+        # Weave bounds come from the map's drawn platforms — a segment at
+        # the anchor's row spanning `bounds` px. None -> weave_range only.
+        bot._map = MapEntry(
+            name="m",
+            platforms=(
+                _plats(bounds[0], bounds[1], y=anchor_xy[1])
+                if bounds is not None else None
+            ),
+        )
         bot.maps = Mock(**{"get.return_value": None})
         bot._anchor_idx = 0
         bot._weave_dir = None
@@ -339,14 +355,18 @@ class WeaveTests(unittest.TestCase):
         # Left wall at x=60 (0.3 * 200): pos x=55 is outside the global
         # 16px edge zone but inside the wall — must face right.
         bot = _weave_bot((55, 50), bounds=(0, 150))
-        bot._map = MapEntry(name="m", walls={"left": 0.3})
+        bot._map = MapEntry(
+            name="m", walls={"left": 0.3}, platforms=_plats(0, 150)
+        )
         bot._weave_dir = "left"
         with patch("random.random", return_value=0.5):
             bot._weave_attack()
         self.assertEqual(bot._weave_dir, "right")
         # Inside the wall on the right side: normal platform logic.
         bot = _weave_bot((80, 50), bounds=(0, 150))
-        bot._map = MapEntry(name="m", walls={"left": 0.3})
+        bot._map = MapEntry(
+            name="m", walls={"left": 0.3}, platforms=_plats(0, 150)
+        )
         bot._weave_dir = "right"
         with patch("random.random", return_value=0.5):
             bot._weave_attack()
@@ -357,7 +377,9 @@ class WeaveTests(unittest.TestCase):
 
         # Right wall at x=150 (0.75 * 200): pos x=160 must face left.
         bot = _weave_bot((160, 50), bounds=(0, 199))
-        bot._map = MapEntry(name="m", walls={"right": 0.75})
+        bot._map = MapEntry(
+            name="m", walls={"right": 0.75}, platforms=_plats(0, 199)
+        )
         bot._weave_dir = "right"
         with patch("random.random", return_value=0.5):
             bot._weave_attack()
@@ -434,7 +456,9 @@ class PatrolTests(unittest.TestCase):
         from picobot.bot.maps import MapEntry
 
         bot = self._bot((70, 50), self._rot())
-        bot._map = MapEntry(name="m", walls={"left": 0.4})  # wall x=80
+        bot._map = MapEntry(
+            name="m", walls={"left": 0.4}, platforms=_plats(10, 90)
+        )  # wall x=80
         bot._anchor_idx = 1                  # next → a0 (x=50), dx=-20
         bot._patrol_tick()
         self.assertEqual(bot._weave_dir, "right")
@@ -460,14 +484,32 @@ class PatrolTests(unittest.TestCase):
 
 
 class TargetSnapTests(unittest.TestCase):
-    def test_target_snapped_to_platform_ink(self):
-        bot = _bot([(20, 49), (20, 50)], target=(20, 60))
-        bot.minimap.platform_y = Mock(return_value=50)
-        self.assertTrue(_drive(bot))  # would loop on unreachable y=60 else
-        bot.minimap.platform_y.assert_called_once()
-        args = bot.minimap.platform_y.call_args[0]
-        self.assertEqual(args[1:], (20, 60))
+    def test_target_snapped_to_platform(self):
+        # Target y=60 hovers 6px above the drawn segment at y=54 — within
+        # max_snap, so the nav target projects onto it.
+        bot = _bot([(20, 55), (20, 54)], target=(20, 60))
+        bot._map = MapEntry(name="m", platforms=_plats(0, 199, y=54 / 150))
+        self.assertTrue(_drive(bot))
         self.assertIsNone(bot.viz["target"])  # cleared on arrival
+
+    def test_target_too_far_off_platform_stays(self):
+        # 10px above the only drawn segment — beyond max_snap, so no
+        # projection. The unreachable descent aborts the leg rather than
+        # arriving at the drawn row.
+        bot = _bot([(20, 50)], target=(20, 60))
+        bot._map = MapEntry(name="m", platforms=_plats(0, 199, y=50 / 150))
+        self.assertFalse(_drive(bot))
+        bot.down_jump.assert_called()  # descent was genuinely attempted
+
+    def test_target_not_snapped_outside_span(self):
+        # Platform drawn at y=50 but only covering x=150..199 — the x=20
+        # target keeps its own y and arrives immediately (a snap to y=50
+        # would have attempted a vertical ascent).
+        bot = _bot([(20, 60)], target=(20, 60))
+        bot._map = MapEntry(name="m", platforms=_plats(150, 199, y=50 / 150))
+        self.assertTrue(_drive(bot))
+        bot.up_jump.assert_not_called()
+        self.assertIsNone(bot.viz["target"])
 
 
 class ResolveRegionTests(unittest.TestCase):

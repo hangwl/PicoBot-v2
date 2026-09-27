@@ -71,16 +71,24 @@ def _hline(img: np.ndarray, y: int, color) -> None:
         img[y, ::3] = color
 
 
+def _line(img: np.ndarray, x0, y0, x1, y1, color) -> None:
+    """Hand-drawn platform segment overlay."""
+    h, w = img.shape[:2]
+    n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+    for i in range(n + 1):
+        t = i / n
+        x, y = int(round(x0 + (x1 - x0) * t)), int(round(y0 + (y1 - y0) * t))
+        if 0 <= x < w and 0 <= y < h:
+            img[y, x] = color
+            if y + 1 < h:
+                img[y + 1, x] = color  # 2px thick so it reads on the stream
+
+
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
-    mask = meta.get("ink_mask")
-    if mask is not None and mask.shape == out.shape[:2]:
-        # Tint detected platform ink — what the bot reads as geometry.
-        out[mask] = (
-            out[mask].astype(np.uint16) // 2
-            + np.array((30, 160, 255), dtype=np.uint16) // 2  # orange BGR
-        ).astype(np.uint8)
+    for seg in meta.get("platforms") or []:
+        _line(out, *seg, (255, 200, 40))                  # cyan platforms
     for x in meta.get("walls") or []:
         _vline(out, int(x), (60, 60, 255))                   # dashed red walls
     floor = meta.get("floor")
@@ -169,7 +177,7 @@ class FrameStreamer:
                     }
                     for key in (
                         "state", "map", "hazard", "player",
-                        "layout", "no_rotation", "patrol", "ink_on",
+                        "layout", "no_rotation", "patrol",
                     ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]

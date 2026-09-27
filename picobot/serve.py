@@ -111,7 +111,7 @@ class BotHost:
         self.calibrator: Optional[CalibrationRunner] = None
         self._map_res_ts = 0.0
         self._map_res = None
-        self._show_ink = False
+
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -363,7 +363,15 @@ class BotHost:
             v = float(v)
             return int(round(v * span)) if 0.0 <= v <= 1.0 else int(round(v))
 
-        walls = floor = anchors = None
+        walls = floor = anchors = platforms = None
+        if entry is not None and entry.platforms and w and h:
+            platforms = [
+                (
+                    int(round(s[0] * w)), int(round(s[1] * h)),
+                    int(round(s[2] * w)), int(round(s[3] * h)),
+                )
+                for s in entry.platforms
+            ]
         if entry is not None and entry.walls and w:
             walls = [
                 px(v, w)
@@ -381,6 +389,7 @@ class BotHost:
             "walls": walls,
             "floor": floor,
             "anchors": anchors,
+            "platforms": platforms,
             "patrol": bool(rot.patrol),
         }
 
@@ -557,18 +566,16 @@ class BotHost:
             self._send_maps()
             self.bus.emit("map", f"walls cleared for {entry.name}")
             return
-        pos = region = img = mm = None
+        pos = region = None
         bot = self.bot
         if bot is not None:
             img = bot.minimap_frame()
             pos = bot.player_pos(img)
             region = bot.minimap.region
-            mm = bot.minimap
         feed = self._get_feed()
         if pos is None and feed is not None:
             img = feed.minimap_img()
             pos = feed.minimap.player_pos(img) if img is not None else None
-            mm = feed.minimap
         if not region and feed is not None:
             region = feed.minimap.region
         if pos is None or not region:
@@ -582,11 +589,13 @@ class BotHost:
             return
         walls = dict(entry.walls or {})
         v = pos[1] if side == "floor" else pos[0]
-        if side == "floor" and img is not None:
-            # Snap onto the platform ink under the player — the drawn
-            # boundary should sit on the floor line, not hover above it.
-            snapped = mm.platform_y(
-                img, pos[0], pos[1], max_snap=10, ink=entry.platform_color
+        if side == "floor" and entry.platforms:
+            # Snap onto the drawn platform under the player — the boundary
+            # should sit on the floor line, not hover above it.
+            from .vision.minimap import platform_row_at
+
+            snapped = platform_row_at(
+                self._platforms_px(entry), pos[0], pos[1], max_snap=10
             )
             if isinstance(snapped, int):
                 v = snapped
@@ -600,36 +609,47 @@ class BotHost:
             "map", f"{side} wall set at {axis}={v} for {entry.name}"
         )
 
-    def _layout_set_ink(self, msg: str) -> None:
-        """layout|ink|x,y[|<name>] — sample platform colour off a click.
+    def _layout_platform(self, msg: str) -> None:
+        """layout|plat|x0,y0,x1,y1|undo|clear[|<name>] — drawn platforms.
 
-        The default platform detector is structural (thin horizontal
-        lines) and needs no colour. When a map's minimap art defeats it —
-        e.g. long horizontal scenery edges on a translucent background —
-        clicking a platform line stores that pixel's colour on the map;
-        the detector then colour-matches it (authoritative) instead.
-        ``layout|ink|clear[|<name>]`` removes the override.
+        Each drag on the Minimap view appends a segment (minimap px here,
+        stored normalized). Platforms are hand-drawn — the authoritative
+        walkable geometry for anchor snapping, weave bounds and floor
+        placement, since auto-detecting translucent minimap lines proved
+        too fragile.
         """
         parts = msg.split("|", 3)
         if len(parts) < 3:
             return
-        payload = parts[2]
-        name = parts[3].strip() if len(parts) > 3 else ""
-        if payload == "clear":
-            entry, err = self._layout_target(name)
-            if entry is None:
-                self.bus.emit("error", err)
+        payload, name = parts[2], (parts[3].strip() if len(parts) > 3 else "")
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        plats = list(entry.platforms or [])
+        if payload == "undo":
+            if not plats:
+                self.bus.emit("map", f"{entry.name}: no platforms to undo")
                 return
-            entry.platform_color = None
-            self.maps.save(entry)
-            self.maps.reload()
-            self._send_maps()
-            self.bus.emit("map", f"platform colour cleared for {entry.name}")
+            plats.pop()
+            entry.platforms = plats or None
+            self._save_layout_entry(entry)
+            self.bus.emit(
+                "map",
+                f"{entry.name}: undid platform ({len(plats)} left)",
+            )
+            return
+        if payload == "clear":
+            entry.platforms = None
+            self._save_layout_entry(entry)
+            self.bus.emit("map", f"platforms cleared for {entry.name}")
             return
         try:
-            x, y = (int(float(v)) for v in payload.split(","))
+            seg = [float(v) for v in payload.split(",")]
         except (TypeError, ValueError):
             return
+        if len(seg) != 4 or (seg[0] - seg[2]) ** 2 + (seg[1] - seg[3]) ** 2 < 16:
+            return  # degenerate / accidental click — ignore
         img = None
         bot = self.bot
         if bot is not None:
@@ -638,38 +658,42 @@ class BotHost:
         if img is None and feed is not None:
             img = feed.minimap_img()
         if img is None:
-            self.bus.emit("error", "no minimap frame to sample")
+            self.bus.emit("error", "no minimap frame — can't draw platforms")
             return
         h, w = img.shape[:2]
-        if not (0 <= x < w and 0 <= y < h):
-            self.bus.emit("error", "pick is off the minimap")
+        if not all(0 <= v for v in seg) or seg[0] > w or seg[2] > w \
+                or seg[1] > h or seg[3] > h:
+            self.bus.emit("error", "platform drag is off the minimap")
             return
-        import numpy as np
+        plats.append([
+            round(seg[0] / w, 4), round(seg[1] / h, 4),
+            round(seg[2] / w, 4), round(seg[3] / h, 4),
+        ])
+        entry.platforms = plats
+        self._save_layout_entry(entry)
+        self.bus.emit("map", f"{entry.name}: platform {len(plats)} drawn")
 
-        patch = (
-            img[max(0, y - 1) : y + 2, max(0, x - 1) : x + 2]
-            .reshape(-1, 3).astype(np.int32)
-        )
-        # The line pixel is the local outlier — a patch median would land
-        # on the background since neighbours of a thin line mostly aren't
-        # line. Works whether the line is brighter or darker than the bg.
-        mean = patch.mean(axis=0)
-        color = tuple(
-            int(v) for v in patch[int(np.abs(patch - mean).sum(axis=1).argmax())]
-        )
-        entry, err = self._layout_target(name)
-        if entry is None:
-            self.bus.emit("error", err)
-            return
-        entry.platform_color = color
+    def _save_layout_entry(self, entry) -> None:
         self.maps.save(entry)
         self.maps.reload()
         self._send_maps()
-        self.bus.emit(
-            "map",
-            f"platform colour {list(color)} set for {entry.name} "
-            "(B,G,R) — 'show platforms' now colour-matches it",
-        )
+
+    def _platforms_px(self, entry) -> list:
+        """A map's drawn platform segments converted to minimap px."""
+        if not entry.platforms:
+            return []
+        region = None
+        if self.bot is not None:
+            region = self.bot.minimap.region
+        if not region:
+            feed = self._get_feed()
+            region = feed.minimap.region if feed is not None else None
+        if not region:
+            return []
+        w, h = region[2], region[3]
+        return [
+            (s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in entry.platforms
+        ]
 
     def _layout_set_patrol(self, msg: str) -> None:
         """layout|patrol|on|off[|<name>] — checkpoint patrol for a map.
@@ -698,6 +722,7 @@ class BotHost:
             meta = self._map_meta()
             meta.pop("walls", None)   # minimap-relative — meaningless here
             meta.pop("floor", None)
+            meta.pop("platforms", None)
             if bot is not None:
                 img = bot._window_capture()
                 if img is None:
@@ -720,7 +745,6 @@ class BotHost:
                 # when the bot hasn't resolved the map yet.
                 meta.pop("anchors", None)
             snap.update(meta)
-            self._attach_ink(snap, bot.minimap)
             return snap
         feed = self._get_feed()
         if feed is None:
@@ -735,24 +759,7 @@ class BotHost:
             "layout": self._layout_source(),
             **self._map_meta(),
         }
-        self._attach_ink(snap, feed.minimap)
         return snap
-
-    def _attach_ink(self, snap: dict, mm) -> None:
-        """When enabled, attach the platform mask for the overlay.
-
-        This is the *effective* mask the bot's platform logic uses — the
-        resolved map's ``platform_color`` override, else the configured
-        ``colors.ink``, else structural line detection — so the tint is
-        an honest view of what the bot sees as walkable geometry.
-        """
-        snap["ink_on"] = self._show_ink
-        img = snap.get("img")
-        if not self._show_ink or img is None or mm is None:
-            return
-        entry = self._resolved_map_cached()
-        ink = entry.platform_color if entry is not None else None
-        snap["ink_mask"] = mm.platform_mask(img, ink=ink)
 
     # -- Dashboard commands ------------------------------------------------------
     def _handle_command(self, msg: str) -> bool:
@@ -777,15 +784,15 @@ class BotHost:
         elif msg.startswith("dash|fps|"):
             self._fps_set(msg.split("|", 2)[2])
         elif msg in ("dash|ink|on", "dash|ink|off"):
-            self._show_ink = msg.endswith("on")
+            pass  # legacy toggle — platform ink detection was removed
         elif msg == "layout|save" or msg.startswith("layout|save|"):
             self._layout_save(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg == "layout|clear" or msg.startswith("layout|clear|"):
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg.startswith("layout|wall|"):
             self._layout_set_wall(msg)
-        elif msg.startswith("layout|ink|"):
-            self._layout_set_ink(msg)
+        elif msg.startswith("layout|plat|"):
+            self._layout_platform(msg)
         elif msg.startswith("layout|patrol|"):
             self._layout_set_patrol(msg)
         elif msg == "layout|reset":
@@ -1062,13 +1069,16 @@ class BotHost:
         from .bot.calibrate import CalibrationRunner
 
         def _snap(img, x, y):
-            # Honour the resolved map's platform-colour override when
-            # re-calibrating a map that has one.
+            # Snap onto the map's drawn platforms. ``y`` back means "no
+            # geometry here to verify against"; None means "off a drawn
+            # platform" — the runner warns on the latter.
+            from .vision.minimap import platform_covered, platform_row_at
+
             entry = self._resolved_map_cached()
-            return feed.minimap.platform_y(
-                img, x, y,
-                ink=entry.platform_color if entry is not None else None,
-            )
+            segs = self._platforms_px(entry) if entry is not None else []
+            if not segs or not platform_covered(segs, x):
+                return y
+            return platform_row_at(segs, x, y)
 
         self.calibrator = CalibrationRunner(
             feed.minimap_img,

@@ -10,7 +10,10 @@ from picobot.vision.minimap import (
     erode3,
     fingerprint,
     largest_blob_centroid,
+    platform_covered,
     platform_mask,
+    platform_row_at,
+    platform_span_at,
     structure_mask,
 )
 
@@ -301,27 +304,6 @@ class PlatformMaskTests(unittest.TestCase):
             self.assertTrue(mask[y, 100])
         self.assertFalse(mask[40, 100])
 
-    def test_platform_y_structural_without_ink(self):
-        a = MinimapAnalyzer()   # no colors.ink configured
-        img = _blank()
-        img[80, 40:160] = (40, 180, 90)
-        self.assertEqual(a.platform_y(img, 100, 84), 80)
-
-    def test_platform_y_ink_override_colour_matches(self):
-        a = MinimapAnalyzer()
-        img = _blank()
-        img[80, 40:160] = (40, 180, 90)
-        # Explicit ink (per-map override) switches to colour matching —
-        # a mismatched colour finds nothing, the right one does.
-        self.assertIsNone(a.platform_y(img, 100, 84, ink=(0, 0, 250)))
-        self.assertEqual(a.platform_y(img, 100, 84, ink=(40, 180, 90)), 80)
-
-    def test_platform_extent_structural(self):
-        a = MinimapAnalyzer()
-        img = _blank()
-        img[80, 40:120] = (33, 77, 111)
-        self.assertEqual(a.platform_extent(img, 60, 80), (40, 119))
-
     def test_fingerprint_include_mask_ignores_background(self):
         # Same platform lines over a wildly different background must
         # hash identically — the structural mask isolates the lines.
@@ -347,81 +329,36 @@ class PlatformMaskTests(unittest.TestCase):
         self.assertFalse(platform_mask(img)[40, 11])
 
 
-class PlatformYTests(unittest.TestCase):
-    def _img(self, rows=(80,), w=200, h=120):
-        img = _blank(w, h)
-        for y in rows:
-            img[y, :] = (228, 228, 228)  # platform ink = border color
-        return img
+class DrawnPlatformTests(unittest.TestCase):
+    """Hand-drawn platform segments — the map's authoritative geometry."""
 
-    def test_snaps_point_below_floor_up_onto_platform(self):
-        a = MinimapAnalyzer()
-        # Target recorded 6px below the platform line snaps up onto it.
-        self.assertEqual(a.platform_y(self._img(), 50, 86), 80)
+    SEGS = [(10, 80, 190, 80), (40, 30, 120, 30)]  # two horizontal floors
 
-    def test_beyond_snap_radius_returns_none(self):
-        a = MinimapAnalyzer()
-        # 15px below the floor is not marker jitter — it's off-geometry.
-        # Unbounded snapping teleported anchors to frame ink (bug).
-        self.assertIsNone(a.platform_y(self._img(), 50, 95))
+    def test_row_at_snaps_point_onto_nearest_segment(self):
+        self.assertEqual(platform_row_at(self.SEGS, 100, 86), 80)
+        self.assertEqual(platform_row_at(self.SEGS, 60, 34), 30)
 
-    def test_nearest_row_wins(self):
-        a = MinimapAnalyzer()
-        img = self._img(rows=(20, 80))
-        self.assertEqual(a.platform_y(img, 50, 75), 80)
-        self.assertEqual(a.platform_y(img, 50, 26), 20)
+    def test_row_at_beyond_snap_radius_returns_none(self):
+        # 15px off the floor isn't jitter — it's off drawn geometry.
+        self.assertIsNone(platform_row_at(self.SEGS, 100, 95))
 
-    def test_column_without_ink_returns_none(self):
-        a = MinimapAnalyzer()
-        img = self._img()
-        img[:, 100:110] = 0  # carve an ink-free column
-        self.assertIsNone(a.platform_y(img, 105, 80))
+    def test_row_at_uncovered_column_returns_none(self):
+        self.assertIsNone(platform_row_at(self.SEGS, 5, 80))
+        self.assertTrue(platform_covered(self.SEGS, 12))
+        self.assertFalse(platform_covered(self.SEGS, 4))
 
-    def test_inset_rim_ignored(self):
-        a = MinimapAnalyzer(marker_inset=4)
-        img = _blank(100, 80)
-        img[2, :] = (228, 228, 228)   # frame rim only
-        img[50, :] = (228, 228, 228)  # real platform
-        self.assertEqual(a.platform_y(img, 50, 55), 50)
+    def test_row_at_lerps_sloped_segment(self):
+        segs = [(20, 40, 80, 60)]   # diagonal line, e.g. stairs
+        self.assertEqual(platform_row_at(segs, 50, 55), 50)
 
+    def test_span_at_returns_segment_extent(self):
+        self.assertEqual(platform_span_at(self.SEGS, 100, 81), (10, 190))
+        self.assertEqual(platform_span_at(self.SEGS, 60, 29), (40, 120))
 
-class PlatformExtentTests(unittest.TestCase):
-    def _img(self, w=200, h=120):
-        return np.zeros((h, w, 3), dtype=np.uint8)
-
-    def test_full_width_platform(self):
-        a = MinimapAnalyzer()
-        img = self._img()
-        img[80, :] = (228, 228, 228)
-        ext = a.platform_extent(img, 100, 80, max_half=150)
-        self.assertEqual(ext, (0, 199))
-
-    def test_bounded_run_stops_at_edge(self):
-        a = MinimapAnalyzer()
-        img = self._img()
-        img[80, 40:120] = (228, 228, 228)   # platform x∈[40,119]
-        self.assertEqual(a.platform_extent(img, 60, 80), (40, 119))
-
-    def test_dashed_line_bridges_gaps(self):
-        a = MinimapAnalyzer()
-        img = self._img()
-        img[80, 40:120] = (228, 228, 228)
-        img[80, 70:72] = 0                  # 2px dash gap (within gap tol)
-        ext = a.platform_extent(img, 60, 80)
-        self.assertEqual(ext, (40, 119))
-
-    def test_no_ink_near_column_returns_none(self):
-        a = MinimapAnalyzer()
-        img = self._img()
-        img[80, 40:60] = (228, 228, 228)    # platform far left of x=100
-        self.assertIsNone(a.platform_extent(img, 100, 80))
-
-    def test_max_half_bounds_wide_ink(self):
-        a = MinimapAnalyzer()
-        img = self._img()
-        img[80, :] = (228, 228, 228)
-        ext = a.platform_extent(img, 100, 80, max_half=30)
-        self.assertEqual(ext, (70, 130))
+    def test_span_at_needs_a_segment_under_the_point(self):
+        self.assertIsNone(platform_span_at(self.SEGS, 100, 50))
+        self.assertIsNone(platform_span_at(self.SEGS, 4, 80))
+        self.assertIsNone(platform_span_at([], 100, 80))
 
 
 if __name__ == "__main__":

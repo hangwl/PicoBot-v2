@@ -20,6 +20,8 @@ from ..vision.minimap import (
     MinimapAnalyzer,
     fingerprint,
     fingerprint_distance,
+    platform_row_at,
+    platform_span_at,
     structure_mask,
 )
 from ..vision.screen import ScreenGrabber
@@ -204,10 +206,18 @@ class SmartBot(BotBase):
         """Fingerprint include-mask: platform-line structure (+ ink)."""
         return structure_mask(img, self.minimap.colors)
 
-    def _ink(self):
-        """Per-map platform colour override (None = structural detect)."""
+    def _platform_segments_px(self) -> list:
+        """The map's hand-drawn platform segments, in minimap px."""
         entry = self._current_map_entry()
-        return entry.platform_color if entry is not None else None
+        if entry is None or not entry.platforms:
+            return []
+        w, h = self._region_wh()
+        if not w or not h:
+            return []
+        return [
+            (s[0] * w, s[1] * h, s[2] * w, s[3] * h)
+            for s in entry.platforms
+        ]
 
     def minimap_fingerprint(self, img=None) -> Optional[str]:
         if img is None:
@@ -511,12 +521,12 @@ class SmartBot(BotBase):
                     continue
                 cx, cy = pos
                 if not snapped:
-                    # Project the target onto platform ink — a target
-                    # recorded beneath the lowest platform is unreachable,
-                    # so snap to the nearest real floor instead.
+                    # Project the target onto the map's drawn platform —
+                    # a target recorded beneath the lowest platform is
+                    # unreachable, so snap to the nearest real floor.
                     snapped = True
-                    py = self.minimap.platform_y(
-                        img, target_x, target_y, ink=self._ink()
+                    py = platform_row_at(
+                        self._platform_segments_px(), target_x, target_y
                     )
                     if py is not None and py != target_y:
                         self.log(
@@ -828,12 +838,11 @@ class SmartBot(BotBase):
         img = self.minimap_frame()
         pos = self.minimap.player_pos(img) if img is not None else None
         self.viz["player"] = pos
-        # Platform bounds: the contiguous ink run at the anchor's row,
-        # cached per dwell; ±weave_range fallback when ink reads empty.
+        # Platform bounds: the drawn platform segment under the anchor,
+        # cached per dwell; ±weave_range fallback when none is drawn.
         if self._weave_bounds is None:
-            self._weave_bounds = (
-                self.minimap.platform_extent(img, ax, ay, ink=self._ink())
-                if img is not None else None
+            self._weave_bounds = platform_span_at(
+                self._platform_segments_px(), ax, ay
             )
         m = cfg.weave_edge_margin_px
         lo, hi = ax - cfg.weave_range_px, ax + cfg.weave_range_px

@@ -3,11 +3,12 @@
 Pure-NumPy detection over a screenshot of the game's minimap region. No
 OpenCV dependency: markers use a per-pixel color distance mask plus a 3x3
 binary erosion (implemented as shifted ANDs) to reject single pixel noise,
-mirroring the approach used by OpenCV-based bots. Platform/line detection
-is structural — thin horizontal runs with vertical contrast — because
-translucent minimaps alpha-blend the lines over the live scene and no
-single colour can match them; a configured ``colors.ink`` or a map's
-``platform_color`` overrides the structural default when set.
+mirroring the approach used by OpenCV-based bots. Platform geometry is
+hand-drawn per map (``platforms`` on the map file) — translucent minimaps
+alpha-blend platform lines over the live scene so reliably that no
+detector proved trustworthy; :func:`platform_mask`/:func:`structure_mask`
+remain only as the fingerprint include-mask, where a rough line guess is
+good enough because it's only used to *exclude* drifting background.
 
 All colors are BGR tuples and configurable because marker colors differ
 between game clients (e.g. GMS-based private servers vs. other versions).
@@ -134,6 +135,81 @@ def structure_mask(
     if ink is not None:
         mask |= color_mask(img, ink, tolerance)
     return mask
+
+
+def _seg_y(s: Tuple[float, float, float, float], x: float) -> float:
+    """y of drawn segment ``(x0, y0, x1, y1)`` at column ``x`` (lerped)."""
+    x0, y0, x1, y1 = s
+    if x1 == x0:
+        return (y0 + y1) / 2.0
+    t = (x - x0) / (x1 - x0)
+    return y0 + t * (y1 - y0)
+
+
+def platform_covered(
+    segments: Iterable[Tuple[float, float, float, float]],
+    x: float,
+    slack: float = 4.0,
+) -> bool:
+    """True when any drawn segment spans column ``x`` (±``slack`` px)."""
+    for s in segments:
+        if min(s[0], s[2]) - slack <= x <= max(s[0], s[2]) + slack:
+            return True
+    return False
+
+
+def platform_row_at(
+    segments: Iterable[Tuple[float, float, float, float]],
+    x: float,
+    y: float,
+    *,
+    max_snap: float = 8.0,
+    x_slack: float = 4.0,
+) -> Optional[int]:
+    """Row y of the drawn platform segment under column ``x`` nearest ``y``.
+
+    Platform geometry is hand-drawn on the dashboard (``platforms`` on the
+    map file) — the bot trusts drawn segments exactly. A snap is only
+    legitimate within ~one platform-spacing (``max_snap``); beyond that
+    the point is off drawn geometry and None is returned rather than
+    teleporting it to a distant line.
+    """
+    best = None
+    for s in segments:
+        if not min(s[0], s[2]) - x_slack <= x <= max(s[0], s[2]) + x_slack:
+            continue
+        py = _seg_y(s, x)
+        d = abs(py - y)
+        if d <= max_snap and (best is None or d < best[0]):
+            best = (d, py)
+    return int(round(best[1])) if best else None
+
+
+def platform_span_at(
+    segments: Iterable[Tuple[float, float, float, float]],
+    x: float,
+    y: float,
+    *,
+    band: float = 4.0,
+    x_slack: float = 3.0,
+) -> Optional[Tuple[int, int]]:
+    """(x0, x1) px extent of the drawn platform segment under ``(x, y)``.
+
+    The nearest segment (in y) spanning column ``x`` and within ``band``
+    px of ``y`` wins. None when nothing is drawn under the point —
+    callers fall back to a fixed range.
+    """
+    best = None
+    for s in segments:
+        lo, hi = min(s[0], s[2]), max(s[0], s[2])
+        if not lo - x_slack <= x <= hi + x_slack:
+            continue
+        d = abs(_seg_y(s, x) - y)
+        if d <= band and (best is None or d < best[0]):
+            best = (d, lo, hi)
+    if best is None:
+        return None
+    return int(round(best[1])), int(round(best[2]))
 
 
 def erode3(mask: np.ndarray) -> np.ndarray:
@@ -486,7 +562,7 @@ class MinimapAnalyzer:
         cx, cy, ymax = blob
         # "feet" = the icon's bottom row. The marker glyph is anchored at
         # its bottom tip — the point touching the platform — so feet-space
-        # positions sit on the platform ink rather than floating ~half an
+        # positions sit on the platform line rather than floating ~half an
         # icon above it the way a centroid does.
         return (cx + off, (ymax if feet else cy) + off)
 
@@ -512,126 +588,6 @@ class MinimapAnalyzer:
         mask = erode3(color_mask(inner, self.colors.other_player, tolerance))
         return bool(mask.any())
 
-    def platform_mask(
-        self,
-        img: np.ndarray,
-        ink: Optional[Tuple[int, int, int]] = None,
-        tolerance: int = 10,
-    ) -> np.ndarray:
-        """Effective platform mask for whatever image is passed in.
-
-        An explicit ``ink`` color (per-map override, else the configured
-        ``colors.ink``) wins — an authoritative match for clients whose
-        platforms render at a known stable color. Otherwise the
-        structural :func:`platform_mask` detects thin horizontal lines,
-        which works on any map regardless of color or alpha-blending.
-        """
-        color = ink if ink is not None else self.colors.ink
-        if color is not None:
-            return color_mask(img, color, tolerance)
-        return platform_mask(img)
-
-    def platform_y(
-        self,
-        minimap_img: np.ndarray,
-        x: float,
-        y: float,
-        *,
-        column: int = 2,
-        tolerance: int = 10,
-        max_snap: int = 8,
-        ink: Optional[Tuple[int, int, int]] = None,
-    ) -> Optional[int]:
-        """Platform surface (nearest ink row) around column ``x`` at ``y``.
-
-        Scans a narrow x-column of the minimap interior for platform/rope
-        ink and returns the ink row closest to ``y``, minimap-relative.
-        Used to project recorded or replayed targets onto real geometry:
-        a point slightly off a platform (mid-air mark, marker jitter)
-        snaps onto the floor instead of becoming an unreachable
-        coordinate.
-
-        ``max_snap`` is the honest bound: a mark should sit ~on a platform
-        line, so if the nearest ink is farther away the point is genuinely
-        off-geometry — returning None rather than teleporting it to some
-        distant row (e.g. a frame edge a color-mismatch mistook for ink).
-        """
-        inner, off = self._interior(minimap_img)
-        h, w = inner.shape[:2]
-        xi = int(round(x)) - off
-        x0 = max(0, xi - column)
-        x1 = min(w, xi + column + 1)
-        if x0 >= x1:
-            return None
-        # The mask needs the full interior: structural detection requires
-        # horizontal context a narrow column slice doesn't have.
-        mask = self.platform_mask(inner, ink, tolerance)[:, x0:x1]
-        ys = np.nonzero(mask.any(axis=1))[0]
-        if ys.size == 0:
-            return None
-        d = np.abs(ys - (y - off))
-        i = int(d.argmin())
-        if d[i] > max_snap:
-            return None
-        return int(ys[i] + off)
-
-    def platform_extent(
-        self,
-        minimap_img: np.ndarray,
-        x: float,
-        y: float,
-        *,
-        band: int = 2,
-        gap: int = 2,
-        max_half: int = 80,
-        tolerance: int = 10,
-        ink: Optional[Tuple[int, int, int]] = None,
-    ) -> Optional[Tuple[int, int]]:
-        """x-extent ``(x0, x1)`` of the platform ink run under ``(x, y)``.
-
-        Projects ink in a thin row band around ``y`` into a column mask,
-        seeds from the ink column nearest ``x``, and expands while gaps
-        stay within ``gap`` px (thin/dashed platform lines). ``max_half``
-        bounds the run so a long wall of ink can't return the whole map.
-        Returns None when no ink lies within ``gap`` of the column — the
-        point isn't on a platform line.
-        """
-        inner, off = self._interior(minimap_img)
-        h, w = inner.shape[:2]
-        xi, yi = int(round(x)) - off, int(round(y)) - off
-        y0 = max(0, yi - band)
-        y1 = min(h, yi + band + 1)
-        if y0 >= y1 or not (0 <= xi < w):
-            return None
-        cols = self.platform_mask(inner, ink, tolerance)[y0:y1].any(axis=0)
-        idx = np.nonzero(cols)[0]
-        if idx.size == 0 or int(np.abs(idx - xi).min()) > gap:
-            return None
-        seed = int(idx[np.abs(idx - xi).argmin()])
-        x0 = x1 = seed
-        miss = 0
-        while x0 > 0 and seed - x0 < max_half:
-            if cols[x0 - 1]:
-                x0 -= 1
-                miss = 0
-            elif miss < gap:
-                x0 -= 1
-                miss += 1
-            else:
-                break
-        x0 += miss  # stepped into the dead zone — walk back to ink
-        miss = 0
-        while x1 < w - 1 and x1 - seed < max_half:
-            if cols[x1 + 1]:
-                x1 += 1
-                miss = 0
-            elif miss < gap:
-                x1 += 1
-                miss += 1
-            else:
-                break
-        x1 -= miss
-        return (x0 + off, x1 + off)
 
 
 __all__ = [
@@ -644,6 +600,9 @@ __all__ = [
     "fingerprint",
     "fingerprint_distance",
     "largest_blob_centroid",
+    "platform_covered",
     "platform_mask",
+    "platform_row_at",
+    "platform_span_at",
     "structure_mask",
 ]

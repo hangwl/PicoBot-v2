@@ -209,7 +209,7 @@ class CalibrationRunnerSnapTests(unittest.TestCase):
         runner = self._runner(snap_fn=lambda img, x, y: None)
         runner.mark()
         self.assertTrue(
-            any("off-platform" in m for k, m in self.events),
+            any("off drawn platforms" in m for k, m in self.events),
             self.events,
         )
 
@@ -217,12 +217,22 @@ class CalibrationRunnerSnapTests(unittest.TestCase):
         runner = self._runner(snap_fn=lambda img, x, y: 92)
         runner.mark()
         self.assertFalse(
-            any("off-platform" in m for k, m in self.events),
+            any("off drawn platforms" in m for k, m in self.events),
+            self.events,
+        )
+
+    def test_undrawn_area_stays_quiet(self):
+        # snap_fn echoing the mark's own y means "no drawn geometry to
+        # verify against" — not a warning.
+        runner = self._runner(snap_fn=lambda img, x, y: y)
+        runner.mark()
+        self.assertFalse(
+            any("off drawn platforms" in m for k, m in self.events),
             self.events,
         )
 
     def test_finish_warns_on_unsnappable_anchor(self):
-        # No platform ink near the mark — kept as recorded, warned loudly.
+        # No drawn platform near the mark — kept as recorded, warned loudly.
         runner = self._runner(snap_fn=lambda img, x, y: None)
         runner.mark()
         entry = runner.finish("m")
@@ -230,7 +240,8 @@ class CalibrationRunnerSnapTests(unittest.TestCase):
             entry.rotation.anchors[0].y * 150, 95.0, places=1
         )
         self.assertTrue(
-            any("off-platform" in m for k, m in self.events), self.events
+            any("off drawn platforms" in m for k, m in self.events),
+            self.events,
         )
 
     def test_finish_snaps_anchor_onto_platform(self):

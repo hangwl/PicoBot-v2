@@ -347,9 +347,8 @@ class HostCommandTests(unittest.TestCase):
             )
             self.assertFalse(MapStore(tmp).get("m1").rotation.patrol)
 
-    def test_ink_pick_stores_sampled_platform_color(self):
+    def test_platform_draw_undo_clear(self):
         img = np.zeros((150, 200, 3), dtype=np.uint8)
-        img[40, 40:80] = (5, 5, 200)        # a line to click on
         feed = Mock()
         feed.minimap_img.return_value = img
         self.host._feed = feed
@@ -357,18 +356,21 @@ class HostCommandTests(unittest.TestCase):
             self.host.maps = MapStore(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.assertTrue(
-                self.host._handle_command("layout|ink|60,40|m1")
+                self.host._handle_command("layout|plat|10,40,100,40|m1")
             )
+            saved = MapStore(tmp).get("m1")
+            # Stored normalized: x over w=200, y over h=150.
             self.assertEqual(
-                MapStore(tmp).get("m1").platform_color, (5, 5, 200)
+                saved.platforms, [[0.05, round(40 / 150, 4), 0.5, round(40 / 150, 4)]]
             )
-            # Clearing removes the override -> structural detection.
-            self.assertTrue(
-                self.host._handle_command("layout|ink|clear|m1")
-            )
-            self.assertIsNone(MapStore(tmp).get("m1").platform_color)
+            self.host._handle_command("layout|plat|20,60,150,60|m1")
+            self.assertEqual(len(MapStore(tmp).get("m1").platforms), 2)
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertEqual(len(MapStore(tmp).get("m1").platforms), 1)
+            self.host._handle_command("layout|plat|clear|m1")
+            self.assertIsNone(MapStore(tmp).get("m1").platforms)
 
-    def test_ink_pick_rejects_off_map_click(self):
+    def test_platform_draw_ignores_accidental_click(self):
         img = np.zeros((150, 200, 3), dtype=np.uint8)
         feed = Mock()
         feed.minimap_img.return_value = img
@@ -376,8 +378,22 @@ class HostCommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.host.maps = MapStore(tmp)
             self.host.maps.save(MapEntry(name="m1"))
-            self.host._handle_command("layout|ink|999,999|m1")
-            self.assertIsNone(MapStore(tmp).get("m1").platform_color)
+            self.host._handle_command("layout|plat|50,50,51,51|m1")
+            self.assertIsNone(MapStore(tmp).get("m1").platforms)
+
+    def test_map_meta_reports_drawn_platforms(self):
+        entry = MapEntry(
+            name="m1", platforms=[[0.05, 0.25, 0.5, 0.25]]
+        )
+        feed = Mock()
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        self.host._resolved_map_entry = Mock(return_value=entry)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(entry)
+            meta = self.host._map_meta()
+        self.assertEqual(meta["platforms"], [(10, 38, 100, 38)])
 
     def _inked_img(self, w=200, h=150):
         """Minimap-like frame: platform rows in border/ink color."""
@@ -442,22 +458,25 @@ class HostCommandTests(unittest.TestCase):
         self.assertEqual(meta["map"], "m1")
         self.assertEqual(meta["walls"], [160])      # 0.8 * 200
 
-    def test_ink_overlay_toggle_and_mask(self):
-        img = self._inked_img()
+    def test_platform_overlay_draws_stored_segments(self):
+        # Drawn platforms ride the frame meta and annotate() renders them.
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
         feed = Mock()
-        feed.minimap = MinimapAnalyzer(region=(0, 0, 200, 150))
-        feed.minimap_img = Mock(return_value=img)
+        feed.minimap_img.return_value = img
+        feed.minimap.player_pos.return_value = None
+        feed.minimap.region = (0, 0, 200, 150)
         self.host._feed = feed
-        self.assertTrue(self.host._handle_command("dash|ink|on"))
-        snap = self.host._provide_frame("minimap")
-        self.assertTrue(snap["ink_on"])
-        self.assertTrue(snap["ink_mask"][60, 50])   # platform row tinted
-        self.assertFalse(snap["ink_mask"][61, 50])  # background untouched
+        self.host._active_map_override = "m1"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(
+                name="m1", platforms=[[0.05, 0.4, 0.5, 0.4]]
+            ))
+            snap = self.host._provide_frame("minimap")
+        self.assertEqual(snap["platforms"], [(10, 60, 100, 60)])
         out = annotate(img, snap)
-        self.assertTrue((out[60, 50] != img[60, 50]).any())
-        self.assertTrue(self.host._handle_command("dash|ink|off"))
-        snap = self.host._provide_frame("minimap")
-        self.assertNotIn("ink_mask", snap)
+        self.assertTrue((out[60, 50] != img[60, 50]).any())   # line drawn
+        self.assertTrue((out[70, 50] == img[70, 50]).all())   # rest clean
 
     def test_layout_save_verifies_fingerprint_match(self):
         # Auto path succeeds when the stored fingerprint matches live.

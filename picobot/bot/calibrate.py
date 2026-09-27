@@ -299,8 +299,9 @@ class CalibrationRunner:
     ) -> None:
         self._frame_fn = frame_fn
         self._pos_fn = pos_fn
-        # Optional: MinimapAnalyzer.platform_y — maps (img, x, y) to the
-        # nearest platform ink row, for off-platform warnings + anchor snap.
+        # Optional: maps (img, x, y) to the nearest drawn-platform row.
+        # Contract: int row = snap target; y back = no geometry to verify
+        # against; None = off a drawn platform (warns).
         self._snap_fn = snap_fn
         self._emit = event or (lambda kind, msg, data=None: None)
         self._period = 1.0 / max(1.0, hz)
@@ -369,8 +370,9 @@ class CalibrationRunner:
             return None
         self._emit("cal", f"anchor {idx} marked")
         # Off-platform sanity check: a mark taken mid-air or while the
-        # marker glitched lands off the platform ink, and the bot can't
-        # physically reach it later. Warn now so the user can re-mark.
+        # marker glitched lands off drawn geometry, and the bot can't
+        # physically reach it later. snap_fn echoes y back when no
+        # platforms are drawn near — nothing to verify, no warning.
         if (
             self._snap_fn is not None
             and self.last_img is not None
@@ -381,13 +383,13 @@ class CalibrationRunner:
                     self.last_img, self.last_pos[0], self.last_pos[1]
                 )
             except Exception:
-                py = None
+                py = self.last_pos[1]
             if py is None or abs(py - self.last_pos[1]) > 8:
                 self._emit(
                     "error",
-                    f"anchor {idx} marked off-platform — the marker may not "
-                    "be standing on a floor; re-mark while standing still "
-                    "or it will be snapped at save",
+                    f"anchor {idx} marked off drawn platforms — the marker "
+                    "may not be standing on a floor; re-mark while standing "
+                    "still, or draw the missing platform line",
                 )
         return idx
 
@@ -403,10 +405,10 @@ class CalibrationRunner:
         self.stop()
         if recorder is None:
             raise RuntimeError("no calibration in progress")
-        # Snap each anchor's y onto platform ink — marks taken mid-fall or
-        # dragged a few px below the floor are unreachable as-is. A snap
-        # only applies within a platform-spacing; farther out the mark is
-        # genuinely off-geometry and is left as recorded with a warning.
+        # Snap each anchor's y onto drawn platform segments — marks taken
+        # mid-fall or dragged a few px below the floor are unreachable
+        # as-is. snap_fn echoes y back where no geometry exists; None
+        # means off a drawn platform — left as recorded with a warning.
         if img is not None and self._snap_fn is not None:
             snapped = off = 0
             for a in recorder.anchors:
@@ -421,16 +423,15 @@ class CalibrationRunner:
                     snapped += 1
             if snapped:
                 self._emit(
-                    "cal", f"snapped {snapped} anchor(s) onto platform ink"
+                    "cal", f"snapped {snapped} anchor(s) onto platforms"
                 )
             if off:
                 self._emit(
                     "error",
-                    f"{off} anchor(s) are off-platform (no line within "
-                    "reach) — left as recorded; they may be unreachable. "
-                    "Re-mark while standing on a floor; if the dashboard "
-                    "'show platforms' tint misses your floors, use "
-                    "Pick ink to set the map's platform colour.",
+                    f"{off} anchor(s) are off drawn platforms — left as "
+                    "recorded; they may be unreachable. Re-mark while "
+                    "standing on a floor, or draw the missing platform "
+                    "line in the dashboard.",
                 )
         entry = recorder.finish(
             name,

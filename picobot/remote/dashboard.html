@@ -144,12 +144,10 @@
         <label>weave toward the next checkpoint instead of standing still</label>
       </div>
       <div class="row" style="margin-top:8px">
-        <label><input type="checkbox" id="inkChk"> show platforms</label>
-        <button id="pickInk" title="arm, then click a platform line on the Minimap view — stores that colour as the map's platform override">Pick ink</button>
-        <button id="inkClear" title="remove the map's platform colour override (back to auto line detection)">Clr</button>
-      </div>
-      <div class="row">
-        <label>tints detected platform lines; Pick ink = colour override for maps geometry misses (uses map field)</label>
+        <button id="drawPlats" title="arm, then drag along each platform on the Minimap view — click again to stop">Draw plats</button>
+        <button id="platUndo" title="remove the last drawn platform segment">Undo</button>
+        <button id="platClear" title="remove all platforms for this map">Clear</button>
+        <label>platforms are hand-drawn — the bot's walkable geometry (uses map field)</label>
       </div>
     </div>
     <div class="panel">
@@ -306,8 +304,7 @@ ws.onmessage = e => {
         p.layout === "auto" ? "warn" : "");
     if (p.patrol !== undefined)
       $("patrolChk").checked = !!p.patrol;
-    if (p.ink_on !== undefined)
-      $("inkChk").checked = !!p.ink_on;
+
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
     const now = $("now");
     now.textContent =
@@ -468,8 +465,16 @@ syncCal();
 const send = m => { if (ws.readyState === 1) ws.send(m); };
 $("startBot").onclick = () => send("bot|start");
 $("stopBot").onclick = () => send("bot|stop");
-$("vMin").onclick = () => send("dash|view|minimap");
-$("vWin").onclick = () => send("dash|view|window");
+$("vMin").onclick = () => {
+  if (drawMode) armDraw();  // region drags are window-view space
+  send("dash|view|minimap");
+};
+$("vWin").onclick = () => {
+  // Platform drags are minimap-space — disarm so a window-view drag
+  // can't record bogus coordinates.
+  if (platMode) armPlats();
+  send("dash|view|window");
+};
 $("fpsSel").onchange = () => send("dash|fps|" + $("fpsSel").value);
 const layTarget = () => {
   const n = $("layName").value.trim();
@@ -484,18 +489,17 @@ $("wallF").onclick = () => send("layout|wall|floor" + layTarget());
 $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 $("patrolChk").onchange = () =>
   send("layout|patrol|" + ($("patrolChk").checked ? "on" : "off") + layTarget());
-$("inkChk").onchange = () =>
-  send("dash|ink|" + ($("inkChk").checked ? "on" : "off"));
-
-// --- Click-to-pick platform colour on the Minimap view -----------------
-let pickMode = false;
-function armPick() {
-  pickMode = !pickMode;
-  if (pickMode) send("dash|view|minimap");
-  $("pickInk").className = pickMode ? "armed" : "";
+// --- Drag-to-draw platforms on the Minimap view ------------------------
+let platMode = false, platStart = null;
+function armPlats() {
+  platMode = !platMode;
+  platStart = null;
+  if (platMode) send("dash|view|minimap");
+  $("drawPlats").className = platMode ? "armed" : "";
 }
-$("pickInk").onclick = () => armPick();
-$("inkClear").onclick = () => send("layout|ink|clear" + layTarget());
+$("drawPlats").onclick = () => armPlats();
+$("platUndo").onclick = () => send("layout|plat|undo" + layTarget());
+$("platClear").onclick = () => send("layout|plat|clear" + layTarget());
 
 // --- Drag-to-draw regions on the Window view ---------------------------
 let drawMode = null, drawStart = null, lastImg = null;
@@ -516,11 +520,28 @@ const viewXY = e => {
   ];
 };
 viewEl.addEventListener("pointerdown", e => {
+  if (platMode) {
+    platStart = viewXY(e);
+    viewEl.setPointerCapture(e.pointerId);
+    return;
+  }
   if (!drawMode) return;
   drawStart = viewXY(e);
   viewEl.setPointerCapture(e.pointerId);
 });
 viewEl.addEventListener("pointermove", e => {
+  if (platMode && platStart && lastImg) {
+    const ctx = viewEl.getContext("2d");
+    ctx.drawImage(lastImg, 0, 0);
+    const [x, y] = viewXY(e);
+    ctx.strokeStyle = "#28c8ff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(platStart[0], platStart[1]);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    return;
+  }
   if (!drawStart || !lastImg) return;
   const ctx = viewEl.getContext("2d");
   ctx.drawImage(lastImg, 0, 0);
@@ -530,11 +551,13 @@ viewEl.addEventListener("pointermove", e => {
   ctx.strokeRect(drawStart[0], drawStart[1], x - drawStart[0], y - drawStart[1]);
 });
 viewEl.addEventListener("pointerup", e => {
-  if (pickMode) {
-    const [x, y] = viewXY(e);
-    send(`layout|ink|${Math.round(x)},${Math.round(y)}` + layTarget());
-    armPick();  // toggles off
-    return;
+  if (platMode) {
+    if (platStart) {
+      const [x, y] = viewXY(e);
+      send(`layout|plat|${Math.round(platStart[0])},${Math.round(platStart[1])},${Math.round(x)},${Math.round(y)}` + layTarget());
+      platStart = null;
+    }
+    return;  // stays armed — draw the next platform
   }
   if (!drawStart) return;
   const [ex, ey] = viewXY(e);

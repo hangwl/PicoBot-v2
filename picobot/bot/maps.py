@@ -12,6 +12,7 @@ File shape::
       "map_name": "Limina : 1-5 East",   // optional label (legacy OCR field)
       "fingerprint": "<hex from vision.minimap.fingerprint>",
       "minimap_region": [x, y, w, h],    // remembered layout (optional)
+      "platforms": [[x0,y0,x1,y1], ...], // drawn platform lines (optional)
       "rotation": { ...Rotation.to_dict()... },
       "skills":   { "fountain": {"key": "d", "cooldown": 57, "kind": "summon"} }
     }
@@ -52,11 +53,11 @@ class MapEntry:
     # whose play area doesn't span the minimap edge-to-edge. "floor" is
     # a normalized y: at/below it, no downward movement is attempted.
     walls: Optional[dict] = None
-    # Optional platform-line BGR colour override (e.g. picked off the
-    # dashboard). When set, platform detection colour-matches it instead
-    # of the default structural line detection — the escape hatch for
-    # maps whose minimap art fools geometry.
-    platform_color: Optional[tuple] = None
+    # Hand-drawn platform segments, normalized [[x0,y0,x1,y1], ...] —
+    # the authoritative walkable geometry: auto-detection proved too
+    # fragile on translucent minimaps, so platforms are drawn on the
+    # dashboard (drag along each line on the minimap view).
+    platforms: Optional[list] = None
     path: Optional[Path] = None
 
     def to_dict(self) -> dict:
@@ -68,8 +69,9 @@ class MapEntry:
                 list(self.minimap_region) if self.minimap_region else None
             ),
             "walls": dict(self.walls) if self.walls else None,
-            "platform_color": (
-                list(self.platform_color) if self.platform_color else None
+            "platforms": (
+                [list(s) for s in self.platforms]
+                if self.platforms else None
             ),
             "rotation": self.rotation.to_dict(),
             "skills": {n: s.to_dict() for n, s in self.skills.items()},
@@ -99,11 +101,20 @@ class MapEntry:
                 if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.5:
                     walls[side] = float(v)
             walls = walls or None
-        pcolor = data.get("platform_color")
-        if not isinstance(pcolor, (list, tuple)) or len(pcolor) != 3:
-            pcolor = None
-        else:
-            pcolor = tuple(int(v) for v in pcolor)
+        platforms = None
+        raw_plats = data.get("platforms")
+        if isinstance(raw_plats, list):
+            platforms = []
+            for s in raw_plats:
+                if not isinstance(s, (list, tuple)) or len(s) != 4:
+                    continue
+                try:
+                    seg = [float(v) for v in s]
+                except (TypeError, ValueError):
+                    continue
+                if all(0.0 <= v <= 1.5 for v in seg):
+                    platforms.append(seg)
+            platforms = platforms or None
         return cls(
             name=str(data["name"]),
             rotation=Rotation.from_dict(data.get("rotation")),
@@ -112,7 +123,7 @@ class MapEntry:
             map_name=data.get("map_name"),
             minimap_region=region,
             walls=walls,
-            platform_color=pcolor,
+            platforms=platforms,
             path=path,
         )
 

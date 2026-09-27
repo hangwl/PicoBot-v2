@@ -120,9 +120,10 @@ you verified in the dashboard carries over to the bot at Start:
 - `wait_on_arrival`: seconds the bot waits at an anchor for a skill's cooldown
   before giving up — players wait a beat for their summon too.
 - During dwells the bot **weaves**: it flash-hops (or walks) back and
-  forth across the anchor's platform — bounds detected from platform ink,
-  falling back to `weave_range_px` — pressing the attack *after* the
-  flash-jump re-press fires (an earlier press eats the FJ input window).
+  forth across the anchor's platform — bounds come from the map's
+  hand-drawn platform segment, falling back to `weave_range_px` when
+  nothing is drawn — pressing the attack *after* the flash-jump re-press
+  fires (an earlier press eats the FJ input window).
   `wall_zone_px` forces an inward facing near the map's left/right edges
   so weave can't wall-bang. Set `dwell_weave: false` to stand still.
 - **Per-map walls**: on maps whose play area doesn't span the minimap,
@@ -132,21 +133,22 @@ you verified in the dashboard carries over to the bot at Start:
   **Floor** does the same vertically: stand on the bottom platform and
   the bot stops attempting down-jumps at/below it. **Clear** removes
   all boundaries; the map field targets a different map.
-- **show platforms** (View panel): tints the pixels the bot reads as
-  platform lines — verify the minimap geometry the bot actually sees.
-  Detection is **structural**: thin horizontal runs of uniform colour
-  with contrast on both sides — no colour config needed, which matters
-  on translucent minimaps where platform lines alpha-blend with the live
-  scene and no single colour can match them. If a map's art defeats
-  geometry (e.g. long horizontal scenery edges), **Pick ink** samples a
-  clicked platform pixel into that map's `platform_color` override —
-  colour-matching then replaces structural detection for that map;
-  **Clr** removes it.
+- **Platforms are hand-drawn, not detected.** Minimap platform lines are
+  alpha-blended over the live scene, so neither colour matching nor
+  structural detection proved trustworthy — instead, click **Draw plats**
+  in the View panel and drag a segment along each platform line on the
+  minimap view (the mode stays armed; drag once per platform). Segments
+  are stored on the map normalized to the minimap size, rendered back as
+  cyan lines so you can verify them, and drive anchor snapping, nav
+  target projection, weave bounds, and Floor placement. **Undo** pops the
+  last segment, **Clear** removes all; the map field targets a different
+  map. Maps without drawn platforms fall back to `weave_range_px` and
+  unsnapped targets — nothing breaks, geometry just isn't verified.
 - Player positions are **feet-anchored**: `player_pos` reports the
   marker icon's bottom row — the point touching the platform — so
-  recorded anchors and the Floor boundary land on the platform ink
+  recorded anchors and the Floor boundary land on the platform line
   rather than floating at icon-center height. (Floor placement also
-  snaps to the nearest platform line.)
+  snaps to the nearest drawn platform segment.)
 - **Patrol mode** (`"patrol": true` on a map's rotation, or the
   **patrol anchors** checkbox): anchors become checkpoints — instead of
   parking at one, the dwell weaves *toward the next anchor* and advances
@@ -218,14 +220,15 @@ Notes:
   before marker (player/rune/other-player) detection — frame and panel-chrome
   pixels can't register as markers, and marker positions are the centroid of
   the largest matching blob, not a global mean.
-- Navigation targets are snapped onto the nearest platform ink row before
-  travel, and vertical jumps that produce no progress twice in a row end
+- Navigation targets are projected onto the nearest drawn platform
+  segment before travel (within ~8px; beyond that the target is left
+  alone), and vertical jumps that produce no progress twice in a row end
   the leg (aligned in x = "arrived"; misaligned = abort) — a target
   recorded beneath the lowest platform can no longer loop the bot forever.
-- `minimap_colors.ink` is an optional *global* platform-line colour override
-  — the per-map `platform_color` (Pick ink) or structural detection are the
-  normal paths. Fingerprints hash structural platform lines (+ configured
-  ink) only, so translucent backgrounds can't drift map matching.
+- `minimap_colors.ink` is an optional *global* platform-line colour that
+  only feeds the map **fingerprint** mask — fingerprints hash detected
+  line structure (plus configured ink) so translucent backgrounds can't
+  drift map matching. It plays no role in movement/platform geometry.
 - Safety: losing window focus, a rune marker, other players on the minimap, or
   an unexpected map change mid-leg pauses the bot (and fires a Telegram alert
   if configured). Solve the check via the dashboard's remote input pad.
