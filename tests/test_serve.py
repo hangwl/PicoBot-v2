@@ -115,9 +115,11 @@ class PanelAssemblyTests(unittest.TestCase):
         map_img[10, 5] = (1, 2, 3)
         # Map frame below the divider, narrower + right-shifted vs band.
         comp, dx, dy = assemble_panel(band, map_img, (10, 75, 200, 100))
-        # y0 = title top - pad (23); map at dy=52; right edge reaches
-        # the title's end + pad.
-        self.assertEqual(comp.shape, (152, 200, 3))
+        # y0 = title top - pad (23); map at dy=52; the right edge
+        # reaches the divider's end (250+pad) — past both the map's
+        # 210 and the detected text's end, so a faded title tail
+        # can't be clipped mid-glyph.
+        self.assertEqual(comp.shape, (152, 246, 3))
         self.assertEqual((dx, dy), (0, 52))
         self.assertTrue((comp[62, 5] == (1, 2, 3)).all())  # map px moved
         # Separator line (cyan) at the divider row (70-23=47).

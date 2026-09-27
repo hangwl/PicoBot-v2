@@ -152,7 +152,7 @@ def assemble_panel(
         lines, div = title_scan(band)
         lines = [(a + bx, c + by, e + bx, f + by) for a, c, e, f in lines]
         if div is not None:
-            div += by
+            div = (div[0] + by, div[1] + bx, div[2] + bx)
     if lines:
         tx0 = min(b[0] for b in lines)
         ty0 = min(b[1] for b in lines)
@@ -160,6 +160,11 @@ def assemble_panel(
         ty1 = max(b[3] for b in lines)
         x0 = max(0, min(rx, tx0 - pad))
         x1 = max(rx + rw, tx1 + pad)
+        if div is not None:
+            # The game fades/clip the title at the panel edge — the
+            # divider's end IS that edge, so reach it even when the
+            # faded tail fell below the near-white threshold.
+            x1 = max(x1, div[2] + pad)
         y0 = max(0, min(ry, ty0 - pad))
     else:
         tx0 = ty0 = tx1 = ty1 = 0
@@ -186,8 +191,8 @@ def assemble_panel(
     # Name|map boundary: the panel's own divider row when it was found
     # inside the canvas, else the bottom of the title zone.
     sep_win = None
-    if div is not None and y0 <= div <= y1:
-        sep_win = div
+    if div is not None and y0 <= div[0] <= y1:
+        sep_win = div[0]
     elif lines:
         sep_win = ty1 + pad
     if sep_win is not None:

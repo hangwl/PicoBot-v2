@@ -115,13 +115,17 @@ def title_scan(
     col_gap: int = 4,
     icon_fill: float = 0.5,
     divider_run: int = 120,
+    tail_thresh: int = 80,
+    tail_gap: int = 12,
 ) -> tuple:
     """Segment the header band -> ``(lines, divider_y)``.
 
     ``lines`` are ``[(x0, y0, x1, y1), ...]`` text-line boxes (band
-    coords), top→down. ``divider_y`` is the row of the panel's solid
-    separator — the boundary between the map-name zone and the map —
-    or ``None`` when no divider was found.
+    coords), top→down. ``divider`` is ``(y, x0, x1)`` — the row and
+    x-extent of the panel's solid separator, i.e. the panel's own
+    edges — or ``None`` when no divider was found. Its right edge is
+    where the game clips/fades the title, so callers can extend the
+    title zone to it and recover characters the near-white test dropped.
 
     - Near-white mask: the map title renders in white; the toolbar icons
       and the colored map icon mostly fail the all-channels test.
@@ -148,9 +152,13 @@ def title_scan(
         row = white[y]
         # longest contiguous True run
         idx = np.flatnonzero(np.diff(np.concatenate(([False], row, [False]))))
-        if len(idx) >= 2 and (idx[1::2] - idx[0::2]).max() >= divider_run:
-            div = cut = y
-            break
+        if len(idx) >= 2:
+            lens = idx[1::2] - idx[0::2]
+            k = int(lens.argmax())
+            if lens[k] >= divider_run:
+                div = (y, int(idx[2 * k]), int(idx[2 * k + 1]))
+                cut = y
+                break
     white = white[:cut]
     if white.size == 0:
         return [], div
@@ -192,6 +200,21 @@ def title_scan(
         keep = merged  # nothing looked like an icon — take everything
     x0 = min(a for a, _ in keep)
     x1 = max(b for _, b in keep)
+    # Faded tail: clients that clip overflowing titles often render the
+    # tail with a fade-out, dropping those glyphs below ``white_thresh``
+    # and truncating the detected extent mid-word. Keep extending while
+    # dimmer-but-bright columns appear inside the text rows — gaps
+    # beyond ``tail_gap`` dark columns end the title.
+    dim = band.min(axis=2) > tail_thresh
+    tail_cols = np.flatnonzero(
+        dim[groups[0][0] : groups[-1][1] + 1].any(axis=0)
+    )
+    for x in tail_cols:
+        if x < x1:
+            continue
+        if x - x1 > tail_gap:
+            break
+        x1 = x
     x0 = max(0, x0 - 2)
     x1 = min(w, x1 + 2)
     lines = [
@@ -206,15 +229,23 @@ def title_lines(band: np.ndarray, **kw) -> list:
 
 
 def title_crop(band: np.ndarray, **kw) -> Optional[np.ndarray]:
-    """One tight crop covering all detected title lines, else None."""
-    lines = title_lines(band, **kw)
+    """One tight crop covering all detected title lines, else None.
+
+    The right edge extends to the divider's end — the game fades the
+    title out at the panel edge, so the tail's glyphs can drop below
+    the near-white threshold mid-word. RapidOCR is a CNN and can still
+    read the faded tail; leaving it out silently truncates long names.
+    """
+    lines, div = title_scan(band, **kw)
     if not lines:
         return None
     y0 = min(b[1] for b in lines)
     y1 = max(b[3] for b in lines)
     x0 = min(b[0] for b in lines)
     x1 = max(b[2] for b in lines)
-    return band[y0:y1, x0:x1]
+    if div is not None:
+        x1 = max(x1, div[2])
+    return band[y0:y1, x0 : min(x1, band.shape[1])]
 
 
 class MapNameReader:
