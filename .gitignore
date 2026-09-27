@@ -39,3 +39,6 @@ env/
 .vscode/
 # Debug frame captures
 /debug/
+
+# Local map data
+/maps/
