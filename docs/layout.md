@@ -54,16 +54,12 @@ truth, no per-section map names.
 - **Draw plats** — drag a segment along each platform line on the Panel
   view; stays armed for successive drags. **Undo** pops, **Clear** wipes.
   Platforms are the *authoritative* walkable geometry: anchor snapping,
-  nav target projection (~8px snap radius), weave bounds, and Floor
-  placement all consult them.
+  nav target projection (~8px snap radius) and weave bounds consult
+  them.
 - **L wall / R wall** — stand at a wall, press the button: stores the
   boundary (normalized x) and shades the blocked side red. Overrides
   `wall_zone_px` on that side. A lighter line shows the `wall_pad_px`
   buffer — the bot never goes past it.
-- **Floor** — stand on the lowest platform and click: the line is placed
-  just below that platform (so it stays walkable) and everything below
-  is forbidden; the lighter padded line shows the effective limit (see
-  [bot-behavior.md](bot-behavior.md#wall-zones)).
 - **Save layout / Forget / Re-detect** — commit the located region to
   the map file (backfilling `map_name` from the current title when it's
   missing), drop it, or force re-detection. With no map named, writes

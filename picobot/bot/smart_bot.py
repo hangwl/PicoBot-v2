@@ -460,13 +460,16 @@ class SmartBot(BotBase):
         entry = self._current_map_entry()
         return entry.walls if entry is not None else None
 
-    def _floor_px(self) -> Optional[int]:
-        """Floor-zone top in px, padded upward by ``wall_pad_px`` — the bot
-        treats it as the bottom of the map. None when no floor is set."""
-        walls = self._map_walls()
-        if walls and walls.get("floor") is not None:
-            return int(round(self._ry(walls["floor"]) - self.config.wall_pad_px))
-        return None
+    def _walk_span(self, x: float, y: float):
+        """Span travel flashes may use: the graph's clipped platform under
+        the player (wall zones respected), else the raw drawing."""
+        graph = self._nav_graph()
+        if graph is not None:
+            i = graph.locate(x, y)
+            if i is not None:
+                p = graph.platforms[i]
+                return (p.x0, p.x1)
+        return platform_span_at(self._platform_segments_px(), x, y)
 
     def _wall_limits(self) -> Tuple[float, float]:
         """(left, right) x the bot must stay between: per-map walls (else
@@ -484,11 +487,6 @@ class SmartBot(BotBase):
     def down_jump(self, img=None) -> None:
         if not self.is_window_focused():
             return
-        floor = self._floor_px()
-        if floor is not None:
-            pos = self.player_pos(img)
-            if pos is not None and pos[1] >= floor - 2:
-                return  # bottom of the map — nothing to drop through
         self.hid.key_down("down")
         self.hid.press(self.config.jump_key)
         self.sleep(human_between(0.1, 0.07, 0.14))
@@ -654,16 +652,13 @@ class SmartBot(BotBase):
                     self.log("Navigation target reached")
                     self.viz["target"] = None
                     return True
-                span = (
-                    platform_span_at(self._platform_segments_px(), cx, cy)
-                    if flash_ok else None
-                )
+                span = self._walk_span(cx, cy) if flash_ok else None
                 room = (
                     span is None
                     or (span[1] - cx > self._hop_px if dx > 0
                         else cx - span[0] > self._hop_px)
                 )
-                if flash_ok and room and abs(dx) > self.config.walk_band_px:
+                if flash_ok and room and abs(dx) > self._hop_px:
                     sync_dir(None)
                     hop_from = cx
                     self._flash_weave("right" if dx > 0 else "left")
@@ -671,6 +666,24 @@ class SmartBot(BotBase):
                     last = pos
                     if stuck >= 4:
                         self.log("Flash hops aren't moving — walking instead")
+                        flash_ok = False
+                        stuck = 0
+                    continue
+                if flash_ok and abs(dx) > self.config.walk_band_px:
+                    # One hop away: a plain jump closes it without the
+                    # overshoot that ping-pongs over the target.
+                    sync_dir(None)
+                    d = "right" if dx > 0 else "left"
+                    self.hid.key_down(d)
+                    try:
+                        self.hid.press(self.config.jump_key)
+                        self._after_flash(0.4)
+                    finally:
+                        self.hid.key_up(d)
+                    stuck = stuck + 1 if last == pos else 0
+                    last = pos
+                    if stuck >= 4:
+                        self.log("Approach hops aren't moving — walking instead")
                         flash_ok = False
                         stuck = 0
                     continue
@@ -705,11 +718,6 @@ class SmartBot(BotBase):
                         vert_ref = cy
                         last_vert_jump = now
                     elif dy > threshold and now - last_vert_jump >= self.config.vert_jump_interval:
-                        floor = self._floor_px()
-                        if floor is not None and cy >= floor - 2:
-                            # Bottom of the map — the target is below the
-                            # lowest platform; verdict now, no keypresses.
-                            return vert_stuck("descend")
                         vert_fails = (
                             vert_fails + 1
                             if vert_ref is not None and cy <= vert_ref + 1

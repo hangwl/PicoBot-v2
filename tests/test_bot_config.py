@@ -7,7 +7,7 @@ from picobot.bot.timing import human_delay, human_hold, jittered
 class BotConfigTests(unittest.TestCase):
     def test_defaults(self):
         cfg = BotConfig()
-        self.assertEqual(cfg.wall_pad_px, 6.0)
+        self.assertEqual(cfg.wall_pad_px, 3.0)
         self.assertFalse(hasattr(cfg, "enable_random_wander"))
         self.assertTrue(cfg.stop_when_rune_appears)
         self.assertFalse(cfg.pause_on_lie_detector)

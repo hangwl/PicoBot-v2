@@ -113,9 +113,6 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
         _zone(out, 0, 0, int(walls["left"]), h, zone)          # block left
     if walls.get("right") is not None:
         _zone(out, int(walls["right"]), 0, w, h, zone)         # block right
-    floor = meta.get("floor")
-    if floor is not None:
-        _zone(out, 0, int(floor), w, h, zone)                  # below floor
     pad = meta.get("wall_pad") or 0
     if pad:                                                    # padded limits
         soft = (140, 140, 255)
@@ -123,8 +120,6 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
             _line(out, walls["left"] + pad, 0, walls["left"] + pad, h - 1, soft)
         if walls.get("right") is not None:
             _line(out, walls["right"] - pad, 0, walls["right"] - pad, h - 1, soft)
-        if floor is not None:
-            _line(out, 0, floor - pad, w - 1, floor - pad, soft)
     for seg in meta.get("platforms") or []:
         _line(out, *seg, (255, 200, 40))                  # cyan platforms
     for kind, *seg in meta.get("nav_edges") or []:

@@ -129,19 +129,20 @@ the bot keeps moving.
 
 ## Wall zones
 
-Drawn walls (L/R) and the floor are forbidden zones, each extended by
-`wall_pad_px` (default 6) of buffer: the left zone grows rightward, the
-right zone leftward, the floor zone upward. They bind everything:
+Drawn walls (L/R) are forbidden zones, each extended by `wall_pad_px`
+(default 3) of buffer: the left zone grows rightward, the right zone
+leftward. They bind everything:
 
-- The movement graph clips platforms to the padded limits, closes
-  clipped ends (no drop or gap move leaves toward a wall), and removes
-  platforms inside the padded floor band — so routes and anchors inside
-  a zone are unreachable (logged) rather than attempted.
+- The movement graph clips platforms to the padded limits and closes
+  clipped ends (no drop or gap move leaves toward a wall) — routes and
+  anchors inside a zone are unreachable (logged) rather than attempted.
+- Travel flashes measure room against the **clipped** platform, so a hop
+  never carries into a zone; if a flash overshoot lands inside one
+  anyway, the patrol walks back out toward the graph.
 - Weave hops turn before a hop could land in a zone.
 - Without per-map walls, `wall_zone_px` edge margins apply (also padded).
-- Note: a floor placed *on* the lowest platform puts that platform in
-  the padded band — place the floor below the lowest platform you want
-  used, or lower `wall_pad_px`.
+- There is no floor boundary: down-jumps only exist toward drawn
+  platforms below, so the lowest drawn platform is the map's bottom.
 
 ## Safety
 

@@ -40,9 +40,12 @@ class SimBot:
         self.moves = []
         self.log_lines = []
         self.slept = 0.0
-        self.config = SimpleNamespace(nav_threshold_px=4, jump_key="space")
+        self.config = SimpleNamespace(
+            nav_threshold_px=4, jump_key="space", walk_band_px=8,
+            wall_pad_px=3.0)
         self.viz = {}
-        self.minimap = SimpleNamespace(player_pos=lambda img: self.pos)
+        self.minimap = SimpleNamespace(
+            player_pos=lambda img: self.pos, region=(0, 0, 200, 150))
         self.downs, self.ups = [], []
         self.hid = SimpleNamespace(
             key_down=lambda k: (self.downs.append(k), self._down(k)) and None,
@@ -239,6 +242,14 @@ class NavigatorTests(unittest.TestCase):
         self.assertFalse(self._nav(bot).go((170, 84), max_failures=1, max_steps=3))
         self.assertLess(time.monotonic() - t0, 8)      # failed fast
         self.assertIn("right", bot.ups)                # direction released
+
+    def test_rope_fires_without_precise_stop(self):
+        # The takeoff is approached to within walk_band, then the rope
+        # fires — no exact stop, no flash ping-pong over the takeoff.
+        bot = SimBot([FLOOR, (60, 70, 100, 70)], (20, 100))
+        nav = self._nav(bot)
+        self.assertTrue(nav.go((80, 70)))
+        self.assertEqual(bot.moves, ["rope_lift"])
 
     def test_rope_chain_replans_when_lift_cools(self):
         bot = SimBot([FLOOR, MID, TOP], (10, 100))

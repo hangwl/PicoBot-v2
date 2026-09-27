@@ -64,7 +64,7 @@ class BotConfig:
     weave_range_px: int = 24              # fallback half-width around the anchor
     weave_edge_margin_px: int = 4         # stay this far inside platform bounds
     wall_zone_px: int = 16                # force inward dir inside this edge zone
-    wall_pad_px: float = 6.0              # buffer beyond each drawn wall/floor zone
+    wall_pad_px: float = 3.0              # buffer beyond each drawn wall zone
 
     # -- Vision ----------------------------------------------------------------
     minimap_colors: MinimapColors = field(default_factory=MinimapColors)

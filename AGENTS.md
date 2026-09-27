@@ -36,7 +36,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
   a trigger — translucent UI defeats it.
 - **OCR is request-driven** (startup, arrival, pin, title band) and runs
   on the `TitleOCR` worker — never per-frame, never on the frame thread.
-- **Manual geometry is authoritative**: drawn platforms/walls/floor drive
+- **Manual geometry is authoritative**: drawn platforms/walls drive
   navigation. No line auto-detection.
 - **Panel region**: found by `find_frame` (sizes differ per map); dropped
   on arrival unless `config`-pinned; relocated only when a frame is
@@ -55,9 +55,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
   No wander state, dwell timers, breathers, or stationary attack loops.
   **Every flash move weaves attacks; no attack outside a flash move** in
   moving paths.
-- **Wall zones bind all movement** (graph clipping, weave, floor), each
-  padded by `wall_pad_px`. Rope lift is preferred for rises when ready
-  and grabs the **highest** platform within `nav_rope_lift_px`.
+- **Wall zones bind all movement** (graph clipping, weave, travel
+  room), each padded by `wall_pad_px`. There is no floor boundary — the
+  lowest drawn platform is the bottom. Rope lift is preferred for rises
+  when ready, grabs the **highest** platform within `nav_rope_lift_px`,
+  and fires without a precise stop (mid-air works).
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Landings are scored tolerantly (platform span + row slack) — a

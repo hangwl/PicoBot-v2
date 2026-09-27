@@ -15,7 +15,6 @@ move to another platform is possible. Edges:
 
 Wall zones (``Bounds``, already padded) clip platforms: nothing is
 planned inside a zone, and clipped ends are closed — no drop or gap move
-leaves toward the wall. Platforms in the padded floor band are removed.
 
 Whether a jump-type edge exists comes from the :class:`ReachModel`
 envelopes (learned from observed moves); edges beyond the proven
@@ -48,11 +47,10 @@ LEVEL_PX = 4.0          # max rise for a "horizontal" gap move
 
 @dataclass(frozen=True)
 class Bounds:
-    """Walkable area: x in [left, right], y above ``floor`` (None = open)."""
+    """Walkable x range: [left, right] (None = open on that side)."""
 
     left: Optional[float] = None
     right: Optional[float] = None
-    floor: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -86,10 +84,7 @@ class Platform:
             x1, open1 = b.right, False
         if x1 - x0 < 1.0:
             return None
-        y0, y1 = self.y_at(x0), self.y_at(x1)
-        if b.floor is not None and max(y0, y1) >= b.floor:
-            return None
-        return Platform(x0, y0, x1, y1, open0, open1)
+        return Platform(x0, self.y_at(x0), x1, self.y_at(x1), open0, open1)
 
 
 @dataclass(frozen=True)
@@ -396,15 +391,13 @@ def _merge_walks(legs: List[Leg]) -> List[Leg]:
 
 def wall_bounds(walls: Optional[dict], w: float, h: float, pad: float) -> Optional[Bounds]:
     """Padded walkable bounds from a map's normalized ``walls``: the left
-    zone grows ``pad`` px rightward, the right zone leftward, the floor
-    zone upward."""
+    zone grows ``pad`` px rightward, the right zone leftward."""
     if not walls:
         return None
-    left, right, floor = walls.get("left"), walls.get("right"), walls.get("floor")
+    left, right = walls.get("left"), walls.get("right")
     return Bounds(
         None if left is None else left * w + pad,
         None if right is None else right * w - pad,
-        None if floor is None else floor * h - pad,
     )
 
 

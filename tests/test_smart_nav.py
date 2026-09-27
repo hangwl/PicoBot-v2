@@ -162,69 +162,6 @@ class VerticalStuckTests(unittest.TestCase):
         self.assertEqual(bot.up_jump.call_count, 2)
 
 
-class FloorZoneTests(unittest.TestCase):
-    """A per-map floor (walls.floor) suppresses downward movement at the
-    bottom platform — no Down-jumps against solid ground."""
-
-    def test_nav_verdict_without_keypresses_at_floor(self):
-        # floor y = 0.8*150 = 120; player pinned at 120, target at 140.
-        from picobot.bot.maps import MapEntry
-
-        bot = _bot([(20, 120)] * 10, target=(20, 140))
-        bot._map = MapEntry(name="m", walls={"floor": 0.8})
-        bot.maps = Mock(**{"get.return_value": None})
-        with patch("time.time", side_effect=iter(range(1, 10000))):
-            self.assertTrue(_drive(bot))     # aligned → accept
-        bot.down_jump.assert_not_called()
-
-    def test_nav_floor_aborts_when_misaligned(self):
-        from picobot.bot.maps import MapEntry
-
-        bot = _bot([(20, 120)] * 10, target=(60, 140))
-        bot._map = MapEntry(name="m", walls={"floor": 0.8})
-        bot.maps = Mock(**{"get.return_value": None})
-        with patch("time.time", side_effect=iter(range(1, 10000))):
-            self.assertFalse(_drive(bot))
-        bot.down_jump.assert_not_called()
-
-    def test_down_jump_skipped_at_floor(self):
-        from picobot.bot.maps import MapEntry
-
-        bot = SmartBot.__new__(SmartBot)
-        bot._nav_cache = GraphCache()
-        bot.config = BotConfig()
-        bot.config.jump_key = "space"
-        bot.hid = FakeHid()
-        bot.is_window_focused = Mock(return_value=True)
-        bot.sleep = Mock(return_value=False)
-        bot._map = MapEntry(name="m", walls={"floor": 0.8})
-        bot.maps = Mock(**{"get.return_value": None})
-        bot.minimap = Mock()
-        bot.minimap.region = (0, 0, 200, 150)
-        bot.player_pos = Mock(return_value=(50, 122))  # at/below floor
-        bot.down_jump()
-        self.assertEqual(bot.hid.presses, [])
-        # Above the floor — drops normally.
-        bot.player_pos = Mock(return_value=(50, 60))
-        bot.down_jump()
-        self.assertEqual(bot.hid.presses, ["space"])
-
-    def test_down_jump_normal_without_floor(self):
-        bot = SmartBot.__new__(SmartBot)
-        bot._nav_cache = GraphCache()
-        bot.config = BotConfig()
-        bot.config.jump_key = "space"
-        bot.hid = FakeHid()
-        bot.is_window_focused = Mock(return_value=True)
-        bot.sleep = Mock(return_value=False)
-        bot._map = None
-        bot.minimap = Mock()
-        bot.minimap.region = (0, 0, 200, 150)
-        bot.player_pos = Mock(return_value=(50, 140))
-        bot.down_jump()
-        self.assertEqual(bot.hid.presses, ["space"])
-
-
 class RopeLiftCooldownTests(unittest.TestCase):
     """up_jump uses rope lift when ready and never waits on its cooldown —
     it up-flashes instead."""
@@ -357,6 +294,19 @@ class MovementRuleTests(unittest.TestCase):
         self.assertIn("right", bot.hid.downs)       # walked the last stretch
         self.assertGreater(bot._hop_px, 13.0)       # learned ~20px hops
 
+    def test_one_hop_away_plain_jumps_instead_of_flashing(self):
+        # 10px out: a full flash weave overshoots and ping-pongs over the
+        # target — a plain jump closes the last hop.
+        bot = _bot([(10, 50), (30, 50), (50, 50), (70, 50), (74, 50),
+                    (80, 50)], target=(80, 50))
+        bot.config.flash_jump_enabled = True
+        bot._flash_weave = Mock()
+        presses = []
+        bot.hid.press = lambda k, h=None: presses.append(k) or True
+        self.assertTrue(bot.move_to_point(80, 50, style="mixed"))
+        self.assertGreaterEqual(bot._flash_weave.call_count, 2)  # long travel
+        self.assertIn(bot.config.jump_key, presses)              # approach jump
+
     def test_walk_style_never_flashes(self):
         bot = _bot([(10, 50), (40, 50), (80, 50)], target=(80, 50))
         bot.config.flash_jump_enabled = True
@@ -456,14 +406,6 @@ class FlashAttackTests(unittest.TestCase):
         with patch("random.random", return_value=0.5):
             bot._weave_attack()
         self.assertEqual(bot._weave_dir, "right")
-
-    def test_floor_px_is_padded_upward(self):
-        from picobot.bot.maps import MapEntry
-
-        bot = _weave_bot((50, 50))
-        bot._map = MapEntry(name="m", walls={"floor": 0.8})
-        self.assertEqual(bot._floor_px(), 114)          # 0.8*150 - 6
-
 
 class RoamFallbackTests(unittest.TestCase):
     """No anchors: keep moving around where grinding started instead of

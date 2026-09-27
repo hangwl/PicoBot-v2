@@ -119,9 +119,9 @@ class NavGraphTests(unittest.TestCase):
         self.assertEqual(via, {True, False})
 
     def test_wall_bounds_are_padded_outward_from_zones(self):
-        b = wall_bounds({"left": 0.1, "right": 0.9, "floor": 0.8}, 200, 150, 6)
-        self.assertEqual((b.left, b.right, b.floor), (26.0, 174.0, 114.0))
-        self.assertIsNone(wall_bounds(None, 200, 150, 6))
+        b = wall_bounds({"left": 0.1, "right": 0.9}, 200, 150, 3)
+        self.assertEqual((b.left, b.right), (23.0, 177.0))
+        self.assertIsNone(wall_bounds(None, 200, 150, 3))
 
     def test_walls_clip_platforms_and_block_routes_into_zones(self):
         g = NavGraph([FLOOR], reach(), bounds=Bounds(left=30, right=170))
@@ -137,17 +137,11 @@ class NavGraphTests(unittest.TestCase):
             if leg.kind in ("drop", "flash", "double_flash", "jump"):
                 self.assertLess(max(leg.x0, leg.x1), 100.5)
 
-    def test_floor_band_removes_platforms(self):
-        # Floor zone top at y=104 padded 6 up → band starts at 98: the
-        # y=100 floor platform is excluded; MID (84) stays.
-        g = NavGraph([FLOOR, MID], reach(), bounds=Bounds(floor=98))
-        self.assertEqual([p.y0 for p in g.platforms], [84])
-
     def test_graph_for_applies_map_walls(self):
         entry = MapEntry(name="m", platforms=[[0.0, 0.5, 1.0, 0.5]],
                          walls={"left": 0.1})
-        g = graph_for(entry, (0, 0, 200, 100), reach(), pad=6)
-        self.assertEqual(g.platforms[0].x0, 26)
+        g = graph_for(entry, (0, 0, 200, 100), reach(), pad=3)
+        self.assertEqual(g.platforms[0].x0, 23)
 
     def test_graph_for_scales_normalized_platforms(self):
         entry = MapEntry(name="m", platforms=[[0.0, 0.5, 1.0, 0.5]])

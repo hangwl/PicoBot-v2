@@ -120,7 +120,11 @@ class Navigator:
             return "failed"
         if leg.kind == "walk":
             return "ok" if self._walk_to(leg.x1) else "failed"
-        if not self._walk_to(leg.x0, exact=True):
+        # Rope lift fires from ~wherever the character stands (mid-air
+        # works too) — no precise stop needed, and stopping precisely is
+        # what caused flash ping-pong over the takeoff point.
+        fire_tol = bot.config.walk_band_px if leg.kind == "rope_lift" else None
+        if not self._walk_to(leg.x0, exact=fire_tol is None, tol=fire_tol):
             return "failed"
         if leg.kind == "rope_lift" and bot.rope_lift_remaining() > 0:
             return "cooldown"
@@ -169,11 +173,13 @@ class Navigator:
             and abs(p.y_at(pos[0]) - pos[1]) <= self.graph.snap_px + 2
         )
 
-    def _walk_to(self, x: float, exact: bool = False) -> bool:
+    def _walk_to(self, x: float, exact: bool = False,
+                 tol: Optional[float] = None) -> bool:
         pos = self._pos()
         if pos is None:
             return False
-        tol = self.align_px if exact else self.bot.config.nav_threshold_px
+        if tol is None:
+            tol = self.align_px if exact else self.bot.config.nav_threshold_px
         if abs(pos[0] - x) <= tol:
             return True
         return bool(self.bot.move_to_point(

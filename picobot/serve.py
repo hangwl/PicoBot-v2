@@ -98,8 +98,6 @@ def _offset_meta(snap: dict, dx: int, dy: int) -> None:
     walls = snap.get("walls")
     if walls:
         snap["walls"] = {k: v + dx for k, v in walls.items()}
-    if snap.get("floor") is not None:
-        snap["floor"] += dy
     if snap.get("platforms"):
         snap["platforms"] = [
             (a + dx, b + dy, c + dx, d + dy)
@@ -382,7 +380,7 @@ class BotHost:
             v = float(v)
             return int(round(v * span)) if 0.0 <= v <= 1.0 else int(round(v))
 
-        walls = floor = anchors = platforms = None
+        walls = anchors = platforms = None
         if entry is not None and entry.rotation.anchors and w and h:
             anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
         if entry is not None and entry.walls and w:
@@ -394,9 +392,6 @@ class BotHost:
                 )
                 if isinstance(v, (int, float))
             } or None
-            fy = entry.walls.get("floor")
-            if h and isinstance(fy, (int, float)):
-                floor = px(fy, h)
         conf = (
             res.score
             if entry is not None and res.title_map == entry.name else None
@@ -404,7 +399,7 @@ class BotHost:
         nav_edges = nav_route = None
         graph = self._nav_graph(entry, region)
         if graph is not None:
-            # Show the graph's clipped platforms — wall/floor zones eat
+            # Show the graph's clipped platforms — wall zones eat
             # platform ends, and the overlay should reflect what the bot
             # actually walks.
             platforms = [
@@ -435,8 +430,7 @@ class BotHost:
             "map_title": res.title,
             "no_rotation": not bool(rot.anchors),
             "walls": walls,
-            "floor": floor,
-            "wall_pad": self.bot_config.wall_pad_px if (walls or floor is not None) else None,
+            "wall_pad": self.bot_config.wall_pad_px if walls else None,
             "anchors": anchors,
         }
 
@@ -617,20 +611,20 @@ class BotHost:
         self.bus.emit("map", f"layout cleared for {entry.name}")
 
     def _layout_set_wall(self, msg: str) -> None:
-        """layout|wall|left|right|floor|clear[|<name>] — map boundaries.
+        """layout|wall|left|right|clear[|<name>] — map boundaries.
 
         ``left``/``right`` pin a wall at the player's current minimap x
-        (inside it the weave faces inward); ``floor`` pins the player's
-        y as the map's bottom — no downward movement is attempted there.
-        ``clear`` removes them all. Unlike the global ``wall_zone_px``
-        edge margins, these work on maps whose play area doesn't span
-        the minimap edge-to-edge.
+        (inside it the weave faces inward). ``clear`` removes them all.
+        Unlike the global ``wall_zone_px`` edge margins, these work on
+        maps whose play area doesn't span the minimap edge-to-edge. The
+        map's bottom needs no boundary: down-jumps only exist toward
+        drawn platforms below.
         """
         parts = msg.split("|", 3)
         side = parts[2] if len(parts) > 2 else ""
         name = parts[3].strip() if len(parts) > 3 else ""
-        if side not in ("left", "right", "floor", "clear"):
-            return
+        if side not in ("left", "right", "clear"):
+            return False
         entry, err = self._layout_target(name)
         if entry is None:
             self.bus.emit("error", err)
@@ -657,33 +651,16 @@ class BotHost:
                 "error", "no player position — can't place a wall"
             )
             return
-        span = region[3] if side == "floor" else region[2]
+        span = region[2]
         if not span:
             self.bus.emit("error", "no minimap region — can't place a wall")
             return
         walls = dict(entry.walls or {})
-        v = pos[1] if side == "floor" else pos[0]
-        if side == "floor" and entry.platforms:
-            # Snap just BELOW the drawn platform under the player: the
-            # padded floor band then starts under it, so the platform the
-            # character stands on stays walkable and everything below is
-            # forbidden.
-            from .vision.minimap import platform_row_at
-
-            snapped = platform_row_at(
-                self._platforms_px(entry), pos[0], pos[1], max_snap=10
-            )
-            if isinstance(snapped, int):
-                v = snapped + self.bot_config.wall_pad_px + 2
-                self.bus.emit(
-                    "map",
-                    f"floor placed just below the platform row ({snapped}) "
-                    "so it stays walkable",
-                )
+        v = pos[0]
         walls[side] = round(max(0.0, min(1.0, v / span)), 4)
         entry.walls = walls
         self._save_entry(entry)
-        axis = "y" if side == "floor" else "x"
+        axis = "x"
         self.bus.emit(
             "map", f"{side} wall set at {axis}={v} for {entry.name}"
         )
@@ -768,7 +745,7 @@ class BotHost:
 
         Each drag on the Minimap view appends a segment (minimap px here,
         stored normalized). Platforms are hand-drawn — the authoritative
-        walkable geometry for anchor snapping, weave bounds and floor
+        walkable geometry for anchor snapping and weave bounds
         placement, since auto-detecting translucent minimap lines proved
         too fragile.
         """
@@ -865,7 +842,6 @@ class BotHost:
                 return {"state": "IDLE"}
             meta = self._map_meta()
             meta.pop("walls", None)
-            meta.pop("floor", None)
             meta.pop("platforms", None)
             meta.pop("anchors", None)
             return {
@@ -876,7 +852,6 @@ class BotHost:
         if mode == "window":
             meta = self._map_meta()
             meta.pop("walls", None)   # minimap-relative — meaningless here
-            meta.pop("floor", None)
             meta.pop("platforms", None)
             if bot is not None:
                 img = bot._window_capture()
@@ -961,7 +936,8 @@ class BotHost:
         elif msg == "layout|clear" or msg.startswith("layout|clear|"):
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg.startswith("layout|wall|"):
-            self._layout_set_wall(msg)
+            if self._layout_set_wall(msg) is False:
+                return False
         elif msg.startswith("layout|anchor|"):
             self._layout_anchor(msg)
         elif msg.startswith("layout|plat|"):

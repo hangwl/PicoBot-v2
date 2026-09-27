@@ -154,7 +154,6 @@
       <div class="row" style="margin-top:8px">
         <button id="wallL" title="stand at the left wall, then click — player left of it always faces right">L wall</button>
         <button id="wallR" title="stand at the right wall, then click — player right of it always faces left">R wall</button>
-        <button id="wallF" title="stand on the bottom platform, then click — no downward movement below it">Floor</button>
         <button id="wallClear" title="remove all boundaries for this map">Clear</button>
         <label>walls at player pos (uses Map selection)</label>
       </div>
@@ -582,7 +581,6 @@ $("layoutClear").onclick = () => send("layout|clear" + layTarget());
 $("layoutReset").onclick = () => send("layout|reset");
 $("wallL").onclick = () => send("layout|wall|left" + layTarget());
 $("wallR").onclick = () => send("layout|wall|right" + layTarget());
-$("wallF").onclick = () => send("layout|wall|floor" + layTarget());
 $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 
 // --- Drag-to-draw platforms on the Minimap view ------------------------

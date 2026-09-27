@@ -63,7 +63,7 @@ a small FSM (`machine.py`, `states/`) owns behavior:
 
 `rotation.py` models the map's anchor/leg graph; `maps.py` is the JSON
 store plus identity matching; `skills.py` is the per-skill cooldown
-scheduler (attack/buff/summon kinds). Movement geometry (platforms, walls, floor) is **hand-drawn in
+scheduler (attack/buff/summon kinds). Movement geometry (platforms, walls) is **hand-drawn in
 the dashboard** — auto-detection of translucent minimap lines proved too
 fragile and was deliberately abandoned.
 

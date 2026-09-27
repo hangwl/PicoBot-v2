@@ -30,7 +30,7 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "weave_double_chance": 0.4,
     "weave_range_px": 24,
     "wall_zone_px": 16,
-    "wall_pad_px": 6,
+    "wall_pad_px": 3,
     "stop_when_players_appear": true,
     "stop_when_rune_appears": true,
     "pause_on_lie_detector": false,
@@ -86,9 +86,8 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   the bot learns real values from observed moves and stores them in
   `nav_reach_file` (gitignored, per character). Delete that file to
   relearn. See [bot-behavior.md](bot-behavior.md#moves--learned-reach-navgraphpy-reachpy-navigatorpy).
-- `wall_pad_px` — buffer added to every wall/floor zone (left zone
-  rightward, right zone leftward, floor upward); nothing is planned or
-  weaved inside it.
+- `wall_pad_px` — buffer added to every wall zone (left zone rightward,
+  right zone leftward); nothing is planned or weaved inside it.
 - Removed keys (`stationary_mode`, `enable_random_wander`,
   `stationary_seconds`, `wander_seconds`, `wander_edge_margin_px`,
   `linger_hops`, rotation `wander_chance`/`rest_chance`) are ignored.

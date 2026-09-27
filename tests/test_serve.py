@@ -157,7 +157,6 @@ class PanelAssemblyTests(unittest.TestCase):
 
         snap = {
             "walls": {"left": 20, "right": 180},
-            "floor": 120,
             "platforms": [(10, 60, 100, 60)],
             "anchors": [(40, 50)],
             "player": (80, 50),
@@ -166,7 +165,6 @@ class PanelAssemblyTests(unittest.TestCase):
         }
         _offset_meta(snap, 7, 52)
         self.assertEqual(snap["walls"], {"left": 27, "right": 187})
-        self.assertEqual(snap["floor"], 172)
         self.assertEqual(snap["platforms"], [(17, 112, 107, 112)])
         self.assertEqual(snap["anchors"], [(47, 102)])
         self.assertEqual(snap["player"], (87, 102))
@@ -445,21 +443,16 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|wall|left")
             self.assertIsNone(MapStore(tmp).get("m1").walls)
 
-    def test_floor_set_at_player_y(self):
-        img = np.zeros((150, 200, 3), dtype=np.uint8)
-        feed = Mock()
-        feed.minimap_img.return_value = img
-        feed.minimap.player_pos.return_value = (50, 120)
-        feed.minimap.region = (0, 0, 200, 150)
-        self.host._feed = feed
+    def test_floor_side_is_rejected(self):
+        # The floor boundary is gone: down-jumps only exist toward drawn
+        # platforms below, so the graph needs no bottom line.
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
-            self.assertTrue(
+            self.assertFalse(
                 self.host._handle_command("layout|wall|floor|m1")
             )
-            saved = MapStore(tmp).get("m1")
-            self.assertEqual(saved.walls, {"floor": 0.8})
+            self.assertIsNone(MapStore(tmp).get("m1").walls)
 
     def test_patrol_command_removed(self):
         # Patrol is the only multi-anchor mode now — the toggle is gone.
@@ -516,7 +509,7 @@ class HostCommandTests(unittest.TestCase):
             self._use_store(tmp)
             self.host.maps.save(entry)
             meta = self.host._map_meta()
-        self.assertEqual(meta["platforms"], [(26.0, 37.5, 100.0, 37.5)])
+        self.assertEqual(meta["platforms"], [(23.0, 37.5, 100.0, 37.5)])
 
     def _region_feed(self):
         feed = Mock()
@@ -658,9 +651,8 @@ class HostCommandTests(unittest.TestCase):
 
     def test_padded_wall_limits_drawn(self):
         img = np.zeros((150, 200, 3), dtype=np.uint8)
-        out = annotate(img, {"walls": {"left": 50}, "floor": 120, "wall_pad": 6})
-        self.assertTrue((out[60, 56] == (140, 140, 255)).all())   # left + pad
-        self.assertTrue((out[114, 100] == (140, 140, 255)).all())  # floor - pad
+        out = annotate(img, {"walls": {"left": 50}, "wall_pad": 3})
+        self.assertTrue((out[60, 53] == (140, 140, 255)).all())   # left + pad
 
     def test_layout_save_backfills_title(self):
         feed = self._region_feed()
@@ -696,23 +688,17 @@ class HostCommandTests(unittest.TestCase):
         self.assertTrue((out[60, 50] != img[60, 50]).any())   # line drawn
         self.assertTrue((out[70, 50] == img[70, 50]).all())   # rest clean
 
-    def test_wall_floor_zones_are_rectangular(self):
+    def test_wall_zones_are_rectangular(self):
         # Zones shade the forbidden region, not just a dashed line:
-        # left wall at x=50 blocks [0,50); right at 160 blocks [160,w);
-        # floor at y=120 blocks [120,h).
+        # left wall at x=50 blocks [0,50); right at 160 blocks [160,w).
         img = np.zeros((150, 200, 3), dtype=np.uint8)
         img[:] = (10, 10, 10)
-        out = annotate(img, {
-            "walls": {"left": 50, "right": 160},
-            "floor": 120,
-        })
+        out = annotate(img, {"walls": {"left": 50, "right": 160}})
         self.assertTrue((out[60, 20] != img[60, 20]).any())  # in left zone
         self.assertTrue((out[60, 180] != img[60, 180]).any())
-        self.assertTrue((out[140, 100] != img[140, 100]).any())
         # Wall line itself is the zone border (solid red).
         self.assertTrue((out[60, 49] == (60, 60, 255)).all())
         self.assertTrue((out[60, 160] == (60, 60, 255)).all())
-        self.assertTrue((out[120, 100] == (60, 60, 255)).all())
         # Walkable middle stays clean.
         self.assertTrue((out[60, 100] == img[60, 100]).all())
         self.assertTrue((out[60, 55] == img[60, 55]).all())

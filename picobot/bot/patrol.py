@@ -54,16 +54,25 @@ class Patrol:
             return
         if graph.locate(*pos) is None:
             # Platforms exist but the player isn't on any of them (mid-move,
-            # or a wall/floor zone ate the platform under them). Wait —
-            # planning from an off-graph start would ban every anchor.
+            # or a wall zone ate the platform under them). Planning from an
+            # off-graph start would ban every anchor.
             now = time.time()
+            reason = self._off_graph_reason(graph, pos)
             if now - getattr(self, "_off_graph_logged", 0.0) > 5.0:
                 self._off_graph_logged = now
-                bot.log(
-                    "Player is not on any drawn platform — waiting ("
-                    + self._off_graph_reason(graph, pos) + ")"
+                bot.log(f"Player is not on any drawn platform — {reason}")
+            if reason.startswith("inside"):
+                # Walk back toward the nearest graph platform — a flash
+                # overshoot can land inside a zone; waiting there stalls.
+                near = min(
+                    graph.platforms,
+                    key=lambda p: min(abs(pos[0] - p.x0), abs(pos[0] - p.x1)),
                 )
-            bot._blind_wait()
+                tx = min((abs(pos[0] - near.x0), near.x0),
+                         (abs(pos[0] - near.x1), near.x1))[1]
+                bot.move_to_point(int(tx), pos[1], style="mixed", flat=True)
+            else:
+                bot._blind_wait()
             return
         if self._nav is None or self._nav.graph is not graph:
             self._nav = Navigator(bot, graph, rng=self.rng)
@@ -132,12 +141,10 @@ class Patrol:
         ) if entry else None
         if bounds is not None:
             if bounds.left is not None and pos[0] < bounds.left:
-                return "inside the left wall zone — re-place it or lower wall_pad_px"
+                return "inside the left wall zone — walking back out"
             if bounds.right is not None and pos[0] > bounds.right:
-                return "inside the right wall zone — re-place it or lower wall_pad_px"
-            if bounds.floor is not None and pos[1] >= bounds.floor:
-                return "inside the floor band — re-place the floor just below the lowest platform"
-        return "check the platform drawing (Panel view)"
+                return "inside the right wall zone — walking back out"
+        return "waiting — check the platform drawing (Panel view)"
 
     # -- Planning ----------------------------------------------------------------------
     def _greedy(self, graph, cur: Point, cur_i: Optional[int]):
