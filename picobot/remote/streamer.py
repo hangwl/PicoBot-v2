@@ -57,18 +57,22 @@ def _rect(img: np.ndarray, x: int, y: int, w: int, h: int, color) -> None:
     img[y0:y1, x1 - 1] = color
 
 
-def _vline(img: np.ndarray, x: int, color) -> None:
-    """Dashed vertical line — wall boundaries."""
-    h, w = img.shape[:2]
-    if 0 <= x < w:
-        img[::3, x] = color
+def _zone(img: np.ndarray, x0: int, y0: int, x1: int, y1: int, color) -> None:
+    """Translucent fill + solid border — a forbidden region (wall/floor).
 
-
-def _hline(img: np.ndarray, y: int, color) -> None:
-    """Dashed horizontal line — floor boundary."""
-    h, w = img.shape[:2]
-    if 0 <= y < h:
-        img[y, ::3] = color
+    The wall/floor marks a boundary, not a line to read: shading the
+    *blocked* side makes the zone readable at a glance.
+    """
+    ih, iw = img.shape[:2]
+    x0, x1 = max(0, x0), min(iw, x1)
+    y0, y1 = max(0, y0), min(ih, y1)
+    if x1 <= x0 or y1 <= y0:
+        return
+    img[y0:y1, x0:x1] = (
+        img[y0:y1, x0:x1].astype(np.float32) * 0.7
+        + np.asarray(color, np.float32) * 0.3
+    ).astype(np.uint8)
+    _rect(img, x0, y0, x1 - x0, y1 - y0, color)
 
 
 def _line(img: np.ndarray, x0, y0, x1, y1, color) -> None:
@@ -87,13 +91,18 @@ def _line(img: np.ndarray, x0, y0, x1, y1, color) -> None:
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
-    for seg in meta.get("platforms") or []:
-        _line(out, *seg, (255, 200, 40))                  # cyan platforms
-    for x in meta.get("walls") or []:
-        _vline(out, int(x), (60, 60, 255))                   # dashed red walls
+    h, w = out.shape[:2]
+    zone = (60, 60, 255)                                     # red zones
+    walls = meta.get("walls") or {}
+    if walls.get("left") is not None:
+        _zone(out, 0, 0, int(walls["left"]), h, zone)          # block left
+    if walls.get("right") is not None:
+        _zone(out, int(walls["right"]), 0, w, h, zone)         # block right
     floor = meta.get("floor")
     if floor is not None:
-        _hline(out, int(floor), (60, 60, 255))               # dashed red floor
+        _zone(out, 0, int(floor), w, h, zone)                  # below floor
+    for seg in meta.get("platforms") or []:
+        _line(out, *seg, (255, 200, 40))                  # cyan platforms
     for x, y in meta.get("anchors") or []:
         _box(out, int(x), int(y), 3, (255, 128, 0))      # blue anchors
     pos = meta.get("player")

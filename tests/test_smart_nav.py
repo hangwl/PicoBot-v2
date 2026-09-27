@@ -64,6 +64,10 @@ def _bot(positions, target=(50, 50), threshold=4, stuck_limit=40):
     bot.viz = {"target": None}
     bot._map = None
     bot.maps = Mock(**{"get.return_value": None})
+    from picobot.bot.skills import SkillBook
+    bot.skills = SkillBook()
+    bot._travel_attack_at = 0.0
+    bot._ckpt_ban = {}
     bot._target = target
     return bot
 
@@ -299,6 +303,8 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot._route = []
         bot._ckpt_idx = None
         bot._ckpt_deadline = 0.0
+        bot._ckpt_ban = {}
+        bot._travel_attack_at = 0.0
         bot._travel_target = None
         bot._dwell_end = 0.0
         bot._arrive_pending = []
@@ -473,7 +479,29 @@ class PatrolTests(unittest.TestCase):
         bot._ckpt_deadline = time.time() - 1  # expired
         bot._patrol_tick()
         self.assertEqual(bot._route, [0])
+        self.assertIn(1, bot._ckpt_ban)      # held out of replans
         self.assertIn("a", bot.hid.presses)  # still attacked
+
+    def test_failed_leg_bans_checkpoint_from_routes(self):
+        # A leg that can't complete (e.g. a rope climb with no recorded
+        # leg) holds its target out of route planning instead of
+        # retrying forever.
+        bot = self._bot((60, 50), self._rot())
+        bot._travel_target = 1
+        bot._anchor_idx = 0
+        bot._leg_fp = None
+        bot._run_leg = Mock(return_value=False)
+        self.assertFalse(bot.run_travel())
+        self.assertIn(1, bot._ckpt_ban)
+        bot._route = []
+        bot._plan_route((60, 50))
+        self.assertEqual(bot._route, [0])  # banned a1 skipped
+
+    def test_ban_expires(self):
+        bot = self._bot((60, 50), self._rot())
+        bot._ckpt_ban[1] = time.time() - 1  # expired
+        bot._plan_route((60, 50))
+        self.assertEqual(bot._route, [0, 1])  # a1 back in rotation
 
     def test_blind_tick_still_attacks(self):
         bot = self._bot(None, self._rot())  # player_pos -> None
@@ -513,6 +541,40 @@ class PatrolTests(unittest.TestCase):
         with patch("random.random", return_value=0.5):  # no breather
             bot.begin_dwell()
         self.assertFalse(bot.dwell_done())
+
+
+class TravelWeaveTests(unittest.TestCase):
+    """Attacks weave into checkpoint travel — registered skills fire
+    mid-leg instead of the leg being an attack-free replay."""
+
+    def test_walk_leg_weaves_registered_attack(self):
+        from picobot.bot.skills import Skill, SkillBook
+
+        bot = _bot(
+            [(20, 50), (30, 50), (40, 50), (50, 50)], target=(50, 50)
+        )
+        bot.skills = SkillBook({"main": Skill("main", "a")})
+        self.assertTrue(_drive(bot))
+        self.assertIn("a", bot.hid.presses)
+
+    def test_no_skills_means_no_presses(self):
+        bot = _bot(
+            [(20, 50), (30, 50), (40, 50), (50, 50)], target=(50, 50)
+        )
+        self.assertTrue(_drive(bot))
+        self.assertEqual(bot.hid.presses, [])
+
+    def test_travel_attack_is_rate_limited(self):
+        # One press per ~0.4s even with a 0-cooldown key — a 20Hz poll
+        # loop must not become a spam loop.
+        from picobot.bot.skills import Skill, SkillBook
+
+        bot = _bot(
+            [(10 + i * 5, 50) for i in range(12)], target=(80, 50)
+        )
+        bot.skills = SkillBook({"main": Skill("main", "a")})
+        _drive(bot)
+        self.assertEqual(bot.hid.presses.count("a"), 1)
 
 
 class TargetSnapTests(unittest.TestCase):

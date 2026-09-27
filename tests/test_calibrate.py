@@ -1,57 +1,15 @@
 import unittest
 
-from picobot.bot.calibrate import TraceRecorder, _trace_to_steps
-
-
-def _walk(points, x0, x1, y, n=12):
-    """Simulated walk: straight line samples."""
-    for i in range(n):
-        points.append((x0 + (x1 - x0) * i / (n - 1), y))
-
-
-def _climb(points, y0, y1, x, n=10):
-    for i in range(n):
-        points.append((x, y0 + (y1 - y0) * i / (n - 1)))
-
-
-class TraceToStepsTests(unittest.TestCase):
-    def test_straight_walk(self):
-        pts = []
-        _walk(pts, 20, 150, 60)
-        steps = _trace_to_steps(pts, (200, 150))
-        self.assertEqual(len(steps), 1)
-        self.assertEqual(steps[0].kind, "walk_to")
-        self.assertAlmostEqual(steps[0].x, 0.75, places=2)
-
-    def test_walk_then_climb_then_walk(self):
-        pts = []
-        _walk(pts, 20, 100, 100)
-        _climb(pts, 100, 40, 100)
-        _walk(pts, 100, 170, 40)
-        steps = _trace_to_steps(pts, (200, 150))
-        kinds = [s.kind for s in steps]
-        self.assertEqual(kinds, ["walk_to", "climb", "walk_to"])
-        climb = steps[1]
-        self.assertEqual(climb.direction, "up")
-        self.assertAlmostEqual(climb.x, 0.5, places=2)
-        self.assertAlmostEqual(climb.until_y, 40 / 150, places=2)
-
-    def test_down_climb(self):
-        pts = []
-        _climb(pts, 30, 100, 60)
-        steps = _trace_to_steps(pts, (200, 150))
-        self.assertEqual(steps[0].direction, "down")
-
-    def test_noise_does_not_create_steps(self):
-        pts = [(50.0, 50.0), (51.0, 50.5), (50.2, 50.8), (50.9, 50.1)]
-        self.assertEqual(_trace_to_steps(pts, (200, 150)), [])
+from picobot.bot.calibrate import TraceRecorder
 
 
 class TraceRecorderTests(unittest.TestCase):
     def _recorder(self):
         return TraceRecorder((200, 150))
 
-    def test_marks_create_anchors_and_leg(self):
+    def test_marks_create_anchors_no_legs(self):
+        # Recording is anchors-only — movement between checkpoints is
+        # generated live (weave-attacks), not replayed from a trace.
         r = self._recorder()
         r.sample((20, 100), t=0.0)
         self.assertEqual(r.mark(t=0.0), 0)
@@ -60,11 +18,10 @@ class TraceRecorderTests(unittest.TestCase):
         self.assertEqual(r.mark(t=13.0), 1)
         entry = r.finish("m")
         self.assertEqual(len(entry.rotation.anchors), 2)
-        steps = entry.rotation.legs[(0, 1)]
-        self.assertEqual(steps[-1].kind, "walk_to")
-        self.assertAlmostEqual(steps[-1].x, 116 / 200, places=2)
+        self.assertEqual(entry.rotation.legs, {})
+        self.assertAlmostEqual(entry.rotation.anchors[1].x, 116 / 200)
 
-    def test_mark_near_existing_closes_loop(self):
+    def test_mark_near_existing_dedupes(self):
         r = self._recorder()
         r.sample((20, 100), t=0.0)
         r.mark(t=0.0)
@@ -77,8 +34,6 @@ class TraceRecorderTests(unittest.TestCase):
         idx = r.mark(t=20.0)
         self.assertEqual(idx, 0)  # deduped to anchor 0
         self.assertEqual(len(r.anchors), 2)
-        entry = r.finish("m")
-        self.assertIn((1, 0), entry.rotation.legs)
 
     def test_dwell_inferred_from_stationary_time(self):
         r = self._recorder()
@@ -167,23 +122,6 @@ class TraceRecorderTests(unittest.TestCase):
             entry.rotation.anchors[0].on_arrive, ("fountain", "main")
         )
         self.assertEqual(entry.skills, {})  # everything bound in config
-
-    def test_quick_drop_becomes_down_jump(self):
-        from picobot.bot.calibrate import _trace_to_steps
-
-        # Sharp downward drop: few samples (fast fall) -> down_jump step.
-        steps = _trace_to_steps(
-            [(50, 50), (50, 58), (52, 70)], (200, 150))
-        self.assertEqual(steps[-1].kind, "down_jump")
-
-        # Sustained downward crawl = climbing down a rope -> climb.
-        steps = _trace_to_steps(
-            [(50, 50), (50, 55), (50, 60), (51, 65), (51, 70),
-             (52, 75), (52, 80)], (200, 150))
-        kinds = [s.kind for s in steps]
-        self.assertIn("climb", kinds)
-        self.assertNotIn("down_jump", kinds)
-
 
 class CalibrationRunnerSnapTests(unittest.TestCase):
     """Off-platform anchor handling in CalibrationRunner (no threads —

@@ -53,12 +53,15 @@ override the remembered values and are persisted the same way.
   explicitly (creating a stub if it doesn't exist yet) and refreshes its
   fingerprint.
 - **Bot** — Start/Stop the smart bot.
-- **Calibrate** — Record → walk your rotation pressing *Mark anchor* at each
-  farming spot → Save. The recorder derives walk/climb legs from your position
-  trace, dwell ranges from how long you stood, and candidate skills from the
-  keys you pressed at each anchor. Marks taken mid-air or off a platform
-  warn immediately, and saved anchors are snapped onto the nearest
-  platform ink so replayed targets stay reachable. Headless alternative:
+- **Calibrate** — Record → visit each farming spot, pressing *Mark anchor*
+  (or F9) at each → Save. Recording captures **anchor positions only** —
+  movement between checkpoints is generated live (weave-attacks against
+  the drawn platform geometry), not replayed from a trace. Dwell ranges
+  and candidate `on_arrive` skills are still inferred from how long you
+  stood at a mark and which keys you pressed there. Marks taken mid-air
+  or off a platform warn immediately, and saved anchors are snapped onto
+  the nearest drawn platform so targets stay reachable. Headless
+  alternative:
   `python -m picobot.bot.calibrate --window "Eluna (x64)" --name my_map`
   (F9 = mark, ESC = save).
 - **Remote input** — arrow pad + key buttons for rune solving or nudges from a
@@ -114,6 +117,11 @@ you verified in the dashboard carries over to the bot at Start:
 - Coordinates are 0–1 fractions of the minimap region (values >1 are raw px).
 - `style` (`loop` | `pingpong` | `shuffle`) is **legacy** — anchor order is
   planned dynamically as a checkpoint route, not walked by index.
+- `legs` are **optional** and hand-authored — recording captures anchors
+  only. Without a leg the checkpoint transition falls back to direct
+  navigation (weave-attacking `walk_to`, with `up_jump`/`down_jump` for
+  level gaps); author one only for moves the fallback can't manage,
+  e.g. rope climbs.
 - Step kinds: `walk_to` (+ `style`: walk|flash|mixed), `climb`
   (`dir`, `until_y`, optional align `x`), `up_jump`, `down_jump`, `wait`.
 - Skill `kind`: `attack` (attack loop), `buff` (fires when ready anywhere),
@@ -132,10 +140,12 @@ you verified in the dashboard carries over to the bot at Start:
 - **Per-map walls**: on maps whose play area doesn't span the minimap,
   stand at the left/right wall and press **L wall** / **R wall** in the
   View panel — the boundary is stored on that map (normalized x), drawn
-  as a dashed red line, and overrides `wall_zone_px` on that side.
+  as a red shaded zone over the blocked side, and overrides
+  `wall_zone_px` on that side.
   **Floor** does the same vertically: stand on the bottom platform and
-  the bot stops attempting down-jumps at/below it. **Clear** removes
-  all boundaries; the map field targets a different map.
+  the zone below shades red; the bot stops attempting down-jumps
+  at/below it. **Clear** removes all boundaries; the map field targets
+  a different map.
 - **Platforms are hand-drawn, not detected.** Minimap platform lines are
   alpha-blended over the live scene, so neither colour matching nor
   structural detection proved trustworthy — instead, click **Draw plats**

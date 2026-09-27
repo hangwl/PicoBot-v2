@@ -1,13 +1,12 @@
-"""Calibration recorder: walk a map's rotation once, get a map file.
+"""Calibration recorder: mark a map's farming anchors, get a map file.
 
-The recorder samples the player dot on the minimap while the user plays
-the rotation by hand. A hotkey (default F9) marks anchors; ESC finishes.
-Between marks, the position trace is segmented into leg steps —
-horizontal runs become ``walk_to``, sustained vertical drift at roughly
-constant x becomes ``climb`` (which is also how rope traversal is
-captured for free). Dwell ranges and candidate ``on_arrive`` skills are
-inferred from how long the user stood at each mark and which keys they
-pressed there.
+The recorder samples the player dot on the minimap while the user
+visits each farming spot. A hotkey (default F9) marks an anchor at the
+current position; ESC finishes. Movement between anchors is NOT
+recorded — checkpoint travel is generated live (weave-attacks plus the
+drawn platform geometry), not replayed. What is inferred at each mark
+is its dwell range (how long you stood there) and which keys you
+pressed on arrival (candidate ``on_arrive`` skills).
 
 CLI (Windows host, no Pico needed)::
 
@@ -24,7 +23,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from .maps import MapEntry, MapStore
-from .rotation import Rotation, Step
+from .rotation import Rotation
 from .skills import Skill
 
 logger = logging.getLogger(__name__)
@@ -46,69 +45,6 @@ def _key_groups(
     return groups
 
 
-def _simplify(points: List[_Pt], min_step: float) -> List[_Pt]:
-    """Drop points closer than ``min_step`` px to the last kept one."""
-    kept = [points[0]]
-    for p in points[1:]:
-        if _dist(p, kept[-1]) >= min_step:
-            kept.append(p)
-    if kept[-1] != points[-1]:
-        kept.append(points[-1])
-    return kept
-
-
-def _trace_to_steps(points: List[_Pt], wh: Tuple[int, int]) -> List[Step]:
-    """Segment a raw position trace into leg steps (normalized coords)."""
-    if len(points) < 2:
-        return []
-    w, h = wh
-    norm = lambda p: (p[0] / w, p[1] / h)
-    pts = _simplify(points, min_step=4.0)
-
-    # Group consecutive edges by dominant axis.
-    runs: List[List[_Pt]] = [[pts[0]]]
-    run_axis = None
-    for a, b in zip(pts, pts[1:]):
-        axis = "v" if abs(b[1] - a[1]) > 2 * abs(b[0] - a[0]) else "h"
-        if run_axis is None or axis == run_axis:
-            run_axis = axis if run_axis is None else run_axis
-            runs[-1].append(b)
-        else:
-            runs.append([a, b])
-            run_axis = axis
-
-    steps: List[Step] = []
-    for run in runs:
-        dx = run[-1][0] - run[0][0]
-        dy = run[-1][1] - run[0][1]
-        if abs(dy) >= 8 and abs(dy) > abs(dx):
-            if dy > 0 and len(run) <= 3:
-                # Quick downward drift (few samples) = drop-through, not a
-                # rope — replay it as down+jump so the leg respects the
-                # platform edge instead of beelining.
-                steps.append(Step("down_jump"))
-                continue
-            nx, ny = norm(run[-1])
-            steps.append(Step(
-                "climb",
-                x=norm((sum(p[0] for p in run) / len(run), 0))[0],
-                direction="up" if dy < 0 else "down",
-                until_y=ny,
-            ))
-        elif _dist(run[0], run[-1]) >= 4:
-            nx, ny = norm(run[-1])
-            steps.append(Step("walk_to", x=nx, y=ny))
-        # tiny runs are noise; fold into the next step by skipping
-    # Merge consecutive same-kind steps (keep the last target).
-    merged: List[Step] = []
-    for step in steps:
-        if merged and merged[-1].kind == step.kind == "walk_to":
-            merged[-1] = step
-        else:
-            merged.append(step)
-    return merged
-
-
 class TraceRecorder:
     """Pure calibration logic: feed position samples + mark events.
 
@@ -127,9 +63,7 @@ class TraceRecorder:
         self.samples: List[Tuple[float, float, float]] = []  # (t, x, y)
         self.keys: List[Tuple[float, str]] = []              # (t, key)
         self.anchors: List[dict] = []                        # pos/dwell/keys
-        self._leg_traces: Dict[Tuple[int, int], List[_Pt]] = {}
-        self._leg_origin: Optional[int] = None
-        self._open_trace: List[_Pt] = []
+        self._at: Optional[int] = None   # anchor the player is at
         self._dwell_start: Optional[float] = None
         self._mark_time: Optional[float] = None
 
@@ -137,10 +71,8 @@ class TraceRecorder:
     def sample(self, pos: _Pt, t: Optional[float] = None) -> None:
         t = time.time() if t is None else t
         self.samples.append((t, pos[0], pos[1]))
-        if self._leg_origin is not None:
-            self._open_trace.append(pos)
-        if self._dwell_start is not None and self._leg_origin is not None:
-            anchor = self.anchors[self._leg_origin]
+        if self._dwell_start is not None and self._at is not None:
+            anchor = self.anchors[self._at]
             if _dist(pos, anchor["pos"]) > 10.0:
                 observed = t - self._dwell_start
                 lo = max(4.0, observed * 0.7)
@@ -154,9 +86,9 @@ class TraceRecorder:
     def mark(self, t: Optional[float] = None) -> int:
         """Anchor at the current position; returns the anchor index.
 
-        Marking within ``anchor_dedupe_px`` of an existing anchor closes a
-        leg to it instead of creating a duplicate — that's how a loop is
-        expressed.
+        Marking within ``anchor_dedupe_px`` of an existing anchor merges
+        into it instead of creating a duplicate — re-marking the same
+        spot is idempotent.
         """
         t = time.time() if t is None else t
         pos = self._last_pos(t)
@@ -170,17 +102,14 @@ class TraceRecorder:
             )
         # Keys pressed within the arrival window after the *previous* mark
         # belong to that anchor (summons get dropped right on arrival).
-        if self._leg_origin is not None and self._mark_time is not None:
-            prev = self.anchors[self._leg_origin]
+        if self._at is not None and self._mark_time is not None:
+            prev = self.anchors[self._at]
             prev["key_events"] = [
                 (kt, k) for kt, k in self.keys
                 if self._mark_time <= kt < self._mark_time + 8.0
                 and k.lower() not in ("f9", "escape")
             ]
-        if self._leg_origin is not None:
-            self._leg_traces[(self._leg_origin, anchor_idx)] = self._open_trace
-        self._open_trace = []
-        self._leg_origin = anchor_idx
+        self._at = anchor_idx
         self._dwell_start = t
         self._mark_time = t
         return anchor_idx
@@ -192,7 +121,7 @@ class TraceRecorder:
         minimap_region=None,
         key_map: Optional[Dict[str, Skill]] = None,
     ) -> MapEntry:
-        """Build the map entry: anchors, leg steps, observed skills.
+        """Build the map entry: anchors + observed arrival skills.
 
         ``key_map`` binds raw key names to configured skills (key ->
         Skill). Recorded presses of a bound key are credited to that
@@ -209,8 +138,8 @@ class TraceRecorder:
             return s if s is not None and s.kind != "movement" else None
 
         # Attribute the arrival-window keys of the final anchor too.
-        if self.anchors and self._leg_origin is not None and self._mark_time is not None:
-            last = self.anchors[self._leg_origin]
+        if self.anchors and self._at is not None and self._mark_time is not None:
+            last = self.anchors[self._at]
             if not last["key_events"]:
                 last["key_events"] = [
                     (kt, k) for kt, k in self.keys
@@ -235,11 +164,6 @@ class TraceRecorder:
             )
             for i, a in enumerate(self.anchors)
         ]
-        legs = {}
-        for ij, trace in self._leg_traces.items():
-            steps = _trace_to_steps(trace, self.wh)
-            if steps:
-                legs[ij] = steps
         # A key pressed 3+ times in an arrival window is being spammed —
         # that's an attack, not a summon. Use its observed cadence as the
         # cooldown so the book spaces presses like the recording did.
@@ -261,7 +185,7 @@ class TraceRecorder:
                     skills[name] = Skill(name, k, 30.0, "summon")
         return MapEntry(
             name=name,
-            rotation=Rotation(anchors=anchors, legs=legs),
+            rotation=Rotation(anchors=anchors),
             skills=skills,
             fingerprint=fingerprint,
             minimap_region=minimap_region,
@@ -531,7 +455,7 @@ def main() -> None:
     keyboard.hook(lambda e: _presses.append(e.name) if e.event_type == "down" else None)
 
     print(
-        f"Recording '{args.name}': walk your rotation, "
+        f"Recording '{args.name}': visit each farming spot, "
         f"{args.mark_key.upper()} = mark anchor, "
         f"{args.finish_key.upper()} = finish"
     )

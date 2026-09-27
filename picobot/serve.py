@@ -377,11 +377,14 @@ class BotHost:
                 for s in entry.platforms
             ]
         if entry is not None and entry.walls and w:
-            walls = [
-                px(v, w)
-                for v in (entry.walls.get("left"), entry.walls.get("right"))
+            walls = {
+                side: px(v, w)
+                for side, v in (
+                    ("left", entry.walls.get("left")),
+                    ("right", entry.walls.get("right")),
+                )
                 if isinstance(v, (int, float))
-            ] or None
+            } or None
             fy = entry.walls.get("floor")
             if h and isinstance(fy, (int, float)):
                 floor = px(fy, h)

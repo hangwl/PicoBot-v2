@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..vision.game_window import GameWindow
 from ..vision.minimap import (
@@ -88,6 +88,12 @@ class SmartBot(BotBase):
         self._route: List[int] = []
         self._ckpt_idx: Optional[int] = None
         self._ckpt_deadline: float = 0.0
+        # Unreachable-checkpoint backoff: a checkpoint whose leg failed
+        # (or that stalled the patrol) is held out of route planning for
+        # a while so a bad anchor can't trap the loop.
+        self._ckpt_ban: Dict[int, float] = {}
+        # Cooldown-spaced gate for attack presses woven into travel legs.
+        self._travel_attack_at = 0.0
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
@@ -542,6 +548,7 @@ class SmartBot(BotBase):
                     self.log("Navigation target reached")
                     self.viz["target"] = None
                     return True
+                self._travel_attack()
                 if held_dir == "right" and dx <= stop_band:
                     sync_dir(None)
                 elif held_dir == "left" and dx >= -stop_band:
@@ -734,8 +741,15 @@ class SmartBot(BotBase):
         self._travel_target = None
         if ok:
             self._anchor_idx = target
+            self._ckpt_ban.pop(target, None)
         else:
-            self.log("Leg incomplete — re-planning next cycle")
+            # Hold the failed checkpoint out of route planning for a
+            # bit — without recorded legs an unreachable target would
+            # otherwise retry-forever.
+            self._ckpt_ban[target] = time.time() + 45.0
+            self.log(
+                "Leg incomplete — checkpoint held out of routes for a bit"
+            )
         return ok
 
     def _run_leg(self, steps: List[Step]) -> bool:
@@ -930,6 +944,11 @@ class SmartBot(BotBase):
             if abs(ax - pos[0]) > cfg.nav_threshold_px
             or abs(ay - pos[1]) > band
         ]
+        now = time.time()
+        self._ckpt_ban = {
+            i: t for i, t in self._ckpt_ban.items() if t > now
+        }
+        remaining = [i for i in remaining if i not in self._ckpt_ban]
         route = []
         cur = pos
         while remaining:
@@ -953,9 +972,9 @@ class SmartBot(BotBase):
 
         Every tick attacks — arrival bookkeeping and cross-level handoffs
         no longer burn a hop. Checkpoints on another level set
-        ``_travel_target`` and end the dwell so TRAVEL runs the recorded
-        leg; a head that can't be reached in ~20s is skipped so a bad
-        checkpoint can't stall the loop forever."""
+        ``_travel_target`` and end the dwell so TRAVEL runs the leg; a
+        head that can't be reached in ~20s is skipped (and briefly
+        banned) so a bad checkpoint can't stall the loop forever."""
         rot = self.effective_rotation()
         if len(rot.anchors) < 2:
             if self.config.dwell_weave:
@@ -987,7 +1006,7 @@ class SmartBot(BotBase):
             target = rot.anchors[idx]
             tx, ty = self._rx(target.x), self._ry(target.y)
             if abs(ty - pos[1]) > level_band:
-                # Different level — the recorded leg owns this transition.
+                # Different level — TRAVEL owns this transition.
                 self._route.pop(0)
                 self._ckpt_idx = None
                 self._travel_target = idx
@@ -1017,6 +1036,7 @@ class SmartBot(BotBase):
         elif now > self._ckpt_deadline:
             self.log(f"Checkpoint {target.name} unreachable — skipping")
             self._route.pop(0)
+            self._ckpt_ban[idx] = now + 30.0
             self._ckpt_idx = None
             self._attack_once()
             return
@@ -1045,6 +1065,22 @@ class SmartBot(BotBase):
             direction = "left"
         self._weave_dir = direction
         self._weave_hop(direction)
+
+    def _travel_attack(self) -> None:
+        """Weave one attack press into a travel leg, cooldown-spaced.
+
+        Registered attack skills fire while the bot walks/hops between
+        checkpoints — nothing registered means nothing fires. The ~0.4s
+        gate keeps a 0-cooldown key from becoming a 20Hz spam loop, and
+        unlike ``_attack_once`` the not-ready path doesn't sleep (the
+        nav loop owns the pacing here).
+        """
+        now = time.time()
+        if now < self._travel_attack_at:
+            return
+        skill = self._pick_attack()
+        if skill is not None and self._use_skill(skill):
+            self._travel_attack_at = now + random.uniform(0.35, 0.55)
 
     def _attack_once(self) -> None:
         """Stationary single attack tick (legacy dwell path)."""

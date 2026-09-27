@@ -442,7 +442,7 @@ class HostCommandTests(unittest.TestCase):
             ))
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
-        self.assertEqual(meta["walls"], [50])       # 0.25 * 200
+        self.assertEqual(meta["walls"], {"left": 50})   # 0.25 * 200
 
     def test_map_meta_live_fingerprint_beats_stale_pin(self):
         # A persisted active_map pin must not shadow the map actually on
@@ -468,7 +468,7 @@ class HostCommandTests(unittest.TestCase):
             ))
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
-        self.assertEqual(meta["walls"], [160])      # 0.8 * 200
+        self.assertEqual(meta["walls"], {"right": 160})  # 0.8 * 200
 
     def test_platform_overlay_draws_stored_segments(self):
         # Drawn platforms ride the frame meta and annotate() renders them.
@@ -489,6 +489,27 @@ class HostCommandTests(unittest.TestCase):
         out = annotate(img, snap)
         self.assertTrue((out[60, 50] != img[60, 50]).any())   # line drawn
         self.assertTrue((out[70, 50] == img[70, 50]).all())   # rest clean
+
+    def test_wall_floor_zones_are_rectangular(self):
+        # Zones shade the forbidden region, not just a dashed line:
+        # left wall at x=50 blocks [0,50); right at 160 blocks [160,w);
+        # floor at y=120 blocks [120,h).
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        img[:] = (10, 10, 10)
+        out = annotate(img, {
+            "walls": {"left": 50, "right": 160},
+            "floor": 120,
+        })
+        self.assertTrue((out[60, 20] != img[60, 20]).any())  # in left zone
+        self.assertTrue((out[60, 180] != img[60, 180]).any())
+        self.assertTrue((out[140, 100] != img[140, 100]).any())
+        # Wall line itself is the zone border (solid red).
+        self.assertTrue((out[60, 49] == (60, 60, 255)).all())
+        self.assertTrue((out[60, 160] == (60, 60, 255)).all())
+        self.assertTrue((out[120, 100] == (60, 60, 255)).all())
+        # Walkable middle stays clean.
+        self.assertTrue((out[60, 100] == img[60, 100]).all())
+        self.assertTrue((out[60, 55] == img[60, 55]).all())
 
     def test_layout_save_verifies_fingerprint_match(self):
         # Auto path succeeds when the stored fingerprint matches live.
