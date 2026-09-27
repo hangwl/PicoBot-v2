@@ -131,6 +131,7 @@
       <div class="row" style="margin-top:8px">
         <button id="vMin">Minimap</button>
         <button id="vWin">Window</button>
+        <button id="vTitle" title="the segmented title band exactly as OCR sees it — green boxes = accepted text lines, orange = OCR input crop">Title</button>
         <select id="fpsSel" title="stream rate">
           <option value="3">3 fps</option>
           <option value="6">6 fps</option>
@@ -393,8 +394,8 @@ ws.onmessage = e => {
       : (p.active || "");
     $("mapNew").style.display = sel.value === "__new" ? "" : "none";
     $("mapDet").textContent = "detected: " + (p.detected || "–") +
-      (p.via === "ocr" ? ` (OCR "${p.title || "?"}")`
-       : p.score != null ? ` (fp ${Math.round(p.score * 100)}%)` : "");
+      (p.via === "ocr" ? ` (OCR "${p.title || "?"}")` : "") +
+      (p.score != null ? ` fp ${Math.round(p.score * 100)}%` : "");
   } else if (p.event === "host") {
     fillSel($("portSel"), "(serial)",
       (p.ports || []).map(pt => [pt.device, pt.device + (pt.desc ? " · " + pt.desc : "")]),
@@ -537,6 +538,11 @@ $("vWin").onclick = () => {
   // can't record bogus coordinates.
   if (platMode) armPlats();
   send("dash|view|window");
+};
+$("vTitle").onclick = () => {
+  if (platMode) armPlats();
+  if (drawMode) armDraw();
+  send("dash|view|title");
 };
 $("fpsSel").onchange = () => send("dash|fps|" + $("fpsSel").value);
 

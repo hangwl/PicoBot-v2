@@ -121,6 +121,25 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     return out
 
 
+def annotate_title(band: np.ndarray) -> np.ndarray:
+    """Title-band debug view: green boxes on the accepted text lines,
+    red outline on the full crop OCR sees. Lets the user verify the
+    segmentation before trusting the OCR text."""
+    from ..vision.mapname import title_lines
+
+    out = band.copy()
+    lines = title_lines(band)
+    for x0, y0, x1, y1 in lines:
+        _rect(out, x0, y0, x1 - x0, y1 - y0, (0, 255, 0))
+    if lines:
+        y0 = min(b[1] for b in lines)
+        y1 = max(b[3] for b in lines)
+        x0 = min(b[0] for b in lines)
+        x1 = max(b[2] for b in lines)
+        _zone(out, x0, y0, x1, y1, (0, 120, 255))   # orange = OCR input
+    return out
+
+
 def encode_jpeg(img: np.ndarray, quality: int = 70) -> str:
     """BGR ndarray -> base64 JPEG. PIL imported lazily."""
     from PIL import Image
@@ -166,7 +185,7 @@ class FrameStreamer:
         self._thread = None
 
     def set_mode(self, mode: str) -> None:
-        if mode in ("minimap", "window"):
+        if mode in ("minimap", "window", "title"):
             self.mode = mode
 
     def _loop(self) -> None:
@@ -198,4 +217,4 @@ class FrameStreamer:
             self._stop.wait(max(0.05, self.interval - elapsed))
 
 
-__all__ = ["FrameStreamer", "Provider", "annotate", "encode_jpeg"]
+__all__ = ["FrameStreamer", "Provider", "annotate", "annotate_title", "encode_jpeg"]

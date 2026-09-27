@@ -241,10 +241,11 @@ class SmartBot(BotBase):
         region = self.minimap.region
         if region is None:
             return None
-        return name_strip_region(region, self.config.name_strip_height)
+        return name_strip_region(region, self.config.name_scan_px)
 
     def name_img(self):
-        """BGR capture of the map-name strip (above the minimap)."""
+        """BGR band spanning the title zone (window top → into the
+        minimap region); title_lines() segments the text out of it."""
         region = self._name_region()
         if region is None:
             return None

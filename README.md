@@ -85,9 +85,16 @@ spots) and legs (walk / flash-jump / climb steps between them), plus skill
 bindings. Map identity uses two independent signals, checked per
 resolution:
 
-1. **OCR** — the map-name strip above the minimap is read with RapidOCR
-   and substring-matched (normalized) against each map's `map_name`.
-   It's an exact text signal, immune to minimap cosmetics entirely.
+1. **OCR** — the map-title text is read with RapidOCR and
+   substring-matched (normalized) against each map's `map_name`. The
+   capture band spans the window top down into the minimap region and
+   is segmented before the engine sees it: near-white masking excludes
+   the toolbar icons and the colored map icon, a divider-row cut stops
+   map content leaking in, and dense column runs (the icon block) are
+   dropped. OCR only fires when identity is in question — startup, a
+   watchdog-confirmed map change, a pin change, or a calibration save —
+   never per-frame. It's an exact text signal, immune to minimap
+   cosmetics entirely.
 2. **Structure fingerprint** (`fingerprint`, `g2:` scheme) — only
    platform/line geometry feeds the hash, so translucent minimap
    backgrounds and panel art can't drift matching as the character moves.
@@ -242,7 +249,7 @@ toggles, minimap colors/region, flash jump, map store:
     "map_match_threshold": 15.0,
     "marker_inset_px": 4,
     "name_ocr": true,
-    "name_strip_height": 26,
+    "name_scan_px": 90,
     "minimap_name_region": null
   }
 }
@@ -262,13 +269,15 @@ Notes:
   area** (i.e. below the OS title bar — captures never include the title bar
   or window borders). Set it if
   auto-detection fails on your client.
-- `name_ocr` (default true) reads the map-title strip above the minimap
-  with RapidOCR — the preferred identity signal. `name_strip_height` is
-  the fallback band height when the minimap is flush with the window's
-  top edge; `minimap_name_region` pins an exact strip rect for clients
-  that draw the title elsewhere. Saving a calibration stores the OCR'd
-  title as the map's `map_name`, which is what `match_name` compares
-  against — a map saved without it simply skips OCR matching.
+- `name_ocr` (default true) reads the map-title band with RapidOCR —
+  the preferred identity signal. `name_scan_px` (default 90) is how far
+  into the minimap region the title scan reaches (panel-embedded titles
+  need ~70px); `minimap_name_region` pins an exact band rect for clients
+  that draw the title elsewhere. The dashboard's **Title** view shows
+  the segmented band with the accepted text lines boxed — verify the
+  crop before trusting OCR. Saving a calibration stores the OCR'd title
+  as the map's `map_name`, which is what `match_name` compares against —
+  a map saved without it simply skips OCR matching.
 - `marker_inset_px` (default 4) crops that many pixels off the minimap rim
   before marker (player/rune/other-player) detection — frame and panel-chrome
   pixels can't register as markers, and marker positions are the centroid of

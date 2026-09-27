@@ -86,8 +86,9 @@ class BotConfig:
     marker_inset_px: int = 4              # marker scans ignore this many rim px
     name_ocr: bool = True                 # OCR the map-name strip (preferred ID)
     minimap_name_region: Optional[Tuple[int, int, int, int]] = None
-    name_strip_height: int = 26           # inner-strip fallback when minimap
-                                          # is flush with the window's top edge
+    name_scan_px: int = 90                # how far into the minimap region the
+                                          # title scan reaches (titles inside
+                                          # the panel border need ~70px)
 
     def __post_init__(self) -> None:
         if not self.skills:
@@ -119,7 +120,7 @@ class BotConfig:
                 setattr(cfg, name, float(data[name]))
         ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px",
                 "marker_inset_px", "weave_range_px", "weave_edge_margin_px",
-                "wall_zone_px", "name_strip_height")
+                "wall_zone_px", "name_scan_px")
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))
