@@ -9,21 +9,24 @@ installed the repo's own venv interpreter works:
 
 ```bash
 .venv/bin/python -m picobot          # run the host
-.venv/bin/python -m pytest tests/ -x -q   # the suite (~280 tests, ~1s)
+.venv/bin/python -m pytest tests/ -x -q   # the suite (~300 tests, ~1s)
 ```
 
 ## Test layout
 
 `tests/` mirrors `picobot/`:
 
-- `test_minimap.py` — fingerprint geometry, watchdog self-consistency,
-  region provenance, marker/blob detection.
+- `test_minimap.py` — transfer detection, `find_frame`, panel-moved
+  relocation, region provenance, marker/blob detection.
+- `test_transition.py` — blackout detector states.
+- `test_identity.py` — title voting, pin resolution, stale-read discard,
+  worker thread.
 - `test_mapname.py` — title segmentation (divider cut, icon cut, sparse
   thresholds, region helpers).
-- `test_bot_maps.py` — `MapStore` matching incl. alias/title OCR keys and
-  truncated-title reverse matching, `match_scored`.
-- `test_smart_nav.py` — patrol routing, weaving, stall guards, map
-  resolution + pin verification.
+- `test_bot_maps.py` — `MapStore` title matching on real OCR reads
+  (clipped/noisy titles, sibling maps, ambiguity).
+- `test_smart_nav.py` — patrol routing, weaving, stall guards, identity
+  sync, arrival handling in `minimap_frame`.
 - `test_serve.py` — host commands, frame payloads, panel assembly
   (`assemble_panel`/`_offset_meta`), layout drags.
 - `test_framelog.py` — debug capture episodes, snapshots, pruning.
@@ -39,13 +42,12 @@ installed the repo's own venv interpreter works:
   composite's offset.
 - **`entry.name` is the user's alias; `entry.map_name` is the OCR'd
   in-game title.** Never conflate them.
-- **Hand-drawn platforms are authoritative** for movement. Structural
-  detection exists only for fingerprints/identity — don't reintroduce
-  ink-based navigation.
-- **OCR is event-gated**, never per-frame. Fingerprint per-frame is cheap
-  and drives `map_conf`.
-- **Self-consistent watchdog**: don't relax "miss must match the previous
-  miss" — translucent panels produce constant one-off misses.
+- **Hand-drawn platforms are authoritative** for movement — don't
+  reintroduce line auto-detection.
+- **OCR is request-driven** and runs on the `TitleOCR` worker — never on
+  the frame thread, never per-frame.
+- **Map change = loading blackout only.** Don't reintroduce pixel-content
+  change as a trigger — translucent UI defeats it (see learnings.md).
 - Event levels: `hid`/serial chatter is `debug`; think before emitting
   chatty kinds at `info`.
 - `picobot_controller/` is a separate Flutter remote app; `CIRCUITPY/` is
@@ -60,12 +62,11 @@ oldest pruned past `debug_capture_max_events`). Every folder has a
 
 | Reason | When | Contents |
 |---|---|---|
-| `watchdog_recovered` | ≥2 frames missed the baseline, then it matched again (an overlay came and went) | pre-roll + episode frames `NNN.png`, structure masks `NNN_mask.png`, `baseline.png`, `window_onset.png`; per-frame `state`/`dist`/`pending_dist`/`misses`/`mask_px`/`scheme` |
-| `watchdog_confirmed` | watchdog declared a map change | as above + `window_confirm.png` |
+| `transition` | a confirmed loading blackout through arrival | pre-roll + episode frames `NNN.png`, `window_arrived.png`; per-frame `dark`/`state`/`event` |
 | `ocr` / `ocr_nocrop` / `ocr_error` | every title OCR read | `band.png`, `crop.png`, text + per-line scores |
-| `hazard_leg_fp` | bot paused on "map changed unexpectedly" | `frame.png`, `window.png`, distance |
+| `frame_not_found` | `find_frame` failed on a lit window (≤ 1 per 30s) | `window.png` |
 
-Single-frame blips are dropped. Captures are written on a background
+Dark blips that never confirm are dropped. Captures are written on a background
 thread. Implementation: `picobot/vision/framelog.py`.
 
 ## Verifying vision changes

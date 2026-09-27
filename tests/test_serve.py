@@ -16,11 +16,6 @@ from picobot.remote.control import (
 )
 from picobot.remote.streamer import annotate, encode_jpeg
 from picobot.serve import BotHost
-from picobot.vision.minimap import (
-    MinimapAnalyzer,
-    fingerprint,
-    structure_mask,
-)
 
 
 class EventBusTests(unittest.TestCase):
@@ -252,11 +247,27 @@ class HostCommandTests(unittest.TestCase):
         self.save_patch = patch("picobot.serve.save_config")
         self.save_mock = self.save_patch.start()
         self.host = BotHost(None, "OldWin", config=AppConfig())
+        self.host.identity.threaded = False
         self.sent = []
         self.host.remote.broadcast = self.sent.append
 
     def tearDown(self):
         self.save_patch.stop()
+
+    def _use_store(self, tmp, pin=None):
+        store = MapStore(tmp)
+        self.host.maps = self.host.identity.store = store
+        self.host.identity.pin = pin
+        self.host.identity._recompute()
+        return store
+
+    def _read_title(self, title):
+        ident = self.host.identity
+        ident._reader = Mock(read=Mock(return_value=title))
+        ident.retry_s = 0.0
+        ident.request("test")
+        for _ in range(ident.max_reads):
+            ident.pump(lambda: object())
 
     def test_provide_frame_minimap_emits_panel_offset(self):
         # With a real title band the feed path composites the panel and
@@ -266,6 +277,7 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap_img.return_value = img
         feed.minimap.player_pos.return_value = (100, 75)
         feed.minimap.region = (10, 75, 200, 150)
+        feed.name_region.return_value = (0, 0, 300, 225)
         feed.name_img.return_value = PanelAssemblyTests._band()
         self.host._feed = feed
         snap = self.host._provide_frame("minimap")
@@ -318,22 +330,19 @@ class HostCommandTests(unittest.TestCase):
         feed = Mock()
         feed.minimap.region = (8, 40, 200, 150)
         self.host._feed = feed
-        self.host._live_fingerprint = Mock(return_value="aa")
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.assertTrue(self.host._handle_command("layout|save|m1"))
             saved = MapStore(tmp).get("m1")
             self.assertEqual(saved.minimap_region, (8, 40, 200, 150))
-            self.assertEqual(saved.fingerprint, "aa")
 
     def test_layout_save_named_creates_stub(self):
         feed = Mock()
         feed.minimap.region = (8, 40, 200, 150)
         self.host._feed = feed
-        self.host._live_fingerprint = Mock(return_value="aa")
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.assertTrue(self.host._handle_command("layout|save|newmap"))
             saved = MapStore(tmp).get("newmap")
             self.assertIsNotNone(saved)
@@ -346,18 +355,16 @@ class HostCommandTests(unittest.TestCase):
         feed = Mock()
         feed.minimap.region = (8, 40, 200, 150)
         self.host._feed = feed
-        self.host._live_fingerprint = Mock(return_value="aa")
-        self.host._active_map_override = "m1"
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            # m1 has a fingerprint that does NOT match the live frame.
-            self.host.maps.save(MapEntry(name="m1", fingerprint="ff" * 512))
+            self._use_store(tmp, pin="m1")
+            self.host.maps.save(MapEntry(name="m1"))
+            self.host.identity.refresh()
             self.host._handle_command("layout|save")
             self.assertIsNone(MapStore(tmp).get("m1").minimap_region)
         msgs = [
             e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
         ]
-        self.assertTrue(any("no map verified" in m for m in msgs))
+        self.assertTrue(any("isn't verified" in m for m in msgs))
 
     def test_wall_set_at_player_x_via_feed(self):
         img = np.zeros((150, 200, 3), dtype=np.uint8)
@@ -367,7 +374,7 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap.region = (0, 0, 200, 150)
         self.host._feed = feed
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.assertTrue(
                 self.host._handle_command("layout|wall|left|m1")
@@ -388,11 +395,12 @@ class HostCommandTests(unittest.TestCase):
 
     def test_wall_set_via_running_bot(self):
         bot = Mock()
-        bot.player_pos.return_value = (160, 40)
+        bot.viz = {"img": np.zeros((150, 200, 3), dtype=np.uint8)}
+        bot.minimap.player_pos.return_value = (160, 40)
         bot.minimap.region = (0, 0, 200, 150)
         self.host.bot = bot
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.assertTrue(
                 self.host._handle_command("layout|wall|right|m1")
@@ -406,7 +414,7 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap.region = (0, 0, 200, 150)
         self.host._feed = feed
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.host._handle_command("layout|wall|left|m1")
             self.assertIsNone(MapStore(tmp).get("m1").walls)
@@ -423,10 +431,9 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap.player_pos.return_value = (50, 40)
         feed.minimap.region = (0, 0, 200, 150)
         self.host._feed = feed
-        self.host._live_fingerprint = Mock(return_value="aa")
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="m1", fingerprint="ff" * 512))
+            self._use_store(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
             self.host._handle_command("layout|wall|left")
             self.assertIsNone(MapStore(tmp).get("m1").walls)
 
@@ -438,7 +445,7 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap.region = (0, 0, 200, 150)
         self.host._feed = feed
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.assertTrue(
                 self.host._handle_command("layout|wall|floor|m1")
@@ -458,7 +465,7 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap_img.return_value = img
         self.host._feed = feed
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.assertTrue(
                 self.host._handle_command("layout|plat|10,40,100,40|m1")
@@ -481,7 +488,7 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap_img.return_value = img
         self.host._feed = feed
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(MapEntry(name="m1"))
             self.host._handle_command("layout|plat|50,50,51,51|m1")
             self.assertIsNone(MapStore(tmp).get("m1").platforms)
@@ -493,129 +500,96 @@ class HostCommandTests(unittest.TestCase):
         feed = Mock()
         feed.minimap.region = (0, 0, 200, 150)
         self.host._feed = feed
-        self.host._resolved_map_entry = Mock(return_value=entry)
+        self.host._resolved_entry = Mock(return_value=entry)
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(entry)
             meta = self.host._map_meta()
         self.assertEqual(meta["platforms"], [(10, 38, 100, 38)])
 
-    def _inked_img(self, w=200, h=150):
-        """Minimap-like frame: platform rows in border/ink color."""
-        img = np.zeros((h, w, 3), dtype=np.uint8)
-        img[::20, :] = (228, 228, 228)
-        return img
-
-    def _feed_with(self, img):
-        """Feed stub whose live frame is ``img``."""
-        analyzer = MinimapAnalyzer(region=(0, 0, 200, 150))
+    def _region_feed(self):
         feed = Mock()
-        feed.minimap = analyzer
-        feed.minimap_img = Mock(return_value=img)
+        feed.minimap.region = (0, 0, 200, 150)
         self.host._feed = feed
-        return analyzer
+        return feed
 
-    def _fp_of(self, img, analyzer):
-        c = analyzer.colors
-        return fingerprint(
-            img,
-            ignore_colors=(c.player, c.other_player, c.rune),
-            include_mask=structure_mask(img, c),
-        )
-
-    def test_maps_payload_reports_detected_and_score(self):
-        img = self._inked_img()
-        analyzer = self._feed_with(img)
-        fp = self._fp_of(img, analyzer)
+    def test_maps_payload_reports_detected_title_and_score(self):
+        self._region_feed()
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="m1", fingerprint=fp))
+            self._use_store(tmp).save(
+                MapEntry(name="m1", map_name="Chu Chu Island Chu Chu Village")
+            )
+            self._read_title("Chu Chu Island Chu Chu Village")
             self.host._send_maps()
         payload = json.loads(self.sent[-1][5:])
         self.assertEqual(payload["event"], "maps")
         self.assertEqual(payload["detected"], "m1")
-        self.assertGreater(payload["score"], 0.9)
+        self.assertEqual(payload["via"], "ocr")
+        self.assertEqual(payload["title"], "Chu Chu Island Chu Chu Village")
+        self.assertEqual(payload["score"], 1.0)
 
-    def test_map_meta_reports_confidence(self):
-        img = self._inked_img()
-        analyzer = self._feed_with(img)
-        fp = self._fp_of(img, analyzer)
+    def test_map_meta_reports_title_confidence(self):
+        self._region_feed()
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="m1", fingerprint=fp))
-            self.host._resolved_map_cached()   # refresh live evidence
+            self._use_store(tmp).save(MapEntry(name="m1", map_name="Arcana Cave"))
+            self._read_title("Arcana Cave")
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
-        self.assertGreater(meta["map_conf"], 0.9)
+        self.assertEqual(meta["map_via"], "ocr")
+        self.assertEqual(meta["map_conf"], 1.0)
 
-    def test_map_meta_confidence_none_without_fingerprint(self):
-        img = self._inked_img()
-        self._feed_with(img)
+    def test_map_meta_pin_only_has_no_confidence(self):
+        self._region_feed()
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="m1"))   # no fingerprint
-            self.host._active_map_override = "m1"
-            self.host._resolved_map_cached()
+            self._use_store(tmp, pin="m1").save(MapEntry(name="m1"))
+            self.host.identity.refresh()
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
+        self.assertEqual(meta["map_via"], "pin")
         self.assertIsNone(meta["map_conf"])
 
     def test_map_meta_walls_survive_bot_without_resolved_map(self):
-        # Regression: walls vanished the moment the bot started — the
-        # meta path trusted only bot._map (None until the first travel
-        # leg resolves it), bypassing the live-fingerprint path the feed
-        # was using.
-        img = self._inked_img()
-        analyzer = MinimapAnalyzer(region=(0, 0, 200, 150))
-        c = analyzer.colors
-        fp = fingerprint(
-            img,
-            ignore_colors=(c.player, c.other_player, c.rune),
-            include_mask=structure_mask(img, c),
-        )
-        feed = Mock()
-        feed.minimap = analyzer
-        feed.minimap_img = Mock(return_value=img)
-        self.host._feed = feed
+        # Walls must not vanish when the bot starts before it has synced
+        # its own map — meta reads the shared identity.
+        self._region_feed()
         bot = Mock()
-        bot._map = None                       # not resolved yet
-        bot.minimap_frame = Mock(return_value=None)
+        bot._map = None
         bot.minimap.region = (0, 0, 200, 150)
         self.host.bot = bot
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(
-                name="m1", fingerprint=fp, walls={"left": 0.25},
+            self._use_store(tmp).save(MapEntry(
+                name="m1", map_name="Arcana Cave", walls={"left": 0.25},
             ))
+            self._read_title("Arcana Cave")
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
         self.assertEqual(meta["walls"], {"left": 50})   # 0.25 * 200
 
-    def test_map_meta_live_fingerprint_beats_stale_pin(self):
-        # A persisted active_map pin must not shadow the map actually on
-        # screen — the pin is rotation scope, not identity.
-        img = self._inked_img()
-        analyzer = MinimapAnalyzer(region=(0, 0, 200, 150))
-        c = analyzer.colors
-        fp = fingerprint(
-            img,
-            ignore_colors=(c.player, c.other_player, c.rune),
-            include_mask=structure_mask(img, c),
-        )
-        feed = Mock()
-        feed.minimap = analyzer
-        feed.minimap_img = Mock(return_value=img)
-        self.host._feed = feed
-        self.host._active_map_override = "oldmap"
+    def test_map_meta_title_beats_stale_pin(self):
+        self._region_feed()
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="oldmap", fingerprint="ff" * 512))
-            self.host.maps.save(MapEntry(
-                name="m1", fingerprint=fp, walls={"right": 0.8},
+            store = self._use_store(tmp, pin="oldmap")
+            store.save(MapEntry(name="oldmap", map_name="Kerning Square"))
+            store.save(MapEntry(
+                name="m1", map_name="Arcana Cave", walls={"right": 0.8},
             ))
+            self._read_title("Arcana Cave")
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
         self.assertEqual(meta["walls"], {"right": 160})  # 0.8 * 200
+
+    def test_layout_save_backfills_title(self):
+        feed = self._region_feed()
+        feed.minimap.region = (8, 40, 200, 150)
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp).save(MapEntry(name="WLOH"))
+            self._read_title("Lake of Oblivion Weathered Land of Happiness")
+            self.host._handle_command("layout|save|WLOH")
+            saved = MapStore(tmp).get("WLOH")
+        self.assertEqual(
+            saved.map_name, "Lake of Oblivion Weathered Land of Happiness"
+        )
+        self.assertEqual(self.host.identity.current.name, "WLOH")
 
     def test_platform_overlay_draws_stored_segments(self):
         # Drawn platforms ride the frame meta and annotate() renders them.
@@ -624,13 +598,14 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap_img.return_value = img
         feed.minimap.player_pos.return_value = None
         feed.minimap.region = (0, 0, 200, 150)
+        feed.name_region.return_value = None
         self.host._feed = feed
-        self.host._active_map_override = "m1"
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp, pin="m1")
             self.host.maps.save(MapEntry(
                 name="m1", platforms=[[0.05, 0.4, 0.5, 0.4]]
             ))
+            self.host.identity.refresh()
             snap = self.host._provide_frame("minimap")
         self.assertEqual(snap["platforms"], [(10, 60, 100, 60)])
         out = annotate(img, snap)
@@ -658,15 +633,13 @@ class HostCommandTests(unittest.TestCase):
         self.assertTrue((out[60, 100] == img[60, 100]).all())
         self.assertTrue((out[60, 55] == img[60, 55]).all())
 
-    def test_layout_save_verifies_fingerprint_match(self):
-        # Auto path succeeds when the stored fingerprint matches live.
+    def test_layout_save_blank_uses_title_verified_map(self):
         feed = Mock()
         feed.minimap.region = (8, 40, 200, 150)
         self.host._feed = feed
-        self.host._live_fingerprint = Mock(return_value="aa")
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="m1", fingerprint="aa"))
+            self._use_store(tmp).save(MapEntry(name="m1", map_name="Arcana Cave"))
+            self._read_title("Arcana Cave")
             self.assertTrue(self.host._handle_command("layout|save"))
             self.assertEqual(
                 MapStore(tmp).get("m1").minimap_region, (8, 40, 200, 150)
@@ -685,18 +658,17 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap.region = (8, 40, 200, 150)
         feed.minimap_img.return_value = None
         self.host._feed = feed
-        self.host._active_map_override = None
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host._handle_command("layout|save")
         msgs = [
             e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
         ]
-        self.assertTrue(any("can't verify" in m for m in msgs))
+        self.assertTrue(any("isn't verified" in m for m in msgs))
 
     def test_layout_clear_removes_stored(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host.maps.save(
                 MapEntry(name="m1", minimap_region=(1, 2, 3, 4))
             )
@@ -709,11 +681,12 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap_img.return_value = img
         feed.minimap.player_pos.return_value = None
         feed.minimap.region = (0, 0, 40, 30)
+        feed.name_region.return_value = None
         self.host._feed = feed
-        self.host._active_map_override = "m1"
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp, pin="m1")
             self.host.maps.save(MapEntry(name="m1"))  # no anchors
+            self.host.identity.refresh()
             snap = self.host._provide_frame("minimap")
             self.assertEqual(snap["map"], "m1")
             self.assertTrue(snap["no_rotation"])
@@ -723,7 +696,6 @@ class HostCommandTests(unittest.TestCase):
             ]
             self.host.maps.save(entry)
             self.host.maps.reload()
-            self.host._map_res_ts = 0.0  # expire the resolution cache
             snap = self.host._provide_frame("minimap")
             self.assertFalse(snap["no_rotation"])
 
@@ -768,7 +740,7 @@ class HostCommandTests(unittest.TestCase):
         self.assertEqual(self.host.config.bot["minimap_name_region"],
                          [5, 8, 300, 40])
         self.save_mock.assert_called()
-        self.assertTrue(self.host._map_dirty)
+        self.assertTrue(self.host.identity.pending)
 
     def test_skills_set_persists_and_broadcasts(self):
         self.assertTrue(self.host._handle_command(
@@ -899,10 +871,10 @@ class HostCommandTests(unittest.TestCase):
         feed.minimap_img.return_value = None
         feed.minimap.region = (0, 0, 100, 100)
         self.host._feed = feed
-        self.host._active_map_override = "detected_map"
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp, pin="detected_map")
             self.host.maps.save(MapEntry(name="detected_map"))
+            self.host.identity.refresh()
             self.host._cal_finish("")
             self.assertEqual(MapStore(tmp).names(), ["detected_map"])
         self.assertEqual(cal.finish.call_args[0][0], "detected_map")
@@ -913,7 +885,7 @@ class HostCommandTests(unittest.TestCase):
         self.host.calibrator = cal
         self.host._get_feed = Mock(return_value=None)
         with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
+            self._use_store(tmp)
             self.host._cal_finish("my_map")
             self.assertEqual(MapStore(tmp).names(), ["my_map"])
         self.assertEqual(cal.finish.call_args[0][0], "my_map")

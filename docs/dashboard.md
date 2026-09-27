@@ -11,8 +11,9 @@ strings; all pushes are `dash|{json}` frames or `evt` events.
 - **Map** — the single source of truth: selector pins a map
   (`active_map`), `auto-detect` defers to live identity, `+ new map…`
   names the next calibration save. `detected:` shows
-  `alias (OCR "…") fp 87%` — alias, ground-truth title text, fingerprint
-  corroboration.
+  `alias (ocr|pin) · title "…" 98%` — the resolved map, how it was
+  resolved, the accepted title and its match score, and `reading title…`
+  while a vote is in progress.
 - **View** — frame views + layout tools:
   - **Panel** (default) — the whole located minimap panel: title strip
     on top (green boxes = accepted text lines, orange = the OCR crop),

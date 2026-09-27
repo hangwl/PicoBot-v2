@@ -18,6 +18,56 @@ comments stay short; history lives here.
   icon cut, faded-tail recovery. Much better than the unsegmented band.
   Still fragile on bright backgrounds behind the panel.
 
+### Diagnosis from debug captures (2026-09-27)
+
+29 captures over ~50s walking Nameless Town → Happiness → Rage → Sorrow
+→ Chu Chu Village. 15 watchdog confirms for 5 real changes.
+
+- **A global `minimap_region` pin is wrong on every other map.** The
+  pinned `[7, 66, 304, 72]` fit Nameless Town's wide minimap; elsewhere
+  ~90px of the region is live game world and the minimap is cut off.
+  Minimap size is per-map.
+- **The structure mask barely sees real platforms.** Minimap platform
+  lines are dotted, so they fail the ≥8px uniform-run test. The mask is
+  dominated by the panel's white border (constant, no identity) plus
+  scene edges — snow platforms seen through the translucent panel and
+  in the out-of-panel strip. Camera movement alone produces misses of
+  20–30 (threshold 15).
+- **Opening/closing a window (Inventory) confirms a change twice** —
+  once on open, once on close — in 0.3s (3 frames at ~10fps).
+- **Loading transitions are pure black** (every pixel 0, whole window)
+  for ≥1s. Raw-hash fallback made each fade confirm twice (into and
+  out of black).
+- **OCR takes ~1.5s and blocks the frame thread**; every run left a
+  matching gap in capture timestamps. OCR ran 15 times, often
+  back-to-back without any watchdog confirm.
+- **OCR text quality is good**, but the pinned title band clips long
+  names mid-glyph: `Happiness` → `Happir`. `Happir` is not a substring
+  of `happiness`, so substring matching fails.
+
+### Redesign (2026-09-27): blackout trigger + frame detection + voted OCR
+
+Replaced the fingerprint watchdog entirely. Validated by replaying the
+captures above:
+
+- **Blackout trigger**: 3 loading/arrived pairs for the 3 captured
+  blackouts; 0 triggers from the Inventory and scenery episodes that
+  produced 12 false confirms before.
+- **`find_frame`**: exact panel rects on every lit window (216×90,
+  185×82, 194×82, 213×109, 170×82); `None` only mid-fade or with
+  Inventory covering the frame's side. The old density-based `_detect`
+  returned 185×297 and 323×82 on the same captures.
+- **Panel-width title band** + fuzzy matching: every lit capture
+  resolved to the right sibling (Happiness/Rage/Sorrow, scores ≥0.985);
+  Chu Chu Village (not stored) stayed unknown. Siblings score 0.84–0.90
+  against each other, hence `min_score` 0.93 + 0.05 margin.
+- **Panel with the title row collapsed** (seen at 180339) has no title to
+  read — identity falls back to the pin there. The region moves without
+  a blackout, so the frame edge is tracked to relocate.
+- The saved `WLOH` map had `map_name: null`, so title matching could
+  never identify it; the stored region `[7,68,204,75]` is smaller than
+  the real panel (216×90).
+
 ## Geometry
 
 - **Platform auto-detection** by ink colour, then colour-free

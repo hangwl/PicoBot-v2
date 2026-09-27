@@ -130,9 +130,7 @@ def assemble_panel(
 ) -> Tuple[np.ndarray, int, int]:
     """Composite the title band + minimap into one panel image.
 
-    ``band_xy`` is the band capture's top-left in window coords —
-    ``(0, 0)`` for the auto band, the override rect's origin when
-    ``minimap_name_region`` pins a custom strip.
+    ``band_xy`` is the band capture's top-left in window coords.
 
     Returns ``(img, dx, dy)`` — ``img`` places the minimap at offset
     ``(dx, dy)``, so region-space overlay coords shift by that much.
@@ -288,7 +286,7 @@ class FrameStreamer:
                         "jpeg": encode_jpeg(frame, self.quality),
                     }
                     for key in (
-                        "state", "map", "map_conf", "map_title",
+                        "state", "map", "map_via", "map_conf", "map_title",
                         "hazard", "player",
                         "layout", "no_rotation", "ox", "oy",
                     ):

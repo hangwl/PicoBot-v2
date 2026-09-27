@@ -71,7 +71,7 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(cfg.maps_dir, "my_maps")
         self.assertEqual(cfg.active_map, "farm_1")
         self.assertFalse(cfg.auto_select_map)
-        self.assertEqual(cfg.map_match_threshold, 12.5)
+        self.assertFalse(hasattr(cfg, "map_match_threshold"))  # legacy key ignored
 
 
 class TimingTests(unittest.TestCase):

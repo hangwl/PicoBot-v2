@@ -24,24 +24,20 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "stop_when_players_appear": true,
     "stop_when_rune_appears": true,
     "pause_on_lie_detector": false,
-    "minimap_region": [x, y, w, h],
     "minimap_colors": {
       "player": [12, 240, 239],
       "other_player": [118, 45, 253],
       "rune": [255, 102, 221],
-      "border": [228, 228, 228],
-      "ink": null
+      "border": [228, 228, 228]
     },
     "flash_jump": {"enabled": true, "key": null},
     "travel_style": "mixed",
     "maps_dir": "maps",
     "active_map": null,
     "auto_select_map": true,
-    "map_match_threshold": 15.0,
     "marker_inset_px": 4,
     "name_ocr": true,
     "name_scan_px": 160,
-    "minimap_name_region": null,
     "debug_capture": true,
     "debug_capture_dir": "debug/frames",
     "debug_capture_max_events": 100
@@ -51,17 +47,17 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 
 ## Notes
 
-- `minimap_region`, `minimap_name_region` are client-area `(x,y,w,h)`
-  rects — set via dashboard drags, not by hand.
-- `name_ocr` reads the title band with RapidOCR — the preferred identity
-  signal, event-gated (never per-frame). `name_scan_px` is how deep into
-  the minimap region the scan reaches; segmentation cuts it back at the
-  panel divider.
-- `minimap_colors.ink` is an optional global platform-line colour that
-  only feeds the fingerprint mask — it plays no role in movement.
-- `active_map` is a pin, not identity: it's kept unless its own stored
-  fingerprint verifiably mismatches, or OCR reads a different stored
-  map's title. `auto_select_map` defers to live detection.
+- `minimap_region` / `minimap_name_region` (client-area `(x,y,w,h)`)
+  are **hard pins** — leave them unset. The panel is found by its frame
+  on every map (sizes differ per map), and the title band follows it.
+  Set them only via the dashboard drags when detection fails.
+- `minimap_colors.border` is the frame colour `find_frame` looks for.
+- `name_ocr` reads the title band with RapidOCR on a worker thread — the
+  identity signal, requested on startup/arrival/pin change (never
+  per-frame). `name_scan_px` is how deep into the frame the band reaches.
+- `active_map` is a pin: it stands unless the title matches a different
+  stored map. `auto_select_map` defers to live detection.
+- Removed keys (`map_match_threshold`, `minimap_colors.ink`) are ignored.
 - `up_jump_skill_key` is a rope-lift style skill used instead of the
   jump+up+jump combo; presses are gated by `up_jump_skill_cooldown` and
   nav rides out the cooldown rather than misreading suppression as

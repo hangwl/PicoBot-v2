@@ -7,20 +7,15 @@ import numpy as np
 
 from picobot.vision import framelog
 from picobot.vision.minimap import MinimapAnalyzer
-
-_BORDER = (228, 228, 228)
-
-
-def _hlines(w=200, h=150):
-    img = np.zeros((h, w, 3), dtype=np.uint8)
-    img[::15, :] = _BORDER
-    return img
+from picobot.vision.transition import TransitionDetector
 
 
-def _vlines(w=200, h=150, off=0):
-    img = np.zeros((h, w, 3), dtype=np.uint8)
-    img[:, off::15] = _BORDER
-    return img
+def _lit(w=200, h=150):
+    return np.full((h, w, 3), 90, dtype=np.uint8)
+
+
+def _black(w=200, h=150):
+    return np.zeros((h, w, 3), dtype=np.uint8)
 
 
 def _events(root: Path):
@@ -32,65 +27,58 @@ class FrameRecorderTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.rec = framelog.configure(self.root, pre=3, post=2)
+        self.t = 0.0
 
     def tearDown(self):
         framelog.configure(None)
         self.tmp.cleanup()
 
     def _analyzer(self):
-        a = MinimapAnalyzer()
+        a = MinimapAnalyzer(transition=TransitionDetector(clock=lambda: self.t))
         a._region = (0, 0, 200, 150)
         a._region_source = "auto"
         return a
 
+    def _feed(self, a, frames, ctx=None):
+        out = []
+        for f in frames:
+            self.t += 0.1
+            out.append(a.note_frame(f, context=ctx))
+        return out
+
     def test_disabled_by_default_writes_nothing(self):
         framelog.configure(None)
         a = self._analyzer()
-        for img in (_hlines(), _vlines(), _vlines(), _vlines()):
-            a.note_frame(img)
+        self._feed(a, [_lit()] * 3 + [_black()] * 8 + [_lit()] * 12)
         self.assertEqual(_events(self.root), [])
 
-    def test_confirmed_change_saves_episode(self):
+    def test_transfer_saves_episode(self):
         a = self._analyzer()
-        ctx_calls = []
+        calls = []
 
         def ctx():
-            ctx_calls.append(1)
+            calls.append(1)
             return {"window": np.full((40, 60, 3), 7, np.uint8)}
 
-        frames = [_hlines(), _hlines()] + [_vlines()] * 3 + [_vlines()] * 3
-        results = [a.note_frame(f, context=ctx) for f in frames]
-        self.assertEqual(results.count(True), 1)
+        out = self._feed(a, [_lit()] * 4 + [_black()] * 8 + [_lit()] * 12, ctx)
+        self.assertEqual(out.count(True), 1)
         self.rec.flush()
         (ev,) = _events(self.root)
-        self.assertTrue(ev.name.endswith("_watchdog_confirmed"))
+        self.assertTrue(ev.name.endswith("_transition"))
         meta = json.loads((ev / "meta.json").read_text())
-        self.assertEqual(meta["outcome"], "confirmed")
+        self.assertEqual(meta["outcome"], "arrived")
         self.assertEqual(meta["region_source"], "auto")
-        states = [f["state"] for f in meta["frames"]]
-        self.assertIn("confirm", states)
         self.assertTrue(meta["frames"][0]["pre"])
-        for name in ("baseline.png", "window_onset.png", "window_confirm.png",
-                     "000.png", "000_mask.png"):
-            self.assertTrue((ev / name).exists(), name)
-        self.assertEqual(len(ctx_calls), 2)
+        self.assertIn("arrived", [f["event"] for f in meta["frames"]])
+        self.assertTrue((ev / "window_arrived.png").exists())
+        self.assertTrue((ev / "000.png").exists())
+        self.assertEqual(len(calls), 1)
 
-    def test_recovered_overlay_is_saved_single_blip_is_not(self):
+    def test_dark_blip_is_not_saved(self):
         a = self._analyzer()
-        a.note_frame(_hlines())
-        a.note_frame(_vlines())            # one-frame blip
-        for _ in range(3):
-            a.note_frame(_hlines())
+        self._feed(a, [_lit()] * 3 + [_black()] + [_lit()] * 6)
         self.rec.flush()
         self.assertEqual(_events(self.root), [])
-
-        a.note_frame(_vlines())
-        a.note_frame(_vlines())            # 2-frame overlay, then gone
-        for _ in range(3):
-            a.note_frame(_hlines())
-        self.rec.flush()
-        (ev,) = _events(self.root)
-        self.assertTrue(ev.name.endswith("_watchdog_recovered"))
 
     def test_snapshot_and_pruning(self):
         rec = framelog.configure(self.root, max_events=2)

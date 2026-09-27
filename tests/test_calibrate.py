@@ -92,6 +92,7 @@ class TraceRecorderTests(unittest.TestCase):
         r.sample((120, 50), t=30.0)
         r.mark(t=30.0)
         entry = r.finish("m")
+        self.assertEqual(entry.name, "m")  # not clobbered by a key_* name
         self.assertEqual(entry.skills["key_a"].kind, "attack")
         self.assertAlmostEqual(entry.skills["key_a"].cooldown, 0.6)
         self.assertEqual(entry.skills["key_d"].kind, "summon")
@@ -210,10 +211,10 @@ class MergeRecordingTests(unittest.TestCase):
             name="m1",
             rotation=Rotation(anchors=[Anchor("a0", 0.3, 0.5)]),
             skills={"key_f1": Skill("key_f1", "f1", 5.0, "attack")},
-            fingerprint="g2:aa",
         )
         existing = MapEntry(
             name="m1",
+            fingerprint="g2:aa",
             walls={"left": 0.2, "right": 0.8, "floor": 0.8},
             platforms=[[0.05, 0.25, 0.5, 0.25]],
             map_name="Limina : 1-5 East",
@@ -225,7 +226,7 @@ class MergeRecordingTests(unittest.TestCase):
         self.assertEqual(merged.map_name, "Limina : 1-5 East")
         self.assertIn("key_f1", merged.skills)
         self.assertIn("nova", merged.skills)
-        self.assertEqual(merged.fingerprint, "g2:aa")  # fresh fp wins
+        self.assertEqual(merged.fingerprint, "g2:aa")  # legacy field carried
 
     def test_fresh_map_name_beats_stored_title(self):
         from picobot.bot.calibrate import merge_recording

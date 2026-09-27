@@ -1,18 +1,24 @@
 # Map detection
 
 Map identity decides which saved layout (anchors, platforms, walls,
-floor, region) is live. It uses **two independent signals**, a
-self-consistent watchdog, and explicit user pins — designed to survive
-the translucent minimap panel that made pixel-colour matching hopeless.
+floor, region) is live. Three pieces, each built on a signal translucent
+UI can't fake:
+
+1. **Map change** — the loading blackout (`vision/transition.py`).
+2. **Where the minimap is** — the panel's opaque white frame
+   (`find_frame` in `vision/minimap.py`).
+3. **Which map** — the OCR'd title, voted and fuzzy-matched
+   (`bot/identity.py`, `vision/mapname.py`, `MapStore.match_title`).
+
+Why not pixel fingerprints: see [learnings.md](learnings.md).
 
 ## The map file model
 
 ```json
 {
-  "name": "lake1f",
+  "name": "WLOH",
   "map_name": "Lake of Oblivion Weathered Land of Happiness",
-  "fingerprint": "g2:<hex>",
-  "minimap_region": [8, 56, 232, 169],
+  "minimap_region": [7, 68, 216, 90],
   "rotation": { "anchors": [...], "legs": [...] },
   "skills": { ... },
   "platforms": [[x0, y0, x1, y1], ...],
@@ -21,82 +27,96 @@ the translucent minimap panel that made pixel-colour matching hopeless.
 ```
 
 - `name` — **your alias** (file name, dashboard selector label).
-- `map_name` — **the OCR'd in-game title only**, stored at calibration
-  save. Never overwrite it with the alias.
-- `fingerprint` — structural hash (`g2:` scheme), see below.
-- `minimap_region` — the minimap rect remembered at save; restored when
-  the map resolves so detection drift can't accumulate.
+- `map_name` — **the OCR'd in-game title only**; this is what identity
+  matches. Captured at calibration save, or backfilled by **Save
+  layout** when missing. Never overwrite it with the alias.
+- `minimap_region` — the panel rect at save. Re-applied once the title
+  verifies the map, so normalized anchors/platforms line up with the
+  layout they were recorded in.
+- `fingerprint` — legacy, carried through unused.
 
-## Signal 1 — OCR title (`vision/mapname.py`)
+## 1. Map change — loading blackout
 
-The map title is exact, human-readable identity — immune to everything
-that breaks fingerprints. It is **event-gated, never per-frame**: it runs
-on startup, a watchdog-confirmed change, a pin change, a `map|list`
-refresh, and a calibration save.
+Every transfer blacks out the whole client (all pixels 0) for ~1s.
+`TransitionDetector` watches each minimap capture: a frame is dark when
+its 99th-percentile value ≤ 12 (the panel's white frame keeps dark
+*scenes* well above that). States: `normal` → `dark` (after 0.25s,
+emits `loading`) → `settling` (first lit frame) → `normal` after 0.6s
+lit (emits `arrived`; waits out the fade-in).
 
-Capture band: full client width, window top → `name_scan_px` (default
-160) into the minimap region. Generous on purpose — segmentation isolates
-the text:
+- While loading, `MinimapAnalyzer.loading` is True: the bot's hazard
+  check reports `map transfer (loading screen)` and aborts the leg; no
+  title reads are attempted.
+- On `arrived`: the region is dropped (unless `config`-pinned) so the
+  new map's panel is re-detected, and identity requests a fresh title
+  with the old title cleared.
 
-1. **Near-white mask** (`min channel > 170`): title text is white;
-   toolbar icons are gray and the colored map icon mostly fails.
-2. **Divider cut** — the first row with a *contiguous* bright run ≥120px.
-   The panel's separator is one solid line (~200+px); a glyph's longest
-   run is ~15px. This works whether `locate()` found the whole panel
-   (divider inside it) or just the map frame (divider at its top).
-3. **Row grouping** into text lines (`min_line_h=4` filters the 1–2px
-   map lines and borders).
-4. **Icon cut** — column runs within the text zone; runs denser than
-   `icon_fill` (the droplet icon is a ~80%-fill block; text is sparse)
-   are dropped, so titles at any panel width survive.
-5. **Faded-tail recovery** — clients fade overflowing titles at the
-   panel edge; trailing glyphs drop below the white threshold mid-word.
-   The scan keeps extending while dimmer-but-bright columns (>80) appear
-   (gaps >12 dark cols end the title), and `title_crop` extends to the
-   divider's right edge — RapidOCR (a CNN) can read glyphs the threshold
-   dropped.
+## 2. Panel location — frame detection
 
-Escape hatch: `minimap_name_region` pins an exact band rect (set it with
-the dashboard's **Draw title** drag on the Window view). It wins over
-auto detection entirely.
+`find_frame` scans the window's top-left quadrant for the frame: a top
+and bottom edge (border-coloured runs ≥80px with matching x-extent) and
+two solid sides, tolerating rounded corners. Largest rectangle wins.
+Minimap size differs per map, so a global region pin is wrong on every
+map but one.
 
-`match_name` normalizes (lowercase alnum) and substring-matches the OCR
-text against **both** `map_name` and `name` — bidirectionally with a
-6-char floor, so a truncated title (`"Lake of Obliv"`) still resolves.
+**Panel moved without a transfer** (e.g. the title row toggled): each
+frame checks the region's top rows still show the border. Missing for
+≥1s → `relocate()` re-runs `find_frame` and switches only if a frame is
+found elsewhere — an overlay hiding the edge (Inventory) keeps the
+current region. Only `auto`/`stored` regions are tracked.
 
-## Signal 2 — structure fingerprint (`vision/minimap.py`)
+Region provenance: `config` (pinned in config.json, survives
+everything), `manual` (drawn on the dashboard), `stored` (map file),
+`auto` (detected).
 
-`g2:` fingerprints hash the *structure mask* — platform/line geometry —
-never pixel colour. Translucent backgrounds, panel art, and the moving
-character sprite can't drift it. Scheme prefix is compared in distance:
-legacy colour-hash fingerprints can never match `g2` ones (re-save maps
-to refresh). `fingerprint_score` normalizes distance→0–1 confidence for
-the dashboard.
+## 3. Identity — title OCR
 
-## Resolution order (both serve-side and bot-side)
+**Band**: `name_strip_region` spans the panel's width (±4px), from the
+window top to `name_scan_px` into the frame. The client clips the title
+at the panel edge, so nothing lies outside; a wider band only picks up
+other UI text. `minimap_name_region` pins a band rect instead.
 
-1. If the user pinned a map (`active_map`): keep it **unless** its own
-   stored fingerprint verifiably mismatches the screen, or OCR reads a
-   *different stored map's* title. A pin with no fingerprint stands —
-   fuzzy evidence never silently overrides user intent.
-2. OCR result → `match_name` → wins when present.
-3. Fingerprint `match_scored` → best sub-threshold entry + confidence.
-4. OCR-vs-fingerprint disagreements log a `map id conflict` event — you
-   see the bad read rather than trust it silently.
+**Segmentation** (`title_scan`): near-white mask; cut at the divider
+(the frame's top edge — first row with a ≥120px bright run); row-group
+text lines; drop dense icon columns; extend over faded tails.
 
-## Watchdog (`note_frame`)
+**Reads** run on a `TitleOCR` worker thread (~2s each on CPU); the
+frame thread only captures the band (`MapIdentity.pump`). A request
+starts a vote:
 
-Each captured minimap frame is fingerprinted and compared to baseline.
-A miss only counts when the new frame **matches the previous miss frame**
-— the scene must be a stable *different* picture. Loading blanks/fades
-neither match baseline nor each other, so they can never accumulate.
-After `map_change_threshold` self-consistent misses the change is
-confirmed: the region is dropped (unless `config`-sourced — provenance
-is tracked: config / stored / manual / auto), map re-resolves, and the
-map's remembered layout is reapplied.
+- a read matching a stored map with score ≥ 0.97 is accepted at once;
+- otherwise two consecutive reads must agree (same map, or same text for
+  an unknown map);
+- after 5 reads the last readable one is accepted, else "unreadable".
 
-Dashboard propagation: a resolved-identity change emits a `map` event
-(`map resolved: lake1f (ocr) via OCR "…"`) and pushes a fresh `maps`
-payload — the `detected:` readout and event log reflect transitions,
-even while the bot is running (the bot's `_map` transitions mark the
-host's resolution dirty, since the feed's watchdog is dormant then).
+Reads from a superseded request are discarded (generation counter).
+
+**Matching** (`title_score` / `match_title`): best of substring
+containment (weighted by coverage), prefix similarity for clipped titles
+(`Happir` ↔ `Happiness`), and whole-string similarity for misreads.
+Accept only when the best score ≥ 0.93 *and* leads the runner-up by
+0.05 — sibling maps on the same street score ~0.85–0.90 against each
+other, so a lone sibling can't claim another's title and truncated reads
+stay unresolved rather than guessing.
+
+**Requests**: startup, arrival, pin change, title-band change,
+panel moved (only if no title yet). Never per-frame.
+
+## Resolution (`MapIdentity`, shared by host and bot)
+
+1. The title matches a stored map that differs from the pin → that map
+   (`via: ocr`, logged as overriding the pin).
+2. Else a pin → the pin (`via: ocr` if the title confirms it, else
+   `pin`).
+3. Else the title's map, or unknown.
+
+Consumers poll `identity.version`. The bot applies changes on its own
+thread (`_sync_map`); the host broadcasts a `maps` payload when the
+version moves. Blank-name layout writes (walls, platforms, Save layout)
+require `via: ocr` — a pin is not evidence of what's on screen.
+
+## Debugging
+
+`debug/frames/` captures every transition, OCR read, and
+frame-not-found event — see
+[development.md](development.md#debug-frame-captures).

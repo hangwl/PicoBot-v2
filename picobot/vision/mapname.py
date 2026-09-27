@@ -1,11 +1,8 @@
 """OCR reader for the map-name text strip near the minimap.
 
-The game UI prints the area/map name as text adjacent to the minimap —
-an exact, human-readable identity signal: immune to translucent
-backgrounds, minimap animation, and look-alike layouts that confuse
-pixel-hash fingerprints. Uses RapidOCR (ONNX runtime, bundled models, no
-external binary). When the engine can't load, every read returns None
-and callers fall back to fingerprint matching.
+The game prints the street/map name above the minimap frame — the map
+identity signal. Uses RapidOCR (ONNX runtime, bundled models). When the
+engine can't load, every read returns None and only the pin applies.
 """
 
 from __future__ import annotations
@@ -64,24 +61,45 @@ def normalize_name(text: Optional[str]) -> str:
     return re.sub(r"[^0-9a-z]+", "", text.lower())
 
 
+def title_score(ocr_text: Optional[str], candidate: Optional[str]) -> float:
+    """0–1 similarity of an OCR'd title to a stored name.
+
+    Best of: substring containment (weighted by how much of the OCR text
+    the candidate covers), prefix similarity for titles the client
+    clipped (``Happir`` vs ``Happiness``), and whole-string similarity
+    for misreads.
+    """
+    from difflib import SequenceMatcher
+
+    ocr, cand = normalize_name(ocr_text), normalize_name(candidate)
+    if not ocr or not cand:
+        return 0.0
+    if ocr == cand:
+        return 1.0
+    score = SequenceMatcher(None, ocr, cand).ratio()
+    if len(cand) >= 5 and cand in ocr:
+        score = max(score, 0.85 + 0.15 * len(cand) / len(ocr))
+    if len(ocr) >= 6 and len(ocr) < len(cand):
+        prefix = SequenceMatcher(None, ocr, cand[: len(ocr)]).ratio()
+        score = max(score, 0.85 * prefix + 0.15 * len(ocr) / len(cand))
+    return min(1.0, score)
+
+
 def name_strip_region(
     minimap_region: Region,
     header_px: int = 90,
-    window_w: Optional[int] = None,
+    pad: int = 4,
 ) -> Region:
-    """Capture band covering the title wherever the client draws it.
+    """Title band: the panel's width (± ``pad``), from the window top to
+    ``header_px`` into the minimap frame.
 
-    Spans from the window's top edge to ``header_px`` into the minimap
-    region — covers both layouts: the title strip *above* the map frame
-    (border-box detection) and the title *inside* the panel top (panel
-    detection). Width is the full window width (``window_w``) when
-    known — titles can overflow the map frame, so a region-width band
-    would clip long names mid-glyph. :func:`title_lines` finds the text
-    inside either way, so the capture can be generous.
+    The client clips the title at the panel edge, so nothing useful lies
+    outside the frame's width — and a wider band picks up other UI text.
+    :func:`title_scan` cuts it back at the frame's top edge.
     """
     x, y, w, h = minimap_region
-    band_w = max(w, window_w) if window_w else w
-    return (0, 0, band_w, min(y + header_px, y + h))
+    bx = max(0, x - pad)
+    return (bx, 0, x + w + pad - bx, y + min(header_px, h))
 
 
 def _row_groups(white: np.ndarray, min_row_px: int, gap: int):
@@ -310,4 +328,5 @@ __all__ = [
     "title_crop",
     "title_lines",
     "title_scan",
+    "title_score",
 ]

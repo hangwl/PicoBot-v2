@@ -2,99 +2,55 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import numpy as np
-
 from picobot.bot.maps import MapEntry, MapStore
 from picobot.bot.rotation import Rotation, Step
-from picobot.vision.minimap import fingerprint, fingerprint_distance
 
 
-def _img(seed=0, w=200, h=120):
-    rng = np.random.default_rng(seed)
-    return rng.integers(0, 255, (h, w, 3), dtype=np.uint8)
+_LAKE = "Lake of Oblivion Weathered Land of "
 
 
-def _structured(seed=0, w=200, h=120):
-    """Minimap-like image: dark background with platform lines."""
-    rng = np.random.default_rng(seed)
-    img = np.full((h, w, 3), 30, dtype=np.uint8)
-    for _ in range(6):
-        y = rng.integers(0, h)
-        x0, x1 = sorted(rng.integers(0, w, 2))
-        img[y : y + 2, x0:x1] = (228, 228, 228)
-    return img
+class TitleMatchTests(unittest.TestCase):
+    """Real OCR reads from debug captures against sibling maps."""
 
+    def _store(self, tmp, *suffixes):
+        store = MapStore(tmp)
+        for sfx in suffixes:
+            store.save(MapEntry(name=sfx.lower(), map_name=_LAKE + sfx))
+        return store
 
-class FingerprintTests(unittest.TestCase):
-    def test_same_image_same_hash(self):
-        img = _img(1)
-        self.assertEqual(fingerprint(img), fingerprint(img))
+    def test_clipped_and_noisy_reads_resolve(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp, "Happiness", "Rage", "Sorrow")
+            for text, want in (
+                ("Lake  of Oblivion Weathered Land  of Happir", "happiness"),
+                ("Lake o of Oblivion Weathered Land of Happir", "happiness"),
+                ("Lake of Oblivion Weathered Land I of Rage", "rage"),
+                ("Lake of Oblivion Weathered La _and of f Sorrow", "sorrow"),
+            ):
+                entry, score = store.match_title(text)
+                self.assertIsNotNone(entry, text)
+                self.assertEqual(entry.name, want, text)
 
-    def test_different_images_differ(self):
-        horizontal = np.full((120, 200, 3), 30, dtype=np.uint8)
-        horizontal[20::30, 10:190] = (228, 228, 228)  # platform rows
-        vertical = np.full((120, 200, 3), 30, dtype=np.uint8)
-        vertical[10:110, 20::40] = (228, 228, 228)    # vertical walls
-        dist = fingerprint_distance(
-            fingerprint(horizontal), fingerprint(vertical)
-        )
-        self.assertGreater(dist, 15)
+    def test_ambiguous_prefix_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp, "Happiness", "Rage")
+            entry, score = store.match_title("Lake of Oblivion")
+            self.assertIsNone(entry)
+            self.assertGreater(score, 0)
 
-    def test_same_map_with_noise_matches(self):
-        base = _structured(4)
-        noisy = base.copy()
-        noisy[40:46, 90:96] = (12, 240, 239)  # roaming player dot
-        dist = fingerprint_distance(
-            fingerprint(base, ignore_colors=[(12, 240, 239)]),
-            fingerprint(noisy, ignore_colors=[(12, 240, 239)]),
-        )
-        self.assertLess(dist, 5)
-
-    def test_marker_pixels_are_ignored(self):
-        base = _img(3)
-        dotted = base.copy()
-        dotted[10:16, 10:16] = (12, 240, 239)  # player-coloured dot
-        plain = fingerprint_distance(fingerprint(base), fingerprint(dotted))
-        masked = fingerprint_distance(
-            fingerprint(base, ignore_colors=[(12, 240, 239)]),
-            fingerprint(dotted, ignore_colors=[(12, 240, 239)]),
-        )
-        self.assertLess(masked, plain)
-
-    def test_distance_rejects_garbage(self):
-        self.assertEqual(fingerprint_distance("", "aa"), float("inf"))
-        self.assertEqual(fingerprint_distance("zz", "zz"), float("inf"))
-
-    def test_include_colors_ignores_transparent_background(self):
-        """Translucent minimap: scene pixels behind it must not perturb fp."""
-        ink = (200, 200, 200)
-
-        def map_img(seed):
-            # arbitrary "scene" showing through the transparent background
-            img = np.random.default_rng(seed).integers(
-                0, 160, (150, 200, 3), dtype=np.uint8
+    def test_lone_sibling_does_not_claim_another_title(self):
+        # Only Rage is stored; reading Happiness must not resolve to it.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp, "Rage")
+            self.assertIsNone(
+                store.match_name(_LAKE + "Happiness")
             )
-            img[30, :] = ink       # platform lines
-            img[80, 40:160] = ink
-            img[:, 150] = ink
-            return img
 
-        a = fingerprint(map_img(1), include_colors=[ink])
-        b = fingerprint(map_img(2), include_colors=[ink])
-        self.assertEqual(a, b)
-        # A genuinely different platform layout must still differ.
-        c_img = np.random.default_rng(5).integers(
-            0, 160, (150, 200, 3), dtype=np.uint8
-        )
-        c_img[:, ::20] = ink  # vertical stripes instead of the a/b layout
-        c = fingerprint(c_img, include_colors=[ink])
-        self.assertGreater(fingerprint_distance(a, c), 15)
-
-    def test_include_colors_blank_frame_returns_empty(self):
-        img = np.zeros((150, 200, 3), dtype=np.uint8)  # loading screen
-        self.assertEqual(
-            fingerprint(img, include_colors=[(200, 200, 200)]), ""
-        )
+    def test_short_alias_cannot_substring_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="of"))
+            self.assertIsNone(store.match_name(_LAKE + "Rage"))
 
 
 class MapEntryTests(unittest.TestCase):
@@ -115,47 +71,19 @@ class MapEntryTests(unittest.TestCase):
 
 
 class MapStoreTests(unittest.TestCase):
-    def test_save_load_match(self):
+    def test_save_load(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = MapStore(tmp)
-            fp = fingerprint(_img(7))
-            entry = MapEntry(
-                name="farm_1",
-                rotation=Rotation(anchors=[], legs={}),
-                fingerprint=fp,
-            )
-            path = store.save(entry)
+            path = store.save(MapEntry(
+                name="farm_1", rotation=Rotation(anchors=[], legs={}),
+            ))
             self.assertTrue(Path(path).exists())
+            self.assertEqual(MapStore(tmp).names(), ["farm_1"])
 
-            store2 = MapStore(tmp)
-            self.assertEqual(store2.names(), ["farm_1"])
-            self.assertIs(store2.match(fp), store2.get("farm_1"))
-            self.assertIsNone(store2.match(fingerprint(_img(9)), threshold=5))
-
-    def test_match_scored_returns_distance(self):
+    def test_match_name_on_stored_title_substring(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = MapStore(tmp)
-            fp = fingerprint(_img(7))
-            store.save(MapEntry(name="farm_1", fingerprint=fp))
-            entry, dist = store.match_scored(fp)
-            self.assertEqual(entry.name, "farm_1")
-            self.assertEqual(dist, 0.0)
-            # No match -> (None, dist-over-threshold).
-            entry, dist = store.match_scored(
-                fingerprint(_img(9)), threshold=5
-            )
-            self.assertIsNone(entry)
-            self.assertGreater(dist, 5)
-            entry, dist = store.match_scored(None)
-            self.assertIsNone(entry)
-            self.assertEqual(dist, float("inf"))
-
-    def test_match_name_on_stored_title(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = MapStore(tmp)
-            store.save(MapEntry(name="lake1f", map_name="Lake of Oblivion"))
-            # OCR text includes the subtitle line — stored title
-            # substring-matches inside it.
+            store.save(MapEntry(name="lake1f", map_name="Weathered Land of Happiness"))
             hit = store.match_name(
                 "Lake of Oblivion Weathered Land of Happiness"
             )
@@ -265,7 +193,7 @@ class MapStoreTests(unittest.TestCase):
     def test_missing_dir_is_empty(self):
         store = MapStore("/nonexistent/dir")
         self.assertEqual(store.load_all(), [])
-        self.assertIsNone(store.match("aa"))
+        self.assertEqual(store.match_title("anything"), (None, 0.0))
 
     def test_bad_file_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:

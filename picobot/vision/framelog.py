@@ -2,11 +2,11 @@
 
 Layout: ``<dir>/<timestamp>_<reason>/`` holding PNGs plus ``meta.json``.
 
-- Watchdog episodes: one per run of frames that miss the baseline.
-  Includes pre-roll frames, every frame's structure mask, the baseline
-  frame, a full-window capture at onset/confirm, and the outcome
-  (``recovered`` or ``confirmed``). Single-frame blips are dropped.
-- Snapshots: one-shot events (OCR reads, leg-fingerprint hazards).
+- Transition episodes: one per confirmed loading blackout. Pre-roll
+  frames, every frame through arrival plus a few after, and a
+  full-window capture at arrival. Dark blips that never confirm are
+  dropped.
+- Snapshots: one-shot events (OCR reads, frame-not-found).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ class _Episode:
         self.meta = meta
         self.frames: list = []
         self.images: Dict[str, np.ndarray] = {}
-        self.misses = 0
+        self.loading = False
         self.outcome: Optional[str] = None
         self.trailing = 0
 
@@ -55,7 +55,6 @@ class FrameRecorder:
         pre: int = 10,
         post: int = 10,
         max_frames: int = 80,
-        min_misses: int = 2,
         max_events: int = 100,
         on_saved: Optional[Callable[[str], None]] = None,
     ) -> None:
@@ -63,12 +62,10 @@ class FrameRecorder:
         self.pre = pre
         self.post = post
         self.max_frames = max_frames
-        self.min_misses = min_misses
         self.max_events = max_events
         self.on_saved = on_saved
         self._lock = threading.Lock()
         self._rings: Dict[int, deque] = {}
-        self._baselines: Dict[int, np.ndarray] = {}
         self._episodes: Dict[int, _Episode] = {}
         self._queue: "queue.Queue" = queue.Queue()
         self._writer: Optional[threading.Thread] = None
@@ -77,55 +74,43 @@ class FrameRecorder:
     def enabled(self) -> bool:
         return self.directory is not None
 
-    def watchdog_frame(
+    def transition_frame(
         self,
         key: int,
         img: np.ndarray,
-        mask: Optional[np.ndarray],
         info: dict,
         context: Optional[Callable[[], dict]] = None,
     ) -> None:
-        """Feed one watchdog verdict (``info["state"]``: baseline, match,
-        miss, confirm, blank) for analyzer ``key``."""
+        """Feed one minimap frame's transition info (``dark``, ``state``,
+        ``event``) for analyzer ``key``."""
         if not self.enabled or img is None:
             return
         now = time.time()
-        state = info.get("state")
-        frame = {
-            "t": round(now, 3),
-            "img": img.copy(),
-            "mask": None if mask is None else mask.copy(),
-            "info": dict(info),
-        }
+        frame = {"t": round(now, 3), "img": img.copy(), "info": dict(info)}
         finished = None
         with self._lock:
             ring = self._rings.setdefault(key, deque(maxlen=self.pre))
             ep = self._episodes.get(key)
-            if state == "baseline":
-                self._baselines[key] = frame["img"]
-            if ep is None and state in ("miss", "confirm"):
-                ep = _Episode("watchdog", now, {
-                    k: info.get(k) for k in ("region", "region_source", "threshold")
+            if ep is None and info.get("dark"):
+                ep = _Episode("transition", now, {
+                    k: info.get(k) for k in ("region", "region_source")
                 })
-                for f in ring:
-                    ep.frames.append({**f, "pre": True})
-                if key in self._baselines:
-                    ep.images["baseline"] = self._baselines[key]
+                ep.frames.extend({**f, "pre": True} for f in ring)
                 self._episodes[key] = ep
-                self._add_context(ep, context, "window_onset")
             if ep is None:
                 ring.append(frame)
                 return
             if len(ep.frames) < self.max_frames:
                 ep.frames.append(frame)
             if ep.outcome is None:
-                if state in ("miss", "confirm"):
-                    ep.misses += 1
-                if state == "match":
-                    ep.outcome = "recovered"
-                elif state == "confirm":
-                    ep.outcome = "confirmed"
-                    self._add_context(ep, context, "window_confirm")
+                if info.get("event") == "loading":
+                    ep.loading = True
+                if info.get("event") == "arrived":
+                    ep.outcome = "arrived"
+                    self._add_context(ep, context, "window_arrived")
+                elif not ep.loading and not info.get("dark") \
+                        and info.get("state") == "normal":
+                    ep.outcome = "flicker"
             else:
                 ep.trailing += 1
             if ep.outcome is not None and ep.trailing >= self.post:
@@ -159,10 +144,10 @@ class FrameRecorder:
                 ep.images[f"{name}_{k}" if k != "window" else name] = v
 
     def _finish(self, ep: _Episode) -> None:
-        if ep.outcome != "confirmed" and ep.misses < self.min_misses:
+        if ep.outcome != "arrived":
             return
-        meta = {**ep.meta, "outcome": ep.outcome, "misses": ep.misses}
-        self._submit(f"watchdog_{ep.outcome}", ep.t, ep.images, ep.frames, meta)
+        meta = {**ep.meta, "outcome": ep.outcome}
+        self._submit("transition", ep.t, ep.images, ep.frames, meta)
 
     def _submit(self, reason, t, images, frames, meta) -> None:
         with self._lock:
@@ -197,12 +182,7 @@ class FrameRecorder:
         rows = []
         for i, f in enumerate(frames):
             _save_png(out / f"{i:03d}.png", f["img"])
-            if f["mask"] is not None:
-                _save_png(out / f"{i:03d}_mask.png", f["mask"])
-            rows.append({"i": i, "t": f["t"], "pre": f.get("pre", False), **{
-                k: v for k, v in f["info"].items()
-                if k not in ("region", "region_source", "threshold")
-            }})
+            rows.append({"i": i, "t": f["t"], "pre": f.get("pre", False), **f["info"]})
         doc = {"reason": reason, "t": round(t, 3), **meta}
         if rows:
             doc["frames"] = rows

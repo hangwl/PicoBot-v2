@@ -51,7 +51,7 @@ Registered skills have `key`, `kind`, `cooldown`:
 ## Safety
 
 Pauses the bot (and fires a Telegram alert if configured) on: window
-focus loss, rune marker on the minimap, other players, an unexpected
-confirmed map change mid-leg. Solve rune checks via the dashboard's
+focus loss, rune marker on the minimap, other players, a map transfer
+(loading blackout) mid-leg. Solve rune checks via the dashboard's
 remote input pad. `pause_on_lie_detector` is a documented stub — keep it
 off until template images exist.

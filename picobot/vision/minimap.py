@@ -1,28 +1,25 @@
 """Minimap analysis for PicoBot.
 
-Pure-NumPy detection over a screenshot of the game's minimap region. No
-OpenCV dependency: markers use a per-pixel color distance mask plus a 3x3
-binary erosion (implemented as shifted ANDs) to reject single pixel noise,
-mirroring the approach used by OpenCV-based bots. Platform geometry is
-hand-drawn per map (``platforms`` on the map file) — translucent minimaps
-alpha-blend platform lines over the live scene so reliably that no
-detector proved trustworthy; :func:`platform_mask`/:func:`structure_mask`
-remain only as the fingerprint include-mask, where a rough line guess is
-good enough because it's only used to *exclude* drifting background.
+Pure-NumPy detection over a screenshot of the game's minimap region.
+Markers use a per-pixel color distance mask plus a 3x3 erosion. The
+panel is located by its rounded white frame (:func:`find_frame`); map
+changes are detected from the loading blackout (``vision.transition``).
+Platform geometry is hand-drawn per map (``platforms`` on the map file).
 
-All colors are BGR tuples and configurable because marker colors differ
-between game clients (e.g. GMS-based private servers vs. other versions).
+All colors are BGR tuples and configurable per client.
 """
 
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
-from typing import Callable, Iterable, Optional, Tuple
+import time
+from dataclasses import dataclass
+from typing import Callable, Iterable, List, Optional, Tuple
 
 import numpy as np
 
 from . import framelog
+from .transition import TransitionDetector, is_dark
 
 Region = Tuple[int, int, int, int]  # (left, top, width, height)
 
@@ -35,16 +32,13 @@ class MinimapColors:
     other_player: Tuple[int, int, int] = (118, 45, 253)  # pink/red dots
     rune: Tuple[int, int, int] = (255, 102, 221)         # purple rune
     border: Tuple[int, int, int] = (228, 228, 228)       # minimap frame
-    # Platform-line colour override for platform detection. None ->
-    # structural line detection (colour-free — see platform_mask()).
-    ink: Optional[Tuple[int, int, int]] = None
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "MinimapColors":
         if not data:
             return cls()
         kwargs = {}
-        for name in ("player", "other_player", "rune", "border", "ink"):
+        for name in ("player", "other_player", "rune", "border"):
             value = data.get(name)
             if value is None:
                 continue
@@ -55,88 +49,64 @@ class MinimapColors:
 
 
 def color_mask(img: np.ndarray, bgr: Tuple[int, int, int], tolerance: int) -> np.ndarray:
-    """Boolean mask of pixels within ``tolerance`` of a BGR color.
-
-    Tolerance compares the summed per-channel absolute difference against
-    ``tolerance * 3`` (same convention as the reference implementation).
-    """
+    """Pixels whose summed per-channel difference is < ``tolerance * 3``."""
     target = np.asarray(bgr, dtype=np.int32)
     diff = np.abs(img.astype(np.int32) - target).sum(axis=2)
     return diff < tolerance * 3
 
 
-def platform_mask(
+def _runs(row: np.ndarray) -> List[Tuple[int, int]]:
+    """``[start, end)`` spans of True values in a 1-D bool array."""
+    idx = np.flatnonzero(np.diff(np.concatenate(([0], row.astype(np.int8), [0]))))
+    return list(zip(idx[0::2].tolist(), idx[1::2].tolist()))
+
+
+def _side(m: np.ndarray, lo: int, hi: int, x_lo: int, x_hi: int, outer: str,
+          fill: float = 0.9) -> Optional[int]:
+    """Outermost column in ``[x_lo, x_hi]`` covered over rows ``[lo, hi)``."""
+    xs = range(max(0, x_lo), min(m.shape[1], x_hi + 1))
+    hits = [x for x in xs if m[lo:hi, x].mean() >= fill]
+    if not hits:
+        return None
+    return hits[0] if outer == "left" else hits[-1]
+
+
+def find_frame(
     img: np.ndarray,
-    *,
-    tolerance: int = 12,
-    min_run: int = 8,
-    vband: int = 2,
-    contrast: int = 10,
-) -> np.ndarray:
-    """Mask of platform/rope line pixels — detected structurally, color-free.
-
-    Platform lines are UI-drawn thin horizontal strokes. On translucent
-    minimaps their rendered color is alpha-blended with whatever the live
-    scene behind the panel shows, so it varies pixel-to-pixel and
-    location-to-location — no single BGR color can match them. Geometry
-    is invariant instead: a platform is a horizontal run of near-uniform
-    rendered color at least ``min_run`` px long whose row differs from
-    the rows ``vband`` px above/below (a thin line over a different
-    background). The vertical-contrast test rejects filled regions,
-    marker blobs, and tall uniform areas; the run-length test rejects
-    dots, text strokes, and short noise.
-    """
-    px = img.astype(np.int16)
-    h, w = px.shape[:2]
-    mask = np.zeros((h, w), dtype=bool)
-    if h < 2 * vband + 2 or w < min_run + 2:
-        return mask
-    def _h_runs(similar: np.ndarray, out: np.ndarray) -> np.ndarray:
-        """Mark pixels covered by a horizontal run of >=min_run similars."""
-        last_false = np.maximum.accumulate(
-            np.where(similar, -1, np.arange(w - 1)), axis=1
-        )
-        ends = similar & (np.arange(w - 1) - last_false >= min_run - 1)
-        pad = np.zeros((h, w + min_run), dtype=bool)
-        pad[:, 1:w] = ends
-        for s in range(min_run):
-            out |= pad[:, s : s + w]
-        return out
-
-    # hsim[i] = pixel i similar to pixel i+1 (summed per-channel diff).
-    _h_runs(np.abs(np.diff(px, axis=1)).sum(axis=2) < tolerance * 3, mask)
-    # Thin-line test: the row must contrast with rows vband away on BOTH
-    # sides — otherwise every uniform background row adjacent to a line
-    # would qualify (halo) and fill regions would pass at their interior.
-    v = np.ones((h, w), dtype=bool)
-    v[vband:] &= np.abs(px[vband:] - px[:-vband]).sum(axis=2) > contrast * 3
-    v[:-vband] &= np.abs(px[:-vband] - px[vband:]).sum(axis=2) > contrast * 3
-    mask &= v
-    # Second pass in mask space: a real platform survives as a contiguous
-    # run of mask pixels; sporadic noise that lucked through run+contrast
-    # is scattered and dies here.
-    if mask.any():
-        mask = _h_runs(mask[:, 1:] & mask[:, :-1], np.zeros_like(mask))
-    return mask
-
-
-def structure_mask(
-    img: np.ndarray,
-    colors: Optional["MinimapColors"] = None,
+    border: Tuple[int, int, int] = (228, 228, 228),
     tolerance: int = 10,
-) -> np.ndarray:
-    """Fingerprint include-mask: platform-line geometry (+ configured ink).
+    *,
+    min_w: int = 80,
+    min_h: int = 40,
+    corner: int = 6,
+) -> Optional[Region]:
+    """Locate the minimap's frame in a window capture (top-left quadrant).
 
-    Map identity fingerprints hash only platform structure, so they are
-    stable on translucent minimaps and across clients regardless of the
-    platform-line color. When ``colors.ink`` is explicitly configured the
-    color match is unioned in as an additional stable signal.
+    The frame is a thin border-colored rectangle with rounded corners:
+    a top and bottom edge with matching x-extent plus two solid sides.
+    The largest such rectangle wins. Returns ``(x, y, w, h)`` with
+    ``w``/``h`` measured edge-to-edge (right - left, bottom - top).
     """
-    mask = platform_mask(img)
-    ink = getattr(colors, "ink", None)
-    if ink is not None:
-        mask |= color_mask(img, ink, tolerance)
-    return mask
+    h, w = img.shape[:2]
+    m = color_mask(img[: h // 2, : w // 2], border, tolerance)
+    edges = []
+    for y in np.flatnonzero(m.sum(axis=1) >= min_w).tolist():
+        edges.extend((y, a, b) for a, b in _runs(m[y]) if b - a >= min_w)
+    best = None
+    for i, (y0, a0, b0) in enumerate(edges):
+        for y1, a1, b1 in edges[i + 1:]:
+            if y1 - y0 < min_h or abs(a0 - a1) > 3 or abs(b0 - b1) > 3:
+                continue
+            lo, hi = y0 + corner, y1 - corner + 1
+            a, b = min(a0, a1), max(b0, b1)
+            left = _side(m, lo, hi, a - corner, a + 2, "left")
+            right = _side(m, lo, hi, b - 3, b + corner, "right")
+            if left is None or right is None:
+                continue
+            area = (right - left) * (y1 - y0)
+            if best is None or area > best[0]:
+                best = (area, (left, y0, right - left, y1 - y0))
+    return best[1] if best else None
 
 
 def _seg_y(s: Tuple[float, float, float, float], x: float) -> float:
@@ -168,14 +138,8 @@ def platform_row_at(
     max_snap: float = 8.0,
     x_slack: float = 4.0,
 ) -> Optional[int]:
-    """Row y of the drawn platform segment under column ``x`` nearest ``y``.
-
-    Platform geometry is hand-drawn on the dashboard (``platforms`` on the
-    map file) — the bot trusts drawn segments exactly. A snap is only
-    legitimate within ~one platform-spacing (``max_snap``); beyond that
-    the point is off drawn geometry and None is returned rather than
-    teleporting it to a distant line.
-    """
+    """Row y of the drawn segment under column ``x`` nearest ``y``, or None
+    when nothing drawn is within ``max_snap`` px."""
     best = None
     for s in segments:
         if not min(s[0], s[2]) - x_slack <= x <= max(s[0], s[2]) + x_slack:
@@ -195,12 +159,7 @@ def platform_span_at(
     band: float = 4.0,
     x_slack: float = 3.0,
 ) -> Optional[Tuple[int, int]]:
-    """(x0, x1) px extent of the drawn platform segment under ``(x, y)``.
-
-    The nearest segment (in y) spanning column ``x`` and within ``band``
-    px of ``y`` wins. None when nothing is drawn under the point —
-    callers fall back to a fixed range.
-    """
+    """(x0, x1) px extent of the drawn segment under ``(x, y)``, or None."""
     best = None
     for s in segments:
         lo, hi = min(s[0], s[2]), max(s[0], s[2])
@@ -215,12 +174,7 @@ def platform_span_at(
 
 
 def erode3(mask: np.ndarray) -> np.ndarray:
-    """3x3 binary erosion via shifted ANDs.
-
-    A pixel survives only if it and all 8 neighbours are set, which removes
-    isolated single-pixel noise while keeping marker dots (typically ~3-7px)
-    intact.
-    """
+    """3x3 binary erosion via shifted ANDs — drops isolated pixels."""
     m = mask
     h, w = mask.shape
     out = mask.copy()
@@ -280,130 +234,17 @@ def _largest_blob(mask: np.ndarray):
 
 
 def largest_blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
-    """Centroid of the largest connected component in ``mask``.
-
-    Unlike :func:`blob_centroid`, scattered noise pixels can't drag the
-    result toward a meaningless midpoint — only the biggest contiguous
-    blob wins. Returns None if the mask is empty.
-    """
+    """Centroid of the largest connected component, or None."""
     blob = _largest_blob(mask)
     return (blob[0], blob[1]) if blob is not None else None
 
 
-def fingerprint(
-    img: np.ndarray,
-    ignore_colors: Optional[Iterable[Tuple[int, int, int]]] = None,
-    include_colors: Optional[Iterable[Tuple[int, int, int]]] = None,
-    include_mask: Optional[np.ndarray] = None,
-    tolerance: int = 10,
-    size: int = 16,
-) -> str:
-    """Content hash of a minimap capture, for map identification.
-
-    The image is divided into ``size``×``size`` cells; each cell's mean AND
-    max grayscale become the hash (hex string, 2 bytes per cell). The max
-    channel preserves thin platform lines that mean-pooling would wash
-    out. Pixels matching ``ignore_colors`` (e.g. the roaming marker dots)
-    are excluded, so markers don't perturb the hash of a static minimap.
-
-    ``include_colors``/``include_mask`` switch the hash to *geometry*
-    mode: the masked structure itself is hashed (cell coverage + a
-    has-structure bit), not the masked pixels' colours. On translucent
-    minimaps the live scene bleeds through platform-line pixels, so
-    colour content drifts while line positions stay fixed — hashing the
-    mask is what makes the fingerprint stable there. Geometry
-    fingerprints carry a ``g2:`` scheme prefix so legacy colour-hash
-    fingerprints can never match them by accident. Returns "" when too
-    few pixels qualify (blank/transition frames), which never matches
-    anything in :func:`fingerprint_distance`.
-    """
-    h, w = img.shape[:2]
-    bh, bw = max(1, h // size), max(1, w // size)
-    crop = img[: bh * size, : bw * size]
-    excluded = np.zeros(crop.shape[:2], dtype=bool)
-    scheme = ""
-    if include_colors or include_mask is not None:
-        included = np.zeros(crop.shape[:2], dtype=bool)
-        if include_colors:
-            for bgr in include_colors:
-                included |= color_mask(crop, bgr, tolerance)
-        if include_mask is not None:
-            m = np.asarray(include_mask, dtype=bool)
-            included |= m[: crop.shape[0], : crop.shape[1]]
-        if included.sum() < 8:
-            # Not enough structure to identify a map — no fingerprint.
-            return ""
-        # Geometry hash: the mask IS the signal (0/255 "image").
-        gray = included.astype(np.float32) * 255.0
-        scheme = "g2:"
-    else:
-        gray = (
-            0.114 * crop[:, :, 0] + 0.587 * crop[:, :, 1]
-            + 0.299 * crop[:, :, 2]
-        ).astype(np.float32)
-    if ignore_colors:
-        for bgr in ignore_colors:
-            excluded |= color_mask(crop.astype(np.uint8), bgr, tolerance)
-    weights = (~excluded).astype(np.float32)
-    if weights.sum() < 8:
-        return ""
-    num = (gray * weights).reshape(size, bh, size, bw).sum(axis=(1, 3))
-    den = weights.reshape(size, bh, size, bw).sum(axis=(1, 3))
-    means = np.where(den > 0, num / np.maximum(den, 1), 127.0)
-    # Excluded pixels get -1 so they never win the per-cell max.
-    maxes = np.where(excluded, -1.0, gray).reshape(size, bh, size, bw).max(axis=(1, 3))
-    maxes = np.where(maxes >= 0, maxes, 127.0)
-    cells = np.concatenate([means, maxes]).astype(np.uint8)
-    return scheme + cells.tobytes().hex()
-
-
-def fingerprint_distance(a: str, b: str) -> float:
-    """Mean absolute cell difference between two fingerprints (0-255).
-
-    Returns ``inf`` for missing/mismatched/invalid inputs so unknown maps
-    never match. Scheme prefixes (``g2:``) are compared — fingerprints
-    from different schemes never match.
-    """
-    if not a or not b or len(a) != len(b):
-        return float("inf")
-    if ":" in a:
-        sa, a = a.split(":", 1)
-        sb, b = b.split(":", 1) if ":" in b else ("", b)
-        if sa != sb:
-            return float("inf")
-    elif ":" in b:
-        return float("inf")
-    try:
-        pa = np.frombuffer(bytes.fromhex(a), dtype=np.uint8).astype(np.int16)
-        pb = np.frombuffer(bytes.fromhex(b), dtype=np.uint8).astype(np.int16)
-    except ValueError:
-        return float("inf")
-    return float(np.abs(pa - pb).mean())
-
-
-def fingerprint_score(a: str, b: str, threshold: float = 15.0) -> float:
-    """Match confidence 0-1: 1.0 = identical, 0 = at/past ``threshold``.
-
-    A convenience for display — distances well under the match threshold
-    read as high confidence, distances past it clamp to 0.
-    """
-    dist = fingerprint_distance(a, b)
-    if dist == float("inf") or threshold <= 0:
-        return 0.0
-    return max(0.0, 1.0 - dist / threshold)
-
-
 class MinimapAnalyzer:
-    """Locates the minimap inside a window capture and reads markers off it.
+    """Locates the minimap panel and reads markers off it.
 
-    ``region`` may be supplied explicitly (recommended — border auto-detection
-    is fragile across clients/resolutions). If omitted, ``locate`` searches a
-    window capture for the frame-colored border rectangle.
-
-    A fingerprint watchdog (``note_frame``) watches captured content; when it
-    changes persistently — i.e. the player changed maps — an auto-located
-    region is dropped so the next ``locate`` re-detects the minimap's new
-    position/size. Explicitly configured regions are never reset.
+    ``note_frame`` watches minimap captures for the loading blackout; on
+    arrival at a new map a non-``config`` region is dropped so ``locate``
+    re-detects the (per-map sized) panel.
     """
 
     def __init__(
@@ -412,9 +253,8 @@ class MinimapAnalyzer:
         region: Region | None = None,
         *,
         border_tolerance: int = 10,
-        map_change_threshold: float = 15.0,
-        map_change_frames: int = 3,
         marker_inset: int = 0,
+        transition: Optional[TransitionDetector] = None,
     ) -> None:
         self.colors = colors or MinimapColors()
         self.marker_inset = max(0, int(marker_inset))
@@ -422,15 +262,11 @@ class MinimapAnalyzer:
         self._region_explicit = region is not None
         self._region_source = "config" if region is not None else None
         self._border_tolerance = border_tolerance
-        self._map_change_threshold = map_change_threshold
-        self._map_change_frames = map_change_frames
-        self._baseline_fp: Optional[str] = None
-        self._pending_fp: Optional[str] = None   # candidate new scene
-        self._fp_misses = 0
-        # Diagnostics: last frame's distance/score vs the baseline.
-        self.last_dist: Optional[float] = None
-        # Guards region/baseline state — the dashboard feed and a running
-        # bot can share one analyzer from different threads.
+        self.transition = transition or TransitionDetector()
+        self._clock = self.transition._clock
+        self._edge_lost_since: Optional[float] = None
+        self.edge_lost_s = 1.0
+        self._miss_logged = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -439,177 +275,124 @@ class MinimapAnalyzer:
 
     @property
     def region_source(self) -> Optional[str]:
-        """Where the current region came from: ``config`` (pinned in
-        config.json), ``manual`` (hand-drawn in the dashboard),
-        ``stored`` (a map file's remembered layout), ``auto`` (live
-        border detection), or None when unknown."""
+        """``config`` (pinned in config.json), ``manual`` (hand-drawn),
+        ``stored`` (a map file's remembered layout), ``auto`` (frame
+        detection), or None."""
         return self._region_source
 
-    def set_region(self, region: Region, *, explicit: bool = False) -> None:
-        """Install a known region — e.g. a remembered per-map layout or
-        a hand-drawn rect (``explicit``).
+    @property
+    def loading(self) -> bool:
+        """True from a confirmed blackout until the new map settles."""
+        return self.transition.loading
 
-        Non-explicit regions stay resettable: the watchdog can still
-        drop them on a confirmed map change. Re-anchors the content
-        baseline so the region swap itself isn't mistaken for a change.
-        """
+    def set_region(self, region: Region, *, explicit: bool = False) -> None:
+        """Install a known region — a map's stored layout or a hand-drawn
+        rect (``explicit``)."""
         with self._lock:
             self._region = tuple(int(v) for v in region)
             self._region_explicit = explicit
             self._region_source = "manual" if explicit else "stored"
-            self._baseline_fp = None
-            self._pending_fp = None
-            self._fp_misses = 0
 
     def reset_region(self) -> None:
-        """Drop the current region (any source) so ``locate`` re-runs on
-        the next capture. The user asked for re-detection — also clears
-        the explicit flag so the watchdog manages the fresh result."""
+        """Drop the current region (any source); ``locate`` re-runs."""
         with self._lock:
             self._region = None
             self._region_explicit = False
             self._region_source = None
-            self._baseline_fp = None
-            self._pending_fp = None
-            self._fp_misses = 0
 
     def note_frame(
         self,
         minimap_img: np.ndarray,
         context: Optional[Callable[[], dict]] = None,
     ) -> bool:
-        """Watchdog: report True when a map change is confirmed.
-
-        Compares each capture's content fingerprint to a baseline taken on
-        the current map. A miss only counts toward a change when it is
-        *self-consistent* — the new frame must match the previous miss
-        frame, i.e. the scene is showing a stable *different* picture.
-        Transitional frames (loading blanks, fades) neither match the
-        baseline nor each other, so they can never accumulate into a
-        false positive no matter how many fire. ``map_change_frames``
-        consecutive consistent misses confirm a real change.
-
-        On confirmation the baseline resets and the region is dropped so
-        ``locate`` re-detects — unless it came from ``config`` (a pinned
-        region is authoritative and survives map changes). Stored and
-        hand-drawn regions belong to the old map's identity and are
-        dropped; a different map's remembered layout is re-applied by the
-        caller's region-seeding pass.
+        """Feed one minimap capture; True when arrival at a new map is
+        confirmed (blackout ended and the scene settled).
 
         ``context`` returns extra images (e.g. ``{"window": ...}``) for
-        debug frame capture; it's only called when an episode starts.
+        debug frame capture; only called on arrival.
         """
-        ignore = (
-            self.colors.player, self.colors.other_player, self.colors.rune
-        )
-        mask = structure_mask(minimap_img, self.colors)
-        mask_px = int(mask.sum())
-        if mask_px >= 8:
-            fp = fingerprint(
-                minimap_img, ignore_colors=ignore, include_mask=mask
-            )
-        else:
-            # No platform structure at all — hash the whole frame instead
-            # so background drift still registers as change.
-            fp = fingerprint(minimap_img, ignore_colors=ignore)
         with self._lock:
             info = {
                 "region": self._region,
                 "region_source": self._region_source,
-                "threshold": self._map_change_threshold,
-                "mask_px": mask_px,
-                "scheme": fp.split(":", 1)[0] if ":" in fp else ("raw" if fp else ""),
+                "dark": is_dark(minimap_img, self.transition.level),
             }
-            changed = self._watch(fp, info)
+            event = self.transition.note(minimap_img)
+            info["state"] = self.transition.state
+            info["event"] = event
+            if event == "arrived" and self._region_source != "config":
+                self._region = None
+                self._region_source = None
+                self._region_explicit = False
+            self._track_edge(minimap_img, info["dark"])
         rec = framelog.recorder()
         if rec.enabled:
-            rec.watchdog_frame(id(self), minimap_img, mask, info, context)
-        return changed
+            rec.transition_frame(id(self), minimap_img, info, context)
+        return event == "arrived"
 
-    def _watch(self, fp: str, info: dict) -> bool:
-        """Watchdog state machine; fills ``info`` with the verdict."""
-        if not fp:
-            info["state"] = "blank"
-            return False
-        if self._baseline_fp is None:
-            self._baseline_fp = fp
-            self._pending_fp = None
-            self._fp_misses = 0
-            info["state"] = "baseline"
-            return False
-        dist = fingerprint_distance(fp, self._baseline_fp)
-        self.last_dist = dist
-        info["dist"] = None if dist == float("inf") else round(dist, 2)
-        if dist <= self._map_change_threshold:
-            self._fp_misses = 0
-            self._pending_fp = None
-            info["state"] = "match"
-            return False
-        # A miss counts only if the new scene agrees with itself —
-        # flicker frames can't match each other and reset the streak.
-        pend = (
-            fingerprint_distance(fp, self._pending_fp)
-            if self._pending_fp is not None else float("inf")
-        )
-        info["pending_dist"] = None if pend == float("inf") else round(pend, 2)
-        if pend <= self._map_change_threshold:
-            self._fp_misses += 1
-        else:
-            self._pending_fp = fp
-            self._fp_misses = 1
-        info["misses"] = self._fp_misses
-        if self._fp_misses < self._map_change_frames:
-            info["state"] = "miss"
-            return False
-        info["state"] = "confirm"
-        self._fp_misses = 0
-        self._pending_fp = None
-        self._baseline_fp = None
-        if self._region_source != "config":
-            self._region = None
-            self._region_source = None
+    def _track_edge(self, img: np.ndarray, dark: bool) -> None:
+        """Note whether the frame's top edge is where the region says."""
+        if (self._region_source not in ("auto", "stored") or dark
+                or self.transition.loading or img.shape[0] < 2):
+            self._edge_lost_since = None
+            return
+        edge = color_mask(img[:2], self.colors.border, self._border_tolerance)
+        if edge.mean(axis=1).max() >= 0.6:
+            self._edge_lost_since = None
+        elif self._edge_lost_since is None:
+            self._edge_lost_since = self._clock()
+
+    @property
+    def edge_lost(self) -> bool:
+        """The frame edge has been missing from the region for a while —
+        the panel was moved or resized (e.g. title row toggled)."""
+        since = self._edge_lost_since
+        return since is not None and self._clock() - since >= self.edge_lost_s
+
+    def relocate(self, window_img: Optional[np.ndarray]) -> bool:
+        """Re-detect after :attr:`edge_lost`; switches only when a frame is
+        actually found elsewhere (an overlay hiding the edge keeps the
+        current region). True when the region changed."""
+        found = find_frame(
+            window_img, self.colors.border, self._border_tolerance
+        ) if window_img is not None else None
+        with self._lock:
+            self._edge_lost_since = self._clock()
+            if found is None or found == self._region:
+                return False
+            self._region = found
+            self._region_source = "auto"
             self._region_explicit = False
+            self._edge_lost_since = None
         return True
 
     def locate(self, window_img: np.ndarray) -> Optional[Region]:
-        """Find the minimap frame in a window capture, once; result is cached.
-
-        Searches the top-left quadrant, then takes the bounding box of
-        border-colored pixels on rows/columns where the border color is dense
-        (the frame's edges). Returns the region relative to ``window_img``.
-        """
+        """The cached region, else detect the panel frame in ``window_img``."""
         with self._lock:
             if self._region is not None:
                 return self._region
         return self._detect(window_img)
 
     def _detect(self, window_img: np.ndarray) -> Optional[Region]:
-        """Border-scan ``window_img`` for the minimap frame and cache it."""
-        h, w = window_img.shape[:2]
-        roi = window_img[: h // 2, : w // 2]
-        mask = color_mask(roi, self.colors.border, self._border_tolerance)
-
-        col_counts = mask.sum(axis=0)
-        row_counts = mask.sum(axis=1)
-        if col_counts.max() == 0 or row_counts.max() == 0:
+        region = find_frame(
+            window_img, self.colors.border, self._border_tolerance
+        )
+        if region is None:
+            self._log_miss(window_img)
             return None
-
-        # Border rows/cols contain a long run of border-colored pixels.
-        cols = np.nonzero(col_counts > col_counts.max() * 0.5)[0]
-        rows = np.nonzero(row_counts > row_counts.max() * 0.5)[0]
-        if cols.size == 0 or rows.size == 0:
-            return None
-
-        left, right = int(cols.min()), int(cols.max())
-        top, bottom = int(rows.min()), int(rows.max())
-        width, height = right - left, bottom - top
-        if width < 50 or height < 50:
-            return None
-
         with self._lock:
-            self._region = (left, top, width, height)
+            self._region = region
             self._region_source = "auto"
-        return self._region
+        return region
+
+    def _log_miss(self, window_img: np.ndarray) -> None:
+        now = time.monotonic()
+        rec = framelog.recorder()
+        if (not rec.enabled or now - self._miss_logged < 30.0
+                or is_dark(window_img)):
+            return
+        self._miss_logged = now
+        rec.snapshot("frame_not_found", {"window": window_img})
 
     def crop(self, window_img: np.ndarray) -> Optional[np.ndarray]:
         """Crop the minimap region out of a full window capture."""
@@ -621,13 +404,7 @@ class MinimapAnalyzer:
 
     # -- Marker detectors -----------------------------------------------------
     def _interior(self, img: np.ndarray) -> Tuple[np.ndarray, int]:
-        """Crop ``marker_inset`` px of frame/chrome off each edge.
-
-        Marker detection runs on the map interior only — border-colored
-        or UI pixels at the crop's rim can't trigger false markers.
-        Returns the inner view plus the offset so reported positions
-        stay minimap-relative.
-        """
+        """Crop ``marker_inset`` px of frame off each edge (+ the offset)."""
         i = self.marker_inset
         h, w = img.shape[:2]
         if i <= 0 or h <= 2 * i or w <= 2 * i:
@@ -648,10 +425,7 @@ class MinimapAnalyzer:
         if blob is None:
             return None
         cx, cy, ymax = blob
-        # "feet" = the icon's bottom row. The marker glyph is anchored at
-        # its bottom tip — the point touching the platform — so feet-space
-        # positions sit on the platform line rather than floating ~half an
-        # icon above it the way a centroid does.
+        # The player glyph's bottom tip touches the platform.
         return (cx + off, (ymax if feet else cy) + off)
 
     def player_pos(
@@ -677,7 +451,6 @@ class MinimapAnalyzer:
         return bool(mask.any())
 
 
-
 __all__ = [
     "MinimapAnalyzer",
     "MinimapColors",
@@ -685,12 +458,9 @@ __all__ = [
     "blob_centroid",
     "color_mask",
     "erode3",
-    "fingerprint",
-    "fingerprint_distance",
+    "find_frame",
     "largest_blob_centroid",
     "platform_covered",
-    "platform_mask",
     "platform_row_at",
     "platform_span_at",
-    "structure_mask",
 ]

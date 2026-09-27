@@ -14,7 +14,6 @@ import json
 import logging
 import ssl
 import threading
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -37,11 +36,9 @@ class _VisionFeed:
     def __init__(
         self,
         window_title: str,
-        colors,
-        region,
+        bot_config,
+        identity=None,
         on_event=None,
-        map_change_threshold: float = 15.0,
-        marker_inset: int = 0,
     ) -> None:
         from .vision.game_window import GameWindow
         from .vision.minimap import MinimapAnalyzer
@@ -49,23 +46,23 @@ class _VisionFeed:
 
         self.window = GameWindow(window_title)
         self.screen = ScreenGrabber()
+        self.config = bot_config
+        self.identity = identity
         self.minimap = MinimapAnalyzer(
-            colors=colors,
-            region=region,
-            map_change_threshold=map_change_threshold,
-            marker_inset=marker_inset,
+            colors=bot_config.minimap_colors,
+            region=bot_config.minimap_region,
+            marker_inset=bot_config.marker_inset_px,
         )
         self._on_event = on_event
 
     def minimap_img(self):
-        region = self.minimap.region
-        if region is None:
-            l, t, r, b = self.window.client_rect()
-            full = self.screen.capture((l, t, r - l, b - t))
+        """Minimap capture; also drives blackout detection and title
+        reads while the bot isn't running."""
+        if self.minimap.region is None:
+            full = self.window_img()
             if full is None or self.minimap.locate(full) is None:
                 return None
-            region = self.minimap.region
-        x, y, w, h = region
+        x, y, w, h = self.minimap.region
         img = self.screen.capture(
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
@@ -73,25 +70,36 @@ class _VisionFeed:
             img, context=lambda: {"window": self.window_img()}
         ):
             if self._on_event:
-                self._on_event("vision", "map change detected — minimap relocated")
+                self._on_event("vision", "arrived on a new map — re-detecting minimap")
+            if self.identity is not None:
+                self.identity.request("arrival", clear=True)
+        elif self.minimap.edge_lost and self.minimap.relocate(self.window_img()):
+            if self._on_event:
+                self._on_event(
+                    "vision", f"minimap panel moved: {list(self.minimap.region)}"
+                )
+            if self.identity is not None and self.identity.current.title is None:
+                self.identity.request("panel moved")
+        if self.identity is not None and not self.minimap.loading:
+            self.identity.pump(self.name_img)
         return img
 
     def window_img(self):
         l, t, r, b = self.window.client_rect()
         return self.screen.capture((l, t, r - l, b - t))
 
-    def name_img(self, scan_px: int = 90, name_region=None):
-        """BGR band spanning the title zone (window top → into the
-        minimap region, full client width); title_lines() segments the
-        text out of it."""
+    def name_region(self):
+        """Client-area rect of the title band, or None."""
         from .vision.mapname import name_strip_region
 
-        l, t, r, b = self.window.client_rect()
-        region = name_region or (
-            name_strip_region(self.minimap.region, scan_px, r - l)
-            if self.minimap.region
-            else None
-        )
+        if self.config.minimap_name_region:
+            return self.config.minimap_name_region
+        if self.minimap.region is None:
+            return None
+        return name_strip_region(self.minimap.region, self.config.name_scan_px)
+
+    def name_img(self):
+        region = self.name_region()
         if region is None:
             return None
         x, y, w, h = region
@@ -137,8 +145,9 @@ class BotHost:
         config: Optional[AppConfig] = None,
     ) -> None:
         from .bot import BotConfig
-        from .bot.maps import MapStore
         from .bot.calibrate import CalibrationRunner
+        from .bot.identity import MapIdentity
+        from .bot.maps import MapStore
 
         self.config = config or load_config()
         self.bot_config = BotConfig.from_dict(getattr(self.config, "bot", None))
@@ -149,24 +158,17 @@ class BotHost:
         self.maps = MapStore(self.bot_config.maps_dir)
         self._feed: Optional[_VisionFeed] = None
         self._feed_lock = threading.Lock()
-        self._active_map_override: Optional[str] = self.bot_config.active_map
+        self.identity = MapIdentity(
+            self.maps,
+            pin=self.bot_config.active_map,
+            ocr_enabled=self.bot_config.name_ocr,
+            on_event=lambda k, m: self.bus.emit(k, m),
+        )
+        self._maps_sent_version = -1
 
         self.bot = None
         self.bot_thread: Optional[threading.Thread] = None
         self.calibrator: Optional[CalibrationRunner] = None
-        self._map_res_ts = 0.0
-        self._map_res = None
-        # Latest live-fingerprint evidence: (entry|None, distance) + raw fp.
-        self._live_match = (None, float("inf"))
-        self._live_fp: Optional[str] = None
-        # Latest OCR evidence: (entry|None, raw title text).
-        self._live_ocr = (None, None)
-        self._ocr_reader = None
-        # OCR runs only when identity is in question: at startup, on a
-        # watchdog-confirmed map change, on an explicit pin, on a
-        # dashboard map-list refresh, and after a calibration save.
-        self._map_dirty = True
-
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -227,6 +229,7 @@ class BotHost:
                 "vision", f"frames captured: {p}", level="debug"
             ),
         )
+        self.identity.request("startup")
         self.remote.start()
         self.http = EmbeddedHTTPServer(
             lambda: self.remote.ws_port, self.config.http_port,
@@ -292,15 +295,15 @@ class BotHost:
                     payload, wait_ack=True, timeout=1.5
                 )
 
-            # Share the dashboard feed's analyzer: it carries the
-            # user-verified/stored region (provenance, watchdog state) so
-            # bot start never re-detects over a fixed layout.
+            # Share the feed's analyzer (region + provenance + transition
+            # state) and the identity, so bot start re-detects nothing.
             feed = self._get_feed()
             self.bot = SmartBot(
                 HidController(send),
                 self.window_title,
                 self.bot_config,
                 minimap=feed.minimap if feed is not None else None,
+                identity=self.identity,
                 notify_callback=self.telegram.send_message,
                 event_bus=bus,
             )
@@ -324,23 +327,14 @@ class BotHost:
                 try:
                     self._feed = _VisionFeed(
                         self.window_title,
-                        self.bot_config.minimap_colors,
-                        self.bot_config.minimap_region,
-                        on_event=self._feed_event,
-                        map_change_threshold=self.bot_config.map_match_threshold,
-                        marker_inset=self.bot_config.marker_inset_px,
+                        self.bot_config,
+                        identity=self.identity,
+                        on_event=lambda k, m: self.bus.emit(k, m),
                     )
                 except Exception as exc:
                     logger.warning("vision feed unavailable: %s", exc)
                     return None
             return self._feed
-
-    def _feed_event(self, kind: str, msg: str, data=None) -> None:
-        """Feed events pass through to the bus; a confirmed map change
-        also marks identity dirty so the next resolution re-OCRs."""
-        if kind == "vision" and "map change" in msg:
-            self._map_dirty = True
-        self.bus.emit(kind, msg, data)
 
     def _layout_source(self):
         """Provenance of the live minimap region: explicit/stored/auto."""
@@ -352,130 +346,22 @@ class BotHost:
             return None
         return mm.region_source
 
-    def _resolved_map_entry(self):
-        """The map this session currently believes we're on.
+    def _resolved_entry(self):
+        """The identity's resolved map (fresh store copy), or None."""
+        return self.identity.entry()
 
-        Evidence order: the running bot's resolution, then a live
-        fingerprint match (what's actually on screen), and only then the
-        ``active_map`` pin — a stale pin must not shadow the real map.
-        Also refreshes ``_live_match``/``_live_fp`` — the fingerprint
-        evidence for the screen right now (confidence reporting).
-        """
-        img = colors = None
-        if self.bot is not None:
-            img = self.bot.minimap_frame()
-            colors = self.bot.minimap.colors
-        feed = self._get_feed()
-        if img is None and feed is not None:
-            img = feed.minimap_img()
-            colors = feed.minimap.colors
-        live, dist, fp = None, float("inf"), None
-        if img is not None and colors is not None:
-            from .vision.minimap import fingerprint, structure_mask
-
-            try:
-                fp = fingerprint(
-                    img,
-                    ignore_colors=(
-                        colors.player, colors.other_player, colors.rune,
-                    ),
-                    include_mask=structure_mask(img, colors),
-                )
-                live, dist = self.maps.match_scored(
-                    fp, self.bot_config.map_match_threshold
-                )
-            except Exception:
-                live, dist, fp = None, float("inf"), None
-        self._live_match = (live, dist)
-        self._live_fp = fp
-        # OCR'd title text is a second, independent identity signal —
-        # an exact stored-name match beats any pixel-level evidence. It
-        # only runs when identity is dirty (startup/change/pin/save) —
-        # the engine is too heavy to poll every frame.
-        ocr_entry, ocr_text = self._live_ocr
-        dirty, self._map_dirty = self._map_dirty, False
-        if dirty and self.bot_config.name_ocr:
-            ocr_entry, ocr_text = None, None
-            reader = getattr(self.bot, "map_name", None)
-            if self.bot is not None and callable(reader):
-                try:
-                    ocr_text = reader(force=True)  # post-change — never cached
-                except Exception:
-                    ocr_text = None
-            elif feed is not None:
-                strip = feed.name_img(
-                    self.bot_config.name_scan_px,
-                    self.bot_config.minimap_name_region,
-                )
-                ocr_text = self._name_reader().read(strip)
-            if not isinstance(ocr_text, str) or not ocr_text.strip():
-                ocr_text = None
-            if ocr_text:
-                try:
-                    ocr_entry = self.maps.match_name(ocr_text)
-                except Exception:
-                    ocr_entry = None
-            self._live_ocr = (ocr_entry, ocr_text)
-        if self.bot is not None and self.bot._map is not None:
-            return self.bot._map
-        if ocr_entry is not None:
-            return ocr_entry
-        if live is not None:
-            return live
-        if self._active_map_override:
-            return self.maps.get(self._active_map_override)
-        return None
-
-    def _resolved_map_cached(self):
-        """``_resolved_map_entry`` throttled to ~2s for per-frame use.
-
-        A change in the resolved name broadcasts the refreshed evidence
-        (detected/via/score) and logs it — without this the dashboard's
-        detected label never sees a watchdog-driven re-resolve.
-        """
-        now = time.time()
-        if now - self._map_res_ts < 2.0:
-            return self._map_res
-        prev = self._map_res
-        try:
-            self._map_res = self._resolved_map_entry()
-        except Exception:
-            self._map_res = None
-        self._map_res_ts = now
-        prev_name = prev.name if prev is not None else None
-        cur_name = self._map_res.name if self._map_res is not None else None
-        if cur_name != prev_name:
-            # Refresh OCR evidence for the broadcast — e.g. while the
-            # bot runs, the feed watchdog is dormant and _map_dirty
-            # never got set by the change that produced this resolve.
-            self._map_dirty = True
+    def _sync_maps_payload(self) -> None:
+        """Broadcast the maps payload whenever identity changed."""
+        if self.identity.version != self._maps_sent_version:
             self._send_maps()
-            ocr_entry, ocr_text = self._live_ocr
-            via = "ocr" if ocr_entry is not None else "fp"
-            detail = f" via OCR \"{ocr_text}\"" if ocr_text else ""
-            self.bus.emit(
-                "map",
-                f"map resolved: {cur_name or '–'} ({via}){detail}",
-            )
-        return self._map_res
 
     def _map_meta(self) -> dict:
-        """Frame metadata: resolved map name + whether a rotation can run.
-
-        ``no_rotation`` mirrors the bot's ``effective_rotation`` — a map
-        entry's own rotation, else the global config fallback.
-        """
+        """Frame metadata: resolved map, title evidence, overlays, and
+        whether a rotation can run."""
+        self._sync_maps_payload()
         bot = self.bot
-        # bot._map stays None until the first travel leg resolves it —
-        # fall back to the live resolution so map overlays (walls, floor)
-        # don't vanish the moment the bot starts.
-        entry = (bot._map if bot is not None else None) or (
-            self._resolved_map_cached()
-        )
-        # Read walls/floor off the store's current object — a save +
-        # reload swaps instances and bot._map can lag behind.
-        if entry is not None:
-            entry = self.maps.get(entry.name) or entry
+        entry = self._resolved_entry()
+        res = self.identity.current
         rot = (
             entry.rotation
             if entry is not None
@@ -516,24 +402,15 @@ class BotHost:
                 floor = px(fy, h)
         if entry is not None and entry.rotation.anchors and w and h:
             anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
-        # Confidence that the resolved map is what's on screen — the
-        # fingerprint score of the latest live evidence (None when the
-        # entry can't be verified: no fingerprint stored or no frame).
-        conf = None
-        fp = self._live_fp
-        if entry is not None and entry.fingerprint and fp:
-            from .vision.minimap import fingerprint_score
-
-            conf = round(
-                fingerprint_score(
-                    fp, entry.fingerprint, self.bot_config.map_match_threshold
-                ),
-                2,
-            )
+        conf = (
+            res.score
+            if entry is not None and res.title_map == entry.name else None
+        )
         return {
             "map": entry.name if entry else None,
+            "map_via": res.via,
             "map_conf": conf,
-            "map_title": self._live_ocr[1],
+            "map_title": res.title,
             "no_rotation": not bool(rot.anchors),
             "walls": walls,
             "floor": floor,
@@ -541,32 +418,12 @@ class BotHost:
             "platforms": platforms,
         }
 
-    def _live_fingerprint(self, feed=None) -> Optional[str]:
-        """Structure fingerprint of the current minimap capture, or None."""
-        from .vision.minimap import fingerprint, structure_mask
-
-        feed = feed or self._get_feed()
-        img = feed.minimap_img() if feed is not None else None
-        if img is None:
-            return None
-        c = feed.minimap.colors
-        return fingerprint(
-            img,
-            ignore_colors=(c.player, c.other_player, c.rune),
-            include_mask=structure_mask(img, c),
-        ) or None
-
     def _layout_target(self, name: str):
         """Which map file a layout write applies to, or (None, error).
 
-        Explicit ``name`` = the user asserts the identity — the file is
-        created if it doesn't exist yet (stub map). Blank = the entry
-        must be *verified* against the live screen: the running bot's
-        resolved map or a fingerprint match whose stored fingerprint
-        actually matches this frame. ``active_map`` is deliberately not
-        consulted — that pin is rotation scope, not evidence of which
-        map is on screen, and trusting it here wrote layouts into the
-        wrong file.
+        Explicit ``name`` = the user asserts the identity (a stub file is
+        created if needed). Blank = the map must be verified by its OCR'd
+        title — a pin alone is not evidence of what's on screen.
         """
         if name:
             entry = self.maps.get(name)
@@ -575,29 +432,20 @@ class BotHost:
 
                 entry = MapEntry(name=name)
             return entry, None
-        from .vision.minimap import fingerprint_distance
-
-        fp = self._live_fingerprint()
-        if not fp:
-            return None, "no minimap frame — can't verify the current map"
-        thresh = self.bot_config.map_match_threshold
-        cands = []
-        if self.bot is not None and self.bot._map is not None:
-            cands.append(self.bot._map)
-        cands.append(self.maps.match(fp, thresh))
-        seen = set()
-        for e in cands:
-            if e is None or id(e) in seen:
-                continue
-            seen.add(id(e))
-            if e.fingerprint and fingerprint_distance(
-                fp, e.fingerprint
-            ) <= thresh:
-                return e, None
+        res = self.identity.current
+        entry = self._resolved_entry()
+        if entry is not None and res.via == "ocr":
+            return entry, None
         return None, (
-            "no map verified — the current screen doesn't match any saved "
-            "map's fingerprint; type the map name to save anyway"
+            "current map isn't verified by its title — type the map name "
+            "to save anyway"
         )
+
+    def _save_entry(self, entry) -> None:
+        self.maps.save(entry)
+        self.maps.reload()
+        self.identity.refresh()
+        self._send_maps()
 
     def _layout_save(self, name: str = "") -> None:
         bot = self.bot
@@ -615,14 +463,10 @@ class BotHost:
             self.bus.emit("error", err)
             return
         entry.minimap_region = tuple(int(v) for v in region)
-        # The save asserts "this screen is this map" — refresh the
-        # fingerprint too (backfills missing ones, repairs stale ones).
-        fp = self._live_fingerprint(feed)
-        if fp:
-            entry.fingerprint = fp
-        self.maps.save(entry)
-        self.maps.reload()
-        self._send_maps()
+        res = self.identity.current
+        if not entry.map_name and res.title and res.title_map in (None, entry.name):
+            entry.map_name = res.title
+        self._save_entry(entry)
         self.bus.emit(
             "map", f"layout saved for {entry.name}: {list(entry.minimap_region)}"
         )
@@ -649,7 +493,7 @@ class BotHost:
     def _layout_set_region(self, msg: str) -> None:
         """layout|region|minimap|x,y,w,h — hand-drawn rect from Window view.
 
-        Manual rects are treated as trusted (watchdog won't drop them),
+        Manual rects are treated as trusted (arrival won't drop them),
         persisted to config.json, and can additionally be committed to
         the map file via Save layout.
         """
@@ -670,7 +514,7 @@ class BotHost:
             bot_cfg["minimap_name_region"] = list(rect)
             self.config.bot = bot_cfg
             save_config(self.config)
-            self._map_dirty = True
+            self.identity.request("title region")
             self.bus.emit("vision", f"title region set: {list(rect)}")
             return
         if which != "minimap":
@@ -693,9 +537,7 @@ class BotHost:
             self.bus.emit("error", f"{entry.name} has no stored layout")
             return
         entry.minimap_region = None
-        self.maps.save(entry)
-        self.maps.reload()
-        self._send_maps()
+        self._save_entry(entry)
         self.bus.emit("map", f"layout cleared for {entry.name}")
 
     def _layout_set_wall(self, msg: str) -> None:
@@ -719,16 +561,14 @@ class BotHost:
             return
         if side == "clear":
             entry.walls = None
-            self.maps.save(entry)
-            self.maps.reload()
-            self._send_maps()
+            self._save_entry(entry)
             self.bus.emit("map", f"walls cleared for {entry.name}")
             return
         pos = region = None
         bot = self.bot
         if bot is not None:
-            img = bot.minimap_frame()
-            pos = bot.player_pos(img)
+            img = bot.viz.get("img")
+            pos = bot.minimap.player_pos(img) if img is not None else None
             region = bot.minimap.region
         feed = self._get_feed()
         if pos is None and feed is not None:
@@ -759,9 +599,7 @@ class BotHost:
                 v = snapped
         walls[side] = round(max(0.0, min(1.0, v / span)), 4)
         entry.walls = walls
-        self.maps.save(entry)
-        self.maps.reload()
-        self._send_maps()
+        self._save_entry(entry)
         axis = "y" if side == "floor" else "x"
         self.bus.emit(
             "map", f"{side} wall set at {axis}={v} for {entry.name}"
@@ -791,7 +629,7 @@ class BotHost:
                 return
             plats.pop()
             entry.platforms = plats or None
-            self._save_layout_entry(entry)
+            self._save_entry(entry)
             self.bus.emit(
                 "map",
                 f"{entry.name}: undid platform ({len(plats)} left)",
@@ -799,7 +637,7 @@ class BotHost:
             return
         if payload == "clear":
             entry.platforms = None
-            self._save_layout_entry(entry)
+            self._save_entry(entry)
             self.bus.emit("map", f"platforms cleared for {entry.name}")
             return
         try:
@@ -811,7 +649,7 @@ class BotHost:
         img = None
         bot = self.bot
         if bot is not None:
-            img = bot.minimap_frame()
+            img = bot.viz.get("img")
         feed = self._get_feed()
         if img is None and feed is not None:
             img = feed.minimap_img()
@@ -828,13 +666,8 @@ class BotHost:
             round(seg[2] / w, 4), round(seg[3] / h, 4),
         ])
         entry.platforms = plats
-        self._save_layout_entry(entry)
+        self._save_entry(entry)
         self.bus.emit("map", f"{entry.name}: platform {len(plats)} drawn")
-
-    def _save_layout_entry(self, entry) -> None:
-        self.maps.save(entry)
-        self.maps.reload()
-        self._send_maps()
 
     def _platforms_px(self, entry) -> list:
         """A map's drawn platform segments converted to minimap px."""
@@ -869,10 +702,7 @@ class BotHost:
             if img is None:
                 feed = self._get_feed()
                 if feed is not None:
-                    img = feed.name_img(
-                        self.bot_config.name_scan_px,
-                        self.bot_config.minimap_name_region,
-                    )
+                    img = feed.name_img()
             if img is None:
                 return {"state": "IDLE"}
             meta = self._map_meta()
@@ -903,7 +733,7 @@ class BotHost:
                 "layout": self._layout_source(),
                 **meta,
             }
-        band = None
+        band = band_rect = None
         region = None
         if bot is not None:
             snap = bot.viz_snapshot() or {}
@@ -916,6 +746,7 @@ class BotHost:
             snap.update(meta)
             region = bot.minimap.region
             try:
+                band_rect = bot.name_region()
                 band = bot.name_img()
             except Exception:
                 band = None
@@ -934,10 +765,8 @@ class BotHost:
                 **self._map_meta(),
             }
             region = feed.minimap.region
-            band = feed.name_img(
-                self.bot_config.name_scan_px,
-                self.bot_config.minimap_name_region,
-            )
+            band_rect = feed.name_region()
+            band = feed.name_img()
         # The minimap view is the whole located panel: title strip on
         # top, map below, separated at the panel divider. Its right edge
         # reaches the title text's end so long names aren't clipped.
@@ -945,8 +774,7 @@ class BotHost:
         if img is not None and region is not None:
             from .remote.streamer import assemble_panel
 
-            name_region = self.bot_config.minimap_name_region
-            band_xy = tuple(name_region[:2]) if name_region else (0, 0)
+            band_xy = tuple(band_rect[:2]) if band_rect else (0, 0)
             comp, dx, dy = assemble_panel(
                 band, img, region, band_xy=band_xy
             )
@@ -958,7 +786,6 @@ class BotHost:
     # -- Dashboard commands ------------------------------------------------------
     def _handle_command(self, msg: str) -> bool:
         if msg == "map|list":
-            self._map_dirty = True   # refresh evidence for the dashboard
             self._send_maps()
         elif msg.startswith("map|set|"):
             self._set_map(msg.split("|", 2)[2])
@@ -978,8 +805,6 @@ class BotHost:
             self.streamer.set_mode(msg.split("|", 2)[2])
         elif msg.startswith("dash|fps|"):
             self._fps_set(msg.split("|", 2)[2])
-        elif msg in ("dash|ink|on", "dash|ink|off"):
-            pass  # legacy toggle — platform ink detection was removed
         elif msg == "layout|save" or msg.startswith("layout|save|"):
             self._layout_save(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg == "layout|clear" or msg.startswith("layout|clear|"):
@@ -1014,59 +839,29 @@ class BotHost:
             return False
         return True
 
-    def _name_reader(self):
-        """Lazily-built RapidOCR reader (first load ~1s, engine shared)."""
-        if self._ocr_reader is None:
-            from .vision.mapname import MapNameReader
-
-            self._ocr_reader = MapNameReader()
-        return self._ocr_reader
-
     def _send_maps(self) -> None:
-        # Refresh the live evidence so the dashboard shows what's
-        # actually on screen, not just the resolution. Dirty identity
-        # forces a full re-resolve (OCR included) regardless of the
-        # throttle window.
-        if self._map_dirty:
-            self._map_res_ts = 0.0
-        self._resolved_map_cached()
-        live, dist = self._live_match
-        ocr_entry, ocr_text = self._live_ocr
-        detected = ocr_entry if ocr_entry is not None else live
-        # Score = does the live fingerprint corroborate the detected map?
-        thresh = self.bot_config.map_match_threshold
-        score = None
-        if detected is not None and detected.fingerprint and self._live_fp:
-            from .vision.minimap import fingerprint_score
-
-            score = round(
-                fingerprint_score(
-                    self._live_fp, detected.fingerprint, thresh
-                ),
-                2,
-            )
+        self._maps_sent_version = self.identity.version
+        res = self.identity.current
         payload = {
             "event": "maps",
             "maps": self.maps.names(),
-            "active": self._active_map_override,
-            "detected": detected.name if detected is not None else None,
-            "via": (
-                "ocr" if ocr_entry is not None
-                else "fp" if live is not None else None
-            ),
-            "title": ocr_text,
-            "score": score,
+            "active": self.identity.pin,
+            "detected": res.name,
+            "via": res.via,
+            "title": res.title,
+            "score": res.score if res.title_map else None,
+            "reading": self.identity.pending,
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
 
     def _set_map(self, name: str) -> None:
-        self._active_map_override = name or None
-        self._map_dirty = True       # pin change → re-verify identity
-        self.bot_config.active_map = self._active_map_override
+        pin = name or None
+        self.bot_config.active_map = pin
         self.bot_config.auto_select_map = not bool(name)
         if self.bot is not None:
-            self.bot.config.active_map = self._active_map_override
+            self.bot.config.active_map = pin
             self.bot.config.auto_select_map = not bool(name)
+        self.identity.set_pin(pin)
         self.bus.emit("map", f"active map: {name or 'auto'}")
         self._send_maps()
 
@@ -1305,7 +1100,7 @@ class BotHost:
             # platform" — the runner warns on the latter.
             from .vision.minimap import platform_covered, platform_row_at
 
-            entry = self._resolved_map_cached()
+            entry = self._resolved_entry()
             segs = self._platforms_px(entry) if entry is not None else []
             if not segs or not platform_covered(segs, x):
                 return y
@@ -1324,45 +1119,23 @@ class BotHost:
     def _cal_finish(self, name: str) -> None:
         if not self.calibrator:
             return
+        res = self.identity.current
         if not name:
-            # Blank = save onto the currently resolved map, else 'unnamed'.
-            resolved = self._resolved_map_entry()
+            resolved = self._resolved_entry()
             name = resolved.name if resolved is not None else "unnamed"
             self.bus.emit("cal", f"auto-named map: {name}")
         feed = self._get_feed()
-        fp = None
-        if feed is not None:
-            img = feed.minimap_img()
-            if img is not None:
-                from .vision.minimap import fingerprint, structure_mask
-
-                c = feed.minimap.colors
-                fp = fingerprint(
-                    img,
-                    ignore_colors=(c.player, c.other_player, c.rune),
-                    include_mask=structure_mask(img, c),
-                ) or None
-        map_name = None
-        if feed is not None and self.bot_config.name_ocr:
-            try:
-                strip = feed.name_img(
-                    self.bot_config.name_scan_px,
-                    self.bot_config.minimap_name_region,
-                )
-                map_name = self._name_reader().read(strip)
-            except Exception:
-                map_name = None
-            if not map_name:
-                self.bus.emit(
-                    "notify",
-                    "map title unreadable — saved without map_name; "
-                    "OCR matching will skip this map until a save "
-                    "captures it (check the Title view)",
-                )
+        map_name = res.title if res.title_map in (None, name) else None
+        if self.bot_config.name_ocr and not map_name:
+            self.bus.emit(
+                "notify",
+                "map title not read yet — saved without map_name; title "
+                "matching will skip this map until a save captures it "
+                "(check the Title view)",
+            )
         try:
             entry = self.calibrator.finish(
                 name,
-                fingerprint=fp,
                 minimap_region=feed.minimap.region if feed else None,
                 key_map={
                     s.key: s for s in self.bot_config.skills.values()
@@ -1374,7 +1147,7 @@ class BotHost:
             )
             path = self.maps.save(entry)
             self.maps.reload()
-            self._map_dirty = True   # fresh map_name — re-verify
+            self.identity.refresh()
             self.bus.emit("cal", f"map saved: {path}")
             self._send_maps()
         except Exception as exc:

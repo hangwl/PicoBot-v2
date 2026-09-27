@@ -1,28 +1,18 @@
-"""Per-map rotation storage.
-
-Each farmed map gets a JSON file under ``maps/`` holding its rotation
-graph, skill bindings, and a minimap fingerprint. The fingerprint lets
-the bot auto-select the right file when the character changes maps —
-capture the minimap, hash it, match against the store.
+"""Per-map storage: one JSON file per farmed map under ``maps/``.
 
 File shape::
 
     {
-      "name": "limina_1f_east",
-      "map_name": "Limina : 1-5 East",   // optional label (legacy OCR field)
-      "fingerprint": "<hex from vision.minimap.fingerprint>",
-      "minimap_region": [x, y, w, h],    // remembered layout (optional)
-      "platforms": [[x0,y0,x1,y1], ...], // drawn platform lines (optional)
+      "name": "limina_1f_east",          // user alias (file name)
+      "map_name": "Limina : 1-5 East",   // OCR'd in-game title
+      "fingerprint": null,               // legacy, carried through unused
+      "minimap_region": [x, y, w, h],    // remembered panel layout
+      "platforms": [[x0,y0,x1,y1], ...], // drawn platform lines
       "rotation": { ...Rotation.to_dict()... },
       "skills":   { "fountain": {"key": "d", "cooldown": 57, "kind": "summon"} }
     }
 
-``map_name`` is a free-form label kept for file compatibility — it is
-not used for matching (the OCR reader was removed; the strip's
-translucent background made it unreliable). ``fingerprint`` is the map
-identity. ``minimap_region`` (client-area-relative) is the minimap
-layout captured at calibration time; once a map is identified the bot
-restores it, so auto-detection drift can't accumulate on known maps.
+Identity is the OCR'd title matched by :meth:`MapStore.match_title`.
 """
 
 from __future__ import annotations
@@ -33,8 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from ..vision.mapname import normalize_name
-from ..vision.minimap import fingerprint_distance
+from ..vision.mapname import title_score
 from .rotation import Rotation
 from .skills import Skill
 
@@ -47,7 +36,7 @@ class MapEntry:
     rotation: Rotation = field(default_factory=Rotation)
     skills: Dict[str, Skill] = field(default_factory=dict)
     fingerprint: Optional[str] = None
-    map_name: Optional[str] = None   # optional label (legacy OCR field)
+    map_name: Optional[str] = None
     minimap_region: Optional[tuple] = None  # remembered (x, y, w, h) layout
     # Optional per-map boundaries (normalized fractions): player left of
     # "left" must face right, right of "right" must face left — for maps
@@ -130,7 +119,7 @@ class MapEntry:
 
 
 class MapStore:
-    """Directory of :class:`MapEntry` JSON files with fingerprint lookup."""
+    """Directory of :class:`MapEntry` JSON files with title lookup."""
 
     def __init__(self, directory: str | Path = "maps") -> None:
         self.directory = Path(directory)
@@ -163,54 +152,39 @@ class MapStore:
                 return entry
         return None
 
-    def match(self, fingerprint: Optional[str], threshold: float = 15.0) -> Optional[MapEntry]:
-        """Best fingerprint match under ``threshold``, else None."""
-        entry, _ = self.match_scored(fingerprint, threshold)
-        return entry
-
-    def match_scored(
-        self, fingerprint: Optional[str], threshold: float = 15.0
+    def match_title(
+        self,
+        ocr_text: Optional[str],
+        *,
+        min_score: float = 0.93,
+        margin: float = 0.05,
     ) -> Tuple[Optional[MapEntry], float]:
-        """Best fingerprint match plus its distance (``inf`` = no match).
+        """Best entry for an OCR'd title plus its score (see
+        :func:`~picobot.vision.mapname.title_score`).
 
-        The distance doubles as a confidence signal — well under
-        ``threshold`` is a confident match, at/over it is not a match.
+        Each entry scores under its ``map_name`` and its ``name`` alias.
+        The winner must reach ``min_score`` — above what sibling maps
+        sharing a street name score — and lead the runner-up by
+        ``margin``; otherwise the result is ``(None, best_score)``.
         """
-        if not fingerprint:
-            return None, float("inf")
-        best, best_dist = None, float("inf")
-        for entry in self.load_all():
-            dist = fingerprint_distance(fingerprint, entry.fingerprint or "")
-            if dist < best_dist:
-                best, best_dist = entry, dist
-        if best is None or best_dist >= threshold:
-            return None, best_dist
-        return best, best_dist
+        scored = sorted(
+            (
+                (max(title_score(ocr_text, e.map_name),
+                     title_score(ocr_text, e.name)), i, e)
+                for i, e in enumerate(self.load_all())
+            ),
+            key=lambda t: (-t[0], t[1]),
+        )
+        if not scored:
+            return None, 0.0
+        best, _, entry = scored[0]
+        second = scored[1][0] if len(scored) > 1 else 0.0
+        if best < min_score or best - second < margin:
+            return None, best
+        return entry, best
 
     def match_name(self, ocr_text: Optional[str]) -> Optional[MapEntry]:
-        """Match on the OCR'd map title (normalized), else None.
-
-        Each entry is tried under both its ``map_name`` (the game's
-        title text) and its ``name`` (the user's alias). A stored name
-        only needs to appear inside the OCR'd text — the strip may also
-        pick up neighbouring UI text — and a long-enough OCR fragment
-        inside a stored name counts too, so a truncated read can still
-        resolve. Longest candidate wins, so overlapping names stay
-        unambiguous.
-        """
-        norm = normalize_name(ocr_text)
-        if not norm:
-            return None
-        best, best_len = None, 0
-        for entry in self.load_all():
-            for cand in (entry.map_name, entry.name):
-                en = normalize_name(cand)
-                if not en:
-                    continue
-                hit = en in norm or (len(norm) >= 6 and norm in en)
-                if hit and len(en) > best_len:
-                    best, best_len = entry, len(en)
-        return best
+        return self.match_title(ocr_text)[0]
 
     def save(self, entry: MapEntry) -> Path:
         """Write the map file; returns its path."""

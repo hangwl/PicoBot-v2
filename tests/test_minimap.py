@@ -8,16 +8,13 @@ from picobot.vision.minimap import (
     blob_centroid,
     color_mask,
     erode3,
-    fingerprint,
-    fingerprint_distance,
-    fingerprint_score,
+    find_frame,
     largest_blob_centroid,
     platform_covered,
-    platform_mask,
     platform_row_at,
     platform_span_at,
-    structure_mask,
 )
+from picobot.vision.transition import TransitionDetector
 
 
 def _blank(w=200, h=120):
@@ -135,108 +132,209 @@ class MinimapAnalyzerTests(unittest.TestCase):
             MinimapColors.from_dict({"player": [1, 2]})
 
 
-_BORDER = (228, 228, 228)  # default MinimapColors.border — the "ink"
+_BORDER = (228, 228, 228)
 
 
 def _hlines(w=200, h=150):
-    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img = np.full((h, w, 3), 40, dtype=np.uint8)
     img[::15, :] = _BORDER
     return img
 
 
 def _vlines(w=200, h=150):
-    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img = np.full((h, w, 3), 40, dtype=np.uint8)
     img[:, ::15] = _BORDER
     return img
 
 
-class MapChangeWatchdogTests(unittest.TestCase):
-    def test_same_map_frames_do_not_trip(self):
-        a = MinimapAnalyzer(region=(0, 0, 200, 150))
-        self.assertFalse(a.note_frame(_hlines()))
-        self.assertFalse(a.note_frame(_hlines()))
+def _black(w=200, h=150):
+    return np.zeros((h, w, 3), dtype=np.uint8)
 
-    def test_persistent_change_trips_after_n_frames(self):
-        a = MinimapAnalyzer()
-        a._region = (0, 0, 200, 150)
-        a._region_source = "auto"   # simulate auto-located region
-        a.note_frame(_hlines())     # baseline
-        self.assertFalse(a.note_frame(_vlines()))   # miss 1
-        self.assertFalse(a.note_frame(_vlines()))   # miss 2
-        self.assertTrue(a.note_frame(_vlines()))    # miss 3 → change
-        self.assertIsNone(a.region)                 # auto region dropped
 
-    def test_inconsistent_misses_never_confirm(self):
-        # Flicker frames that don't match each other can't accumulate —
-        # translucency noise and loading blanks die here.
-        a = MinimapAnalyzer()
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def _analyzer(region=None, source="auto"):
+    clock = _Clock()
+    a = MinimapAnalyzer(
+        region=region, transition=TransitionDetector(clock=clock)
+    )
+    if region is None:
         a._region = (0, 0, 200, 150)
-        a._region_source = "auto"
-        a.note_frame(_hlines())
-        alt = _vlines()
-        alt2 = np.zeros_like(alt); alt2[:, 3::15] = _BORDER
-        for i in range(6):
-            # alternating new scenes — each disagrees with the last miss
-            self.assertFalse(a.note_frame(alt if i % 2 else alt2))
+        a._region_source = source
+    return a, clock
+
+
+def _transfer(a, clock, dark_s=1.0, settle_s=1.0, step=0.1):
+    """Feed a blackout then the new map; returns note_frame results."""
+    out = []
+    for _ in range(int(dark_s / step)):
+        clock.t += step
+        out.append(a.note_frame(_black()))
+    for _ in range(int(settle_s / step)):
+        clock.t += step
+        out.append(a.note_frame(_vlines()))
+    return out
+
+
+class MapTransferTests(unittest.TestCase):
+    def test_translucent_ui_changes_never_trigger(self):
+        # The false-trigger class from the debug captures: content changes
+        # a lot (overlays, scenery) but never goes black.
+        a, clock = _analyzer()
+        for i in range(50):
+            clock.t += 0.1
+            self.assertFalse(a.note_frame(_hlines() if i % 7 < 3 else _vlines()))
         self.assertEqual(a.region, (0, 0, 200, 150))
 
-    def test_manual_region_dropped_on_change(self):
-        # A hand-drawn region belongs to the old map's identity — only a
-        # config-pinned region survives a confirmed change.
-        a = MinimapAnalyzer()
-        a.set_region((0, 0, 200, 150), explicit=True)
-        a.note_frame(_hlines())
-        for _ in range(2):
-            self.assertFalse(a.note_frame(_vlines()))
-        self.assertTrue(a.note_frame(_vlines()))
+    def test_blackout_then_arrival_drops_auto_region(self):
+        a, clock = _analyzer()
+        out = _transfer(a, clock)
+        self.assertEqual(out.count(True), 1)
         self.assertIsNone(a.region)
 
-    def test_explicit_region_kept_on_change(self):
-        a = MinimapAnalyzer(region=(0, 0, 200, 150))
-        a.note_frame(_hlines())
-        for _ in range(2):
-            self.assertFalse(a.note_frame(_vlines()))
-        self.assertTrue(a.note_frame(_vlines()))
-        self.assertEqual(a.region, (0, 0, 200, 150))
+    def test_loading_flag_spans_blackout_and_settle(self):
+        a, clock = _analyzer()
+        clock.t += 0.1
+        a.note_frame(_black())
+        self.assertFalse(a.loading)          # not confirmed yet
+        for _ in range(3):
+            clock.t += 0.1
+            a.note_frame(_black())
+        self.assertTrue(a.loading)
+        clock.t += 0.1
+        a.note_frame(_vlines())
+        self.assertTrue(a.loading)           # settling
+        clock.t += 1.0
+        a.note_frame(_vlines())
+        self.assertFalse(a.loading)
 
-    def test_transient_flicker_does_not_trip(self):
-        a = MinimapAnalyzer()
-        a._region = (0, 0, 200, 150)
-        a.note_frame(_hlines())
-        self.assertFalse(a.note_frame(_vlines()))   # 1 miss
-        self.assertFalse(a.note_frame(_hlines()))   # recovers → counter reset
+    def test_brief_dark_blip_is_ignored(self):
+        a, clock = _analyzer()
+        clock.t += 0.1
+        a.note_frame(_black())
+        clock.t += 0.1
+        self.assertFalse(a.note_frame(_hlines()))
+        clock.t += 2.0
         self.assertFalse(a.note_frame(_hlines()))
         self.assertEqual(a.region, (0, 0, 200, 150))
 
-    def test_baseline_rearms_after_reset(self):
-        a = MinimapAnalyzer(map_change_frames=2)
-        a.note_frame(_hlines())
-        a.note_frame(_vlines())
-        self.assertTrue(a.note_frame(_vlines()))    # change confirmed
-        # New baseline adopted; same new content must not re-trip.
-        self.assertFalse(a.note_frame(_vlines()))
+    def test_manual_and_stored_regions_dropped_on_arrival(self):
+        for explicit in (True, False):
+            a, clock = _analyzer()
+            a.set_region((0, 0, 200, 150), explicit=explicit)
+            _transfer(a, clock)
+            self.assertIsNone(a.region)
+
+    def test_config_region_kept_on_arrival(self):
+        a, clock = _analyzer(region=(0, 0, 200, 150))
+        self.assertIn(True, _transfer(a, clock))
+        self.assertEqual(a.region, (0, 0, 200, 150))
+
+
+def _frame(img, x, y, w, h, r=4):
+    """Draw a 2px rounded-corner frame like the client's minimap."""
+    img[y, x + r : x + w - r + 1] = _BORDER
+    img[y + 1, x + r - 2 : x + w - r + 3] = _BORDER
+    img[y + h, x + r : x + w - r + 1] = _BORDER
+    img[y + h - 1, x + r - 2 : x + w - r + 3] = _BORDER
+    img[y + r : y + h - r + 1, x] = _BORDER
+    img[y + r - 2 : y + h - r + 3, x + 1] = _BORDER
+    img[y + r : y + h - r + 1, x + w] = _BORDER
+    img[y + r - 2 : y + h - r + 3, x + w - 1] = _BORDER
+    return img
+
+
+class FindFrameTests(unittest.TestCase):
+    def _window(self):
+        return np.full((768, 1366, 3), 50, dtype=np.uint8)
+
+    def test_rounded_frame_found_exactly(self):
+        img = _frame(self._window(), 7, 68, 216, 90)
+        img[30:40, 50:200:3] = _BORDER          # title glyph-ish clutter
+        self.assertEqual(find_frame(img), (7, 68, 216, 90))
+
+    def test_per_map_sizes(self):
+        for rect in ((7, 68, 185, 82), (7, 68, 213, 109), (7, 28, 170, 82)):
+            img = _frame(self._window(), *rect)
+            self.assertEqual(find_frame(img), rect)
+
+    def test_occluded_side_returns_none(self):
+        img = _frame(self._window(), 7, 68, 216, 90)
+        img[60:170, 150:300] = 90               # a window covers the right
+        self.assertIsNone(find_frame(img))
+
+    def test_long_white_line_alone_is_not_a_frame(self):
+        img = self._window()
+        img[100, 10:300] = _BORDER
+        img[180, 10:300] = _BORDER
+        self.assertIsNone(find_frame(img))
+
+    def test_locate_uses_frame_and_marks_auto(self):
+        a = MinimapAnalyzer()
+        img = _frame(self._window(), 7, 68, 216, 90)
+        self.assertEqual(a.locate(img), (7, 68, 216, 90))
+        self.assertEqual(a.region_source, "auto")
+
+
+class PanelMovedTests(unittest.TestCase):
+    def _setup(self):
+        clock = _Clock()
+        a = MinimapAnalyzer(transition=TransitionDetector(clock=clock))
+        win = _frame(np.full((768, 1366, 3), 50, np.uint8), 7, 68, 216, 90)
+        a.locate(win)
+        return a, clock, win
+
+    def _crop(self, win, a):
+        x, y, w, h = a.region
+        return win[y : y + h, x : x + w]
+
+    def _tick(self, a, clock, img, n=15):
+        for _ in range(n):
+            clock.t += 0.1
+            a.note_frame(img)
+
+    def test_edge_present_never_lost(self):
+        a, clock, win = self._setup()
+        self._tick(a, clock, self._crop(win, a))
+        self.assertFalse(a.edge_lost)
+
+    def test_toggled_panel_relocates(self):
+        a, clock, _ = self._setup()
+        moved = _frame(np.full((768, 1366, 3), 50, np.uint8), 7, 28, 170, 82)
+        self._tick(a, clock, self._crop(moved, a))
+        self.assertTrue(a.edge_lost)
+        self.assertTrue(a.relocate(moved))
+        self.assertEqual(a.region, (7, 28, 170, 82))
+        self.assertFalse(a.edge_lost)
+
+    def test_overlay_hiding_edge_keeps_region(self):
+        a, clock, win = self._setup()
+        covered = win.copy()
+        covered[60:170, 0:300] = 90
+        self._tick(a, clock, self._crop(covered, a))
+        self.assertTrue(a.edge_lost)
+        self.assertFalse(a.relocate(covered))
+        self.assertEqual(a.region, (7, 68, 216, 90))
+        self.assertFalse(a.edge_lost)        # waits another interval
+
+    def test_config_and_manual_regions_not_tracked(self):
+        a, clock = _analyzer(region=(0, 0, 200, 150))
+        self._tick(a, clock, _hlines())
+        self.assertFalse(a.edge_lost)
 
 
 class SetRegionTests(unittest.TestCase):
-    def test_installs_region_and_reanchors_baseline(self):
+    def test_installs_stored_region(self):
         a = MinimapAnalyzer()
-        a.note_frame(_hlines())                     # old baseline
         a.set_region((10, 20, 200, 150))
         self.assertEqual(a.region, (10, 20, 200, 150))
         self.assertEqual(a.region_source, "stored")
-        # The swap itself isn't a map change — baseline re-anchors.
-        self.assertFalse(a.note_frame(_vlines()))
-        self.assertFalse(a.note_frame(_vlines()))
-
-    def test_stored_region_stays_resettable(self):
-        a = MinimapAnalyzer()
-        a.set_region((10, 20, 200, 150))
-        a.note_frame(_hlines())
-        a.note_frame(_vlines())
-        a.note_frame(_vlines())
-        self.assertTrue(a.note_frame(_vlines()))
-        self.assertIsNone(a.region)                 # watchdog can still drop
-        self.assertIsNone(a.region_source)
 
     def test_config_region_source_and_reset(self):
         a = MinimapAnalyzer(region=(0, 0, 200, 150))
@@ -272,118 +370,6 @@ class LargestBlobTests(unittest.TestCase):
         _dot(img, 90, 10, a.colors.rune, r=1)      # stray speck (survives erosion)
         pos = a.rune_pos(img)
         self.assertTrue(abs(pos[0] - 30) <= 2 and abs(pos[1] - 40) <= 2)
-
-
-class PlatformMaskTests(unittest.TestCase):
-    """Structural line detection — geometry, not colour."""
-
-    def test_detects_line_of_any_colour(self):
-        # A green platform line on dark bg — the whole point of the
-        # structural detector is that colour doesn't matter.
-        img = _blank()
-        img[:] = (10, 20, 30)
-        img[40, 20:120] = (40, 180, 90)
-        mask = platform_mask(img)
-        self.assertTrue(mask[40, 60])
-        self.assertFalse(mask[40, 150])    # past the run's end
-        self.assertFalse(mask[45, 60])     # plain background row
-
-    def test_rejects_dots_and_short_runs(self):
-        img = _blank()
-        _dot(img, 60, 40, (200, 200, 200), r=2)   # 5px marker blob
-        img[70, 20:26] = (200, 200, 200)          # 6px run < min_run
-        self.assertFalse(platform_mask(img).any())
-
-    def test_thick_region_interior_and_edges_rejected(self):
-        # A tall filled block isn't a line: interior rows have no vertical
-        # contrast and its edge rows only contrast on one side.
-        img = _blank()
-        img[30:80, 20:150] = (60, 60, 60)
-        self.assertFalse(platform_mask(img).any())
-
-    def test_blended_line_with_two_rendered_colours(self):
-        # Alpha-blend look: one logical line rendered as two different
-        # colours over different backgrounds — still one platform row.
-        img = _blank()
-        img[:] = (10, 20, 30)
-        img[40, 10:60] = (100, 100, 100)
-        img[40, 60:120] = (80, 90, 95)
-        mask = platform_mask(img)
-        self.assertTrue(mask[40, 30])
-        self.assertTrue(mask[40, 90])
-
-    def test_multiple_platforms_all_detected(self):
-        img = _blank()
-        img[:] = (5, 5, 8)
-        for y in (20, 60, 100):
-            img[y, 30:170] = (150, 140, 130)
-        mask = platform_mask(img)
-        for y in (20, 60, 100):
-            self.assertTrue(mask[y, 100])
-        self.assertFalse(mask[40, 100])
-
-    def test_fingerprint_include_mask_ignores_background(self):
-        # Same platform lines over a wildly different background must
-        # hash identically — the structural mask isolates the lines.
-        base = _blank()
-        base[:] = (10, 20, 30)
-        other = _blank()
-        other[:] = (250, 200, 100)
-        for img in (base, other):
-            img[40, 10:150] = (90, 90, 90)
-            img[90, 40:180] = (90, 90, 90)
-        fa = fingerprint(base, include_mask=structure_mask(base))
-        fb = fingerprint(other, include_mask=structure_mask(other))
-        self.assertEqual(fa, fb)
-
-    def test_structure_mask_unions_configured_ink(self):
-        # An ink-coloured feature too short for structural detection
-        # still enters the mask when the ink colour is configured.
-        img = _blank()
-        img[40, 10:14] = (7, 8, 9)  # 4px run — too short for geometry
-        colors = MinimapColors(ink=(7, 8, 9))
-        mask = structure_mask(img, colors)
-        self.assertTrue(mask[40, 11])
-        self.assertFalse(platform_mask(img)[40, 11])
-
-
-class GeometryFingerprintTests(unittest.TestCase):
-    """include-mask fingerprints hash structure, not pixel colour."""
-
-    def test_mask_fingerprint_is_colour_free(self):
-        # The translucency fix: identical line *positions* over wildly
-        # different rendered colours hash the same — the scene behind
-        # the translucent panel can no longer perturb the fingerprint.
-        rng = np.random.default_rng(0)
-        mask = np.zeros((150, 200), dtype=bool)
-        mask[40, 10:150] = True
-        mask[90, 40:180] = True
-        fa = fingerprint(
-            rng.integers(0, 256, (150, 200, 3), dtype=np.uint8),
-            include_mask=mask,
-        )
-        fb = fingerprint(
-            rng.integers(0, 256, (150, 200, 3), dtype=np.uint8),
-            include_mask=mask,
-        )
-        self.assertEqual(fa, fb)
-        self.assertTrue(fa.startswith("g2:"))
-
-    def test_geometry_and_legacy_schemes_never_match(self):
-        img = _hlines()
-        g = fingerprint(img, include_mask=structure_mask(img))
-        legacy = "00" * 512
-        self.assertEqual(fingerprint_distance(g, legacy), float("inf"))
-        self.assertEqual(fingerprint_distance(legacy, g), float("inf"))
-
-    def test_score_scale(self):
-        img = _hlines()
-        fa = fingerprint(img, include_mask=structure_mask(img))
-        self.assertEqual(fingerprint_score(fa, fa), 1.0)
-        # Wrong scheme -> no match -> 0 confidence.
-        self.assertEqual(fingerprint_score(fa, "00" * 512), 0.0)
-        other = fingerprint(_vlines()) or "g2:" + "ff" * 512
-        self.assertEqual(fingerprint_score(fa, other), 0.0)
 
 
 class DrawnPlatformTests(unittest.TestCase):

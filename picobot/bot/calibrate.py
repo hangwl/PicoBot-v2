@@ -60,6 +60,7 @@ def merge_recording(
     if existing is not None:
         entry.walls = existing.walls
         entry.platforms = existing.platforms
+        entry.fingerprint = existing.fingerprint
         merged = dict(entry.skills)
         merged.update(existing.skills)
         entry.skills = merged
@@ -142,7 +143,6 @@ class TraceRecorder:
     def finish(
         self,
         name: str,
-        fingerprint: Optional[str] = None,
         minimap_region=None,
         key_map: Optional[Dict[str, Skill]] = None,
     ) -> MapEntry:
@@ -197,22 +197,21 @@ class TraceRecorder:
             for k, times in _key_groups(a["key_events"]).items():
                 if k in key_map:
                     continue  # bound in config — its kind/cooldown apply
-                name = f"key_{k}"
-                if name in skills:
+                sname = f"key_{k}"
+                if sname in skills:
                     continue
                 if len(times) >= 3:
                     gaps = [b - t for t, b in zip(times, times[1:])]
                     cd = sorted(gaps)[len(gaps) // 2]
-                    skills[name] = Skill(
-                        name, k, min(15.0, max(0.5, cd)), "attack"
+                    skills[sname] = Skill(
+                        sname, k, min(15.0, max(0.5, cd)), "attack"
                     )
                 else:
-                    skills[name] = Skill(name, k, 30.0, "summon")
+                    skills[sname] = Skill(sname, k, 30.0, "summon")
         return MapEntry(
             name=name,
             rotation=Rotation(anchors=anchors),
             skills=skills,
-            fingerprint=fingerprint,
             minimap_region=minimap_region,
         )
 
@@ -345,7 +344,6 @@ class CalibrationRunner:
     def finish(
         self,
         name: str,
-        fingerprint: Optional[str] = None,
         minimap_region=None,
         key_map: Optional[Dict[str, Skill]] = None,
         existing: Optional[MapEntry] = None,
@@ -386,7 +384,6 @@ class CalibrationRunner:
                 )
         entry = recorder.finish(
             name,
-            fingerprint=fingerprint,
             minimap_region=minimap_region,
             key_map=key_map,
         )
@@ -415,11 +412,7 @@ def main() -> None:
     from ..config import load_config
     from ..settings import configure_logging
     from ..vision.game_window import GameWindow
-    from ..vision.minimap import (
-        MinimapAnalyzer,
-        fingerprint,
-        structure_mask,
-    )
+    from ..vision.minimap import MinimapAnalyzer
     from ..vision.screen import ScreenGrabber
     from .config import BotConfig
 
@@ -463,23 +456,13 @@ def main() -> None:
             "Minimap not found — set minimap_region/colors in config.json"
         )
     recorder = TraceRecorder((first.shape[1], first.shape[0]))
-    fp = fingerprint(
-        first,
-        ignore_colors=(
-            minimap.colors.player,
-            minimap.colors.other_player,
-            minimap.colors.rune,
-        ),
-        include_mask=structure_mask(first, minimap.colors),
-    ) or None
     map_name = None
     try:
         from ..vision.mapname import MapNameReader, name_strip_region
 
         if minimap.region:
-            l, t, r, b = window.client_rect()
-            x, y, w, h = name_strip_region(
-                minimap.region, window_w=r - l
+            x, y, w, h = bot_config.minimap_name_region or name_strip_region(
+                minimap.region, bot_config.name_scan_px
             )
             strip = screen.capture(
                 (window.client_left + x, window.client_top + y, w, h)
@@ -518,7 +501,6 @@ def main() -> None:
         screen.close()
     entry = recorder.finish(
         args.name,
-        fingerprint=fp,
         minimap_region=minimap.region,
         key_map={s.key: s for s in bot_config.skills.values()},
     )

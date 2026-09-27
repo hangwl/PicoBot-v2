@@ -15,20 +15,17 @@ import random
 import time
 from typing import Dict, List, Optional, Tuple
 
-from ..vision import framelog
 from ..vision.game_window import GameWindow
-from ..vision.mapname import MapNameReader, name_strip_region
+from ..vision.mapname import name_strip_region
 from ..vision.minimap import (
     MinimapAnalyzer,
-    fingerprint,
-    fingerprint_distance,
     platform_row_at,
     platform_span_at,
-    structure_mask,
 )
 from ..vision.screen import ScreenGrabber
 from .base import BotBase
 from .config import BotConfig
+from .identity import MapIdentity
 from .inputs import HidController
 from .machine import Machine
 from .maps import MapEntry, MapStore
@@ -49,6 +46,7 @@ class SmartBot(BotBase):
         config: BotConfig | None = None,
         *,
         minimap: Optional[MinimapAnalyzer] = None,
+        identity: Optional[MapIdentity] = None,
         log_callback=None,
         notify_callback=None,
         event_bus=None,
@@ -56,13 +54,11 @@ class SmartBot(BotBase):
         config = config or BotConfig()
         window = GameWindow(window_title)
         screen = ScreenGrabber()
-        # A caller-supplied analyzer (e.g. the dashboard's feed) carries
-        # its verified region + provenance into the bot; otherwise build
-        # our own seeded by config.
+        # The host shares its analyzer + identity so region provenance
+        # and the resolved map carry into the bot.
         minimap = minimap or MinimapAnalyzer(
             colors=config.minimap_colors,
             region=config.minimap_region,
-            map_change_threshold=config.map_match_threshold,
             marker_inset=config.marker_inset_px,
         )
         super().__init__(
@@ -71,18 +67,21 @@ class SmartBot(BotBase):
             event_bus=event_bus,
         )
         self.skills = SkillBook(config.skills)
-        self.maps = MapStore(config.maps_dir)
+        self.identity = identity or MapIdentity(
+            MapStore(config.maps_dir),
+            pin=config.active_map,
+            ocr_enabled=config.name_ocr,
+            on_event=lambda k, m: self.event(k, m),
+        )
+        self.maps = self.identity.store
+        self._identity_version = -1
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0
         self._travel_target: Optional[int] = None
-        self._leg_fp: Optional[str] = None
         self._dwell_end = 0.0
         self._rest_until = 0.0
         self._arrive_pending: List[Tuple[Skill, float]] = []
         self._minimap_warned = False
-        self._map_warned = False
-        self._name_reader = MapNameReader()
-        self._name_cache: Tuple[float, Optional[str]] = (0.0, None)
         self._last_up_skill = 0.0
         self._weave_dir: Optional[str] = None
         self._weave_bounds: Optional[Tuple[int, int]] = None
@@ -147,82 +146,43 @@ class SmartBot(BotBase):
         return self.screen.capture((l, t, r - l, b - t))
 
     def minimap_frame(self):
-        """BGR capture of the minimap, or None if the region is unknown."""
-        region = self.minimap.region
-        if region is not None:
-            x, y, w, h = region
-            img = self.screen.capture(
-                (self.window.client_left + x, self.window.client_top + y, w, h)
-            )
-            if img is not None and self.minimap.note_frame(
-                img, context=lambda: {"window": self._window_capture()}
-            ):
-                self.event("vision", "map change detected — minimap relocated")
-                self._minimap_warned = False  # re-warn if re-locate fails
-                # Re-identify the map under the new scene so a stale pin
-                # or stored layout can't persist past a real change.
-                self._resolve_map(img)
-            return self._stash_frame(img)
-        # Region unknown: try each map's remembered layout first (the
-        # fingerprint is meaningless under a wrong region, so seeding the
-        # region IS how the map gets identified), then border-detect.
-        img = self._window_capture()
-        if img is None:
-            return None
-        if self._resolve_region(img) is None:
-            if not self._minimap_warned:
-                self.log(
-                    "Minimap not found — set 'minimap_region' in the bot "
-                    "config or verify the border color."
-                )
-                self._minimap_warned = True
-            return None
-        return self.minimap_frame()
+        """BGR capture of the minimap, or None if the panel isn't found.
 
-    def _resolve_region(self, window_img) -> Optional[Tuple[int, int, int, int]]:
-        """Install the best region for the current screen.
-
-        Tries every map file's remembered ``minimap_region``: capture that
-        rect, fingerprint it, and keep the candidate whose fingerprint
-        matches that map (position is stable across maps, size is not).
-        Falls back to border ``locate()`` when nothing matches.
+        Also drives map-change detection (loading blackout), title reads,
+        and applies identity changes — all on the calling (bot) thread.
         """
-        for entry in self.maps.load_all():
-            if not entry.minimap_region or not entry.fingerprint:
-                continue
-            x, y, w, h = entry.minimap_region
-            img = self.screen.capture(
-                (self.window.client_left + x, self.window.client_top + y,
-                 w, h)
-            )
-            if img is None:
-                continue
-            fp = fingerprint(
-                img,
-                ignore_colors=self._fp_ignored_colors(),
-                include_mask=self._fp_mask(img),
-            )
-            if (
-                fp
-                and fingerprint_distance(fp, entry.fingerprint)
-                <= self.config.map_match_threshold
-            ):
-                self.minimap.set_region(entry.minimap_region)
-                self.log(f"Layout: restored {entry.name}'s remembered region")
-                return self.minimap.region
-        return self.minimap.locate(window_img)
+        if self.minimap.region is None:
+            window_img = self._window_capture()
+            if window_img is None or self.minimap.locate(window_img) is None:
+                if not self._minimap_warned:
+                    self.log(
+                        "Minimap not found — check the minimap is open "
+                        "and minimap_colors.border matches its frame."
+                    )
+                    self._minimap_warned = True
+                return None
+            self._minimap_warned = False
+        x, y, w, h = self.minimap.region
+        img = self.screen.capture(
+            (self.window.client_left + x, self.window.client_top + y, w, h)
+        )
+        if img is not None and self.minimap.note_frame(
+            img, context=lambda: {"window": self._window_capture()}
+        ):
+            self.event("vision", "arrived on a new map — re-detecting minimap")
+            self.identity.request("arrival", clear=True)
+        elif self.minimap.edge_lost and self.minimap.relocate(self._window_capture()):
+            self.event("vision", f"minimap panel moved: {list(self.minimap.region)}")
+            if self.identity.current.title is None:
+                self.identity.request("panel moved")
+        if not self.minimap.loading:
+            self.identity.pump(self.name_img)
+        self._sync_map()
+        return self._stash_frame(img)
 
     def _stash_frame(self, img):
         self.viz["img"] = img
         return img
-
-    def _fp_ignored_colors(self):
-        c = self.minimap.colors
-        return (c.player, c.other_player, c.rune)
-
-    def _fp_mask(self, img):
-        """Fingerprint include-mask: platform-line structure (+ ink)."""
-        return structure_mask(img, self.minimap.colors)
 
     def _platform_segments_px(self) -> list:
         """The map's hand-drawn platform segments, in minimap px."""
@@ -238,81 +198,23 @@ class SmartBot(BotBase):
         ]
 
     # -- Map-name OCR ----------------------------------------------------------
-    def _name_region(self):
+    def name_region(self):
+        """Client-area rect of the title band, or None."""
         if self.config.minimap_name_region:
             return self.config.minimap_name_region
         region = self.minimap.region
         if region is None:
             return None
-        l, t, r, b = self.window.client_rect()
-        return name_strip_region(
-            region, self.config.name_scan_px, window_w=r - l
-        )
+        return name_strip_region(region, self.config.name_scan_px)
 
     def name_img(self):
-        """BGR band spanning the title zone (window top → into the
-        minimap region); title_lines() segments the text out of it."""
-        region = self._name_region()
+        region = self.name_region()
         if region is None:
             return None
         x, y, w, h = region
         return self.screen.capture(
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
-
-    def map_name(self, force: bool = False) -> Optional[str]:
-        """OCR'd map title, cached a few seconds (it only changes on
-        map transitions). None = OCR off / engine missing / unreadable."""
-        if not self.config.name_ocr:
-            return None
-        now = time.time()
-        ts, cached = self._name_cache
-        if not force and now - ts < 5.0:
-            return cached
-        name = self._name_reader.read(self.name_img())
-        self._name_cache = (now, name)
-        if name and name != cached:
-            self.event("vision", f"map name: {name}")
-        self.viz["title"] = name
-        return name
-
-    def _live_map(self, img=None):
-        """(entry, via, fp, ocr_text) — the screen's best-guess identity.
-
-        OCR'd title text wins (an exact name match); the structural
-        fingerprint is the fallback. When both fire and disagree the
-        OCR result is kept — the title literally names the map — but
-        the conflict is logged so a misread can be spotted.
-        """
-        # force=True: resolution is change-gated and rare — a cached
-        # title from the previous map must never decide identity.
-        name = self.map_name(force=True)
-        ocr_entry = self.maps.match_name(name) if name else None
-        fp = self.minimap_fingerprint(img)
-        fp_entry, _ = self.maps.match_scored(
-            fp, self.config.map_match_threshold
-        )
-        if ocr_entry is not None:
-            if fp_entry is not None and fp_entry.name != ocr_entry.name:
-                self.log(
-                    f"map id conflict — OCR '{name}' → {ocr_entry.name}, "
-                    f"fingerprint → {fp_entry.name}; using OCR"
-                )
-            return ocr_entry, "ocr", fp, name
-        if fp_entry is not None:
-            return fp_entry, "fp", fp, name
-        return None, None, fp, name
-
-    def minimap_fingerprint(self, img=None) -> Optional[str]:
-        if img is None:
-            img = self.minimap_frame()
-        if img is None:
-            return None
-        return fingerprint(
-            img,
-            ignore_colors=self._fp_ignored_colors(),
-            include_mask=self._fp_mask(img),
-        ) or None
 
     def player_pos(self, img=None) -> Optional[Tuple[int, int]]:
         if img is None:
@@ -363,35 +265,18 @@ class SmartBot(BotBase):
             self.viz["hazard"] = None
             return None
         reason = None
-        capture = None
-        rune = self.minimap.rune_pos(img)
+        rune = None
+        if self.minimap.loading:
+            reason = "map transfer (loading screen)"
+        else:
+            rune = self.minimap.rune_pos(img)
+            if cfg.stop_when_rune_appears and rune is not None:
+                reason = "rune"
+            elif cfg.stop_when_players_appear and self.minimap.has_other_players(img):
+                reason = "other players"
         self.viz["rune"] = rune
-        if cfg.stop_when_rune_appears and rune is not None:
-            reason = "rune"
-        elif cfg.stop_when_players_appear and self.minimap.has_other_players(img):
-            reason = "other players"
-        elif self._leg_fp:
-            fp = fingerprint(
-                img,
-                ignore_colors=self._fp_ignored_colors(),
-                include_mask=self._fp_mask(img),
-            )
-            dist = fingerprint_distance(fp, self._leg_fp)
-            if dist > cfg.map_match_threshold:
-                reason = "map changed unexpectedly (portal?)"
-                capture = {
-                    "dist": None if dist == float("inf") else round(dist, 2),
-                    "fp_blank": not fp,
-                    "region": self.minimap.region,
-                }
         if reason != self.viz["hazard"] and reason is not None:
             self.event("safety", reason)
-            if capture is not None and framelog.recorder().enabled:
-                framelog.recorder().snapshot(
-                    "hazard_leg_fp",
-                    {"frame": img, "window": self._window_capture()},
-                    **capture,
-                )
         self.viz["hazard"] = reason
         return reason
 
@@ -404,67 +289,34 @@ class SmartBot(BotBase):
     def rotation_active(self) -> bool:
         return bool(self.effective_rotation().anchors)
 
-    def _resolve_map(self, img=None) -> None:
-        """Pin ``active_map`` or auto-select by OCR/fingerprint."""
-        cfg = self.config
-        if not (cfg.auto_select_map or cfg.active_map):
+    def _sync_map(self) -> None:
+        """Apply the shared identity's latest resolution (bot thread)."""
+        ident = self.identity
+        if ident.version == self._identity_version:
             return
-        entry = None
-        live, via, fp, ocr_text = self._live_map(img)
-        if cfg.active_map:
-            entry = self.maps.get(cfg.active_map)
-            if entry is None and not self._map_warned:
-                self.log(f"Map '{cfg.active_map}' not found in {cfg.maps_dir}/")
-                self._map_warned = True
-            elif (
-                entry is not None
-                and live is not None
-                and live.name != entry.name
-            ):
-                # The pin is rotation scope, not identity — when the
-                # screen verifiably shows a different map, the live
-                # evidence wins so a stale pin can't hold a dead layout.
-                # OCR'd title text is explicit identity and always wins;
-                # a fingerprint-only match only beats a pin whose own
-                # stored fingerprint disagrees with the screen.
-                proven = via == "ocr"
-                if not proven and entry.fingerprint and fp:
-                    pinned_dist = fingerprint_distance(
-                        fp, entry.fingerprint
-                    )
-                    proven = pinned_dist > cfg.map_match_threshold
-                if proven:
-                    self.log(
-                        f"Pin '{entry.name}' disagrees with the "
-                        f"screen ({via}) — switching to {live.name}"
-                    )
-                    entry = live
-        else:
-            entry = live
-        if entry is not self._map:
+        self._identity_version = ident.version
+        res = ident.current
+        entry = ident.entry()
+        self.viz["title"] = res.title
+        if (entry.name if entry else None) != (self._map.name if self._map else None):
             self._map = entry
             self.viz["map"] = entry.name if entry else None
-            merged = dict(cfg.skills)
+            merged = dict(self.config.skills)
             if entry is not None:
                 merged.update(entry.skills)
-                self.log(f"Map: {entry.name}")
-                self.event("map", entry.name)
+                self.log(f"Map: {entry.name} ({res.via})")
             self.skills = SkillBook(merged)
             self._anchor_idx = 0
             self._weave_dir = None
             self._weave_bounds = None
             self._route = []
-        self._apply_stored_layout(entry)
+        if res.via == "ocr":
+            self._apply_stored_layout(entry)
 
     def _apply_stored_layout(self, entry) -> None:
-        """Reinstall the map's remembered minimap region.
-
-        Corrects auto-detect drift on known maps: once a layout was
-        saved at calibration, identifying the map snaps the region back
-        to the known-good rect. Skipped when ``minimap_region`` is
-        pinned in the config or the map has none. Stored regions stay
-        resettable — a real map change still clears them via the
-        watchdog.
+        """Reinstall a title-verified map's remembered region, so the
+        normalized anchors/platforms line up with the layout they were
+        recorded in. Skipped when ``minimap_region`` is pinned in config.
         """
         if entry is None or not entry.minimap_region:
             return
@@ -525,7 +377,7 @@ class SmartBot(BotBase):
         Dashboard boundary edits save + reload the map file, which swaps
         the ``MapEntry`` objects — ``self._map`` can point at the stale
         pre-reload instance, so walls set mid-run would be invisible
-        until the next ``_resolve_map``. This re-reads the store's copy.
+        until the next identity change. This re-reads the store's copy.
         """
         if self._map is None:
             return None
@@ -815,13 +667,12 @@ class SmartBot(BotBase):
         Targets come from the patrol route — a level-change handoff
         presets ``_travel_target``; otherwise the route's head is the
         next checkpoint (used by the degenerate <2-anchor path)."""
-        self._resolve_map()
+        self._sync_map()
         rot = self.effective_rotation()
         if not rot.anchors:
             return False
         if self._anchor_idx >= len(rot.anchors):
             self._anchor_idx = 0
-        self._leg_fp = self.minimap_fingerprint()
         if self._travel_target is not None:
             target = self._travel_target
         elif self._route:
@@ -847,7 +698,6 @@ class SmartBot(BotBase):
         if target is None:
             return False
         ok = self._run_leg(rot.leg_steps(self._anchor_idx, target))
-        self._leg_fp = None
         self._travel_target = None
         if ok:
             self._anchor_idx = target
@@ -1287,7 +1137,9 @@ class SmartBot(BotBase):
         try:
             self.window.activate()
             self.sleep(1)
-            self._resolve_map()
+            if self.identity.current.title is None and not self.identity.pending:
+                self.identity.request("startup")
+            self.minimap_frame()
             Machine(self).run()
             self.log("Smart bot stopped")
         except KeyboardInterrupt:

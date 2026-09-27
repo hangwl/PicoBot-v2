@@ -116,7 +116,7 @@
       <h3>Map</h3>
       <div class="row">
         <select id="mapSel" style="min-width:170px"
-          title="auto = fingerprint-detect; picking a map pins it as the target for every section below">
+          title="auto = detect by map title (OCR); picking a map pins it as the target for every section below">
           <option value="">(auto-detect)</option>
         </select>
         <input id="mapNew" placeholder="new map name" size="14"
@@ -351,6 +351,7 @@ ws.onmessage = e => {
     if (p.map !== undefined || p.no_rotation !== undefined)
       chip("map",
         "map: " + (p.map || "–") +
+        (p.map_via === "pin" ? " (pinned)" : "") +
         (p.map_conf != null ? ` (${Math.round(p.map_conf * 100)}%)` : "") +
         (p.no_rotation ? " (no rotation)" : ""),
         p.no_rotation ? "warn" : "");
@@ -396,8 +397,10 @@ ws.onmessage = e => {
       : (p.active || "");
     $("mapNew").style.display = sel.value === "__new" ? "" : "none";
     $("mapDet").textContent = "detected: " + (p.detected || "–") +
-      (p.via === "ocr" ? ` (OCR "${p.title || "?"}")` : "") +
-      (p.score != null ? ` fp ${Math.round(p.score * 100)}%` : "");
+      (p.via ? ` (${p.via})` : "") +
+      (p.title ? ` · title "${p.title}"` : "") +
+      (p.score != null ? ` ${Math.round(p.score * 100)}%` : "") +
+      (p.reading ? " · reading title…" : "");
   } else if (p.event === "host") {
     fillSel($("portSel"), "(serial)",
       (p.ports || []).map(pt => [pt.device, pt.device + (pt.desc ? " · " + pt.desc : "")]),

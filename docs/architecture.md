@@ -37,17 +37,20 @@ project exists because recorded macro playback is too easily detected.
   rect. Every pixel coordinate in the codebase below this layer is
   client-relative: captures never include the OS title bar or borders.
 - `screen.py` — `mss`-backed BGR captures of arbitrary client rects.
-- `minimap.py` — `Minimap` finds the minimap panel (border-color frame
-  detection), tracks the player/rune/other-player color blobs (feet-anchored
-  positions), computes the structural `g2:` map fingerprint, and runs the
-  map-change watchdog. See [map-detection.md](map-detection.md).
-- `mapname.py` — title-strip segmentation + RapidOCR. Also documented in
-  [map-detection.md](map-detection.md).
+- `minimap.py` — `MinimapAnalyzer` finds the panel by its white frame
+  (`find_frame`), tracks player/rune/other-player blobs (feet-anchored),
+  feeds the blackout detector, and relocates when the panel moves.
+- `transition.py` — loading-blackout detector (the map-change trigger).
+- `mapname.py` — title band, segmentation, RapidOCR, `title_score`.
+- `framelog.py` — debug frame capture to `debug/frames/`.
+
+See [map-detection.md](map-detection.md).
 
 ## Bot (`bot/`)
 
 `smart_bot.py` is a perception → decide → act loop. Its `minimap_frame()`
-tick drives the watchdog and re-resolves map identity on confirmed change;
+tick drives blackout detection, pumps title reads into the shared
+`MapIdentity` (`identity.py`), and applies identity changes;
 a small FSM (`machine.py`, `states/`) owns behavior:
 
 - **Grind** — the farming state. ≥2 anchors → planned checkpoint patrol
@@ -87,8 +90,8 @@ warn < error; `hid`/serial chatter is debug).
 ## Data flow (dashboard frame)
 
 ```
-screen.capture → minimap_img() ──► note_frame() (watchdog)
-             └──► name_img() (title band, gated OCR)
+screen.capture → minimap_img() ──► note_frame() (blackout → arrival)
+             └──► identity.pump(name_img) ──► TitleOCR worker (on request)
 snap = viz/map meta + overlays ──► assemble_panel (title+map composite,
                                    ox/oy offset) ──► annotate ──► JPEG
                                                           └─► WS frame

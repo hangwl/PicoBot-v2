@@ -42,8 +42,8 @@ override the remembered values and are persisted the same way.
 
 - **Connection** — Pico DATA serial port + game window (persisted).
 - **Map** — the single source of truth for which map every section acts on:
-  pin a map, `auto-detect` defers to live identity (OCR title +
-  structural fingerprint), and `detected:` shows `alias (OCR "…") fp 87%`.
+  pin a map, `auto-detect` defers to live identity (the OCR'd map
+  title), and `detected:` shows the map, how it was resolved, and the title.
 - **View** — the **Panel** feed composites the located minimap panel:
   title strip on top (text lines boxed, orange = OCR crop), a divider
   separator, then the annotated minimap below — its right edge extends to
@@ -66,14 +66,12 @@ override the remembered values and are persisted the same way.
   between every checkpoint; single anchors weave in place. Movement
   geometry (platforms, walls, floor) is **hand-drawn** — authoritative,
   since auto-detecting translucent minimap lines proved too fragile.
-- **Map identity**: two independent signals — the **OCR'd map title**
-  (`map_name`, exact text, event-gated) wins; the **structural
-  fingerprint** (`g2:` platform geometry, colour-free) corroborates with
-  a confidence score. A self-consistent watchdog confirms real map
-  changes before acting, so translucent-panel drift can't produce false
-  positives or persist stale layouts.
-- **Safety**: rune markers, other players, window-focus loss, or an
-  unexpected map change pause the bot (Telegram alert if configured);
+- **Map identity**: map changes are detected from the loading blackout,
+  the minimap panel is located by its white frame, and the map is named
+  by its **OCR'd title** (voted, fuzzy-matched against `map_name`, read
+  on a worker thread). Translucent UI can't trigger any of these.
+- **Safety**: rune markers, other players, window-focus loss, or a
+  map transfer (loading screen) pause the bot (Telegram alert if configured);
   remote input solves checks from a phone over Tailscale.
 
 ## Documentation
@@ -81,7 +79,7 @@ override the remembered values and are persisted the same way.
 | Doc | Covers |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | Components, layers, data flow, directory map |
-| [docs/map-detection.md](docs/map-detection.md) | OCR segmentation, fingerprints, watchdog, pins |
+| [docs/map-detection.md](docs/map-detection.md) | Blackout trigger, panel detection, title OCR, pins |
 | [docs/calibration.md](docs/calibration.md) | Anchor recording, layout drawing, map format |
 | [docs/bot-behavior.md](docs/bot-behavior.md) | Patrol routes, weaving, skills, safety |
 | [docs/dashboard.md](docs/dashboard.md) | Panels, views, event levels, WS protocol |

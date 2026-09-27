@@ -13,8 +13,9 @@ from picobot.bot.config import BotConfig
 from picobot.bot.maps import MapEntry, MapStore
 from picobot.bot.rotation import Rotation, Anchor, Step
 from picobot.bot.smart_bot import SmartBot
-from picobot.events import EventBus
-from picobot.vision.minimap import MinimapAnalyzer, fingerprint
+from picobot.bot.identity import MapIdentity
+from picobot.vision.minimap import MinimapAnalyzer
+from picobot.vision.transition import TransitionDetector
 
 
 class FakeHid:
@@ -489,7 +490,6 @@ class PatrolTests(unittest.TestCase):
         bot = self._bot((60, 50), self._rot())
         bot._travel_target = 1
         bot._anchor_idx = 0
-        bot._leg_fp = None
         bot._run_leg = Mock(return_value=False)
         self.assertFalse(bot.run_travel())
         self.assertIn(1, bot._ckpt_ban)
@@ -577,116 +577,134 @@ class TravelWeaveTests(unittest.TestCase):
         self.assertEqual(bot.hid.presses.count("a"), 1)
 
 
-class ResolveMapTests(unittest.TestCase):
-    """_resolve_map: the active_map pin is rotation scope — live
-    fingerprint evidence beats it when the screen shows another map."""
+class _Reader:
+    def __init__(self, *texts):
+        self.texts = list(texts)
 
-    def _bot(self):
+    def read(self, img):
+        return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
+
+
+def _identity(tmp, reader, pin=None, entries=()):
+    store = MapStore(tmp)
+    for e in entries:
+        store.save(e)
+    return MapIdentity(store, reader, pin=pin, threaded=False)
+
+
+class SyncMapTests(unittest.TestCase):
+    """The bot applies the shared identity's resolution on its thread."""
+
+    def _bot(self, identity):
         bot = SmartBot.__new__(SmartBot)
         bot.config = BotConfig()
+        bot.identity = identity
+        bot.maps = identity.store
+        bot._identity_version = -1
         bot._map = None
-        bot._map_warned = False
         bot._anchor_idx = 0
         bot._weave_dir = None
         bot._weave_bounds = None
         bot._route = []
-        bot.viz = {"map": None}
+        bot.viz = {"map": None, "title": None}
         bot.log = Mock()
         bot.event = Mock()
-        bot.map_name = Mock(return_value=None)       # OCR off/unreadable
-        bot.minimap_fingerprint = Mock(return_value="g2:" + "ff" * 512)
         bot._apply_stored_layout = Mock()
         return bot
 
-    def test_pin_yields_to_live_fingerprint_match(self):
-        bot = self._bot()
-        bot.config.active_map = "pinned"
+    def test_title_resolves_map_and_restores_layout(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = MapStore(tmp)
-            store.save(MapEntry(
-                name="pinned", fingerprint="g2:" + "00" * 512
-            ))
-            store.save(MapEntry(
-                name="live", fingerprint="g2:" + "ff" * 512
-            ))
-            bot.maps = store
-            bot._resolve_map()
-        self.assertEqual(bot._map.name, "live")
-
-    def test_pin_kept_when_screen_matches_it(self):
-        bot = self._bot()
-        bot.config.active_map = "pinned"
-        with tempfile.TemporaryDirectory() as tmp:
-            store = MapStore(tmp)
-            store.save(MapEntry(
-                name="pinned", fingerprint="g2:" + "ff" * 512
-            ))
-            bot.maps = store
-            bot._resolve_map()
-        self.assertEqual(bot._map.name, "pinned")
-
-    def test_pin_kept_when_unverifiable(self):
-        # Pinned map has no stored fingerprint and the screen matches
-        # nothing stored — the explicit pin stands.
-        bot = self._bot()
-        bot.config.active_map = "pinned"
-        with tempfile.TemporaryDirectory() as tmp:
-            store = MapStore(tmp)
-            store.save(MapEntry(name="pinned"))          # no fingerprint
-            store.save(MapEntry(
-                name="other", fingerprint="g2:" + "00" * 512
-            ))
-            bot.maps = store
-            bot._resolve_map()
-        self.assertEqual(bot._map.name, "pinned")
-
-    def test_unverifiable_pin_stands_under_live_match(self):
-        # Pin can't be verified (no fp) — a fuzzy live match must not
-        # silently override an explicit choice. Only the pin's own
-        # stored fingerprint can disprove it.
-        bot = self._bot()
-        bot.config.active_map = "pinned"
-        with tempfile.TemporaryDirectory() as tmp:
-            store = MapStore(tmp)
-            store.save(MapEntry(name="pinned"))          # no fingerprint
-            store.save(MapEntry(
-                name="live", fingerprint="g2:" + "ff" * 512
-            ))
-            bot.maps = store
-            bot._resolve_map()
-        self.assertEqual(bot._map.name, "pinned")
-
-    def test_ocr_match_wins_in_auto_mode(self):
-        bot = self._bot()
-        bot.config.active_map = None
-        bot.config.auto_select_map = True
-        bot.map_name = Mock(return_value="Limina : 1-5 East")
-        with tempfile.TemporaryDirectory() as tmp:
-            store = MapStore(tmp)
-            store.save(MapEntry(
-                name="east", map_name="Limina : 1-5 East",
-                fingerprint="g2:" + "00" * 512,   # fp disagrees — OCR wins
-            ))
-            store.save(MapEntry(
-                name="close_fp", fingerprint="g2:" + "ff" * 512
-            ))
-            bot.maps = store
-            bot._resolve_map()
+            ident = _identity(tmp, _Reader("Limina : 1-5 East"), entries=[
+                MapEntry(name="east", map_name="Limina : 1-5 East"),
+            ])
+            bot = self._bot(ident)
+            ident.request("startup")
+            ident.pump(lambda: object())
+            bot._sync_map()
         self.assertEqual(bot._map.name, "east")
+        self.assertEqual(bot.viz["title"], "Limina : 1-5 East")
+        bot._apply_stored_layout.assert_called_once()
 
-    def test_ocr_displaces_unverifiable_pin(self):
-        # Pin has no fingerprint to check — but the OCR'd title text
-        # literally names a different stored map, so the pin loses.
-        bot = self._bot()
-        bot.config.active_map = "pinned"
-        bot.map_name = Mock(return_value="Arcana : Cave")
+    def test_pin_stands_without_title_but_no_layout_restore(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = MapStore(tmp)
-            store.save(MapEntry(name="pinned"))
-            store.save(MapEntry(name="cave", map_name="Arcana : Cave"))
-            bot.maps = store
-            bot._resolve_map()
+            ident = _identity(tmp, _Reader(None), pin="pinned",
+                              entries=[MapEntry(name="pinned")])
+            bot = self._bot(ident)
+            bot._sync_map()
+        self.assertEqual(bot._map.name, "pinned")
+        bot._apply_stored_layout.assert_not_called()
+
+    def test_title_of_other_stored_map_overrides_pin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ident = _identity(tmp, _Reader("Arcana : Cave"), pin="pinned",
+                              entries=[MapEntry(name="pinned"),
+                                       MapEntry(name="cave", map_name="Arcana : Cave")])
+            bot = self._bot(ident)
+            ident.request("startup")
+            ident.pump(lambda: object())
+            bot._sync_map()
         self.assertEqual(bot._map.name, "cave")
+
+    def test_sync_is_noop_without_new_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ident = _identity(tmp, _Reader(None), pin="pinned",
+                              entries=[MapEntry(name="pinned")])
+            bot = self._bot(ident)
+            bot._sync_map()
+            bot._route = [1, 0]
+            bot._sync_map()
+        self.assertEqual(bot._route, [1, 0])
+
+
+class MinimapFrameTests(unittest.TestCase):
+    """minimap_frame drives transfer detection + title reads."""
+
+    def _bot(self, tmp, frames):
+        clock = [0.0]
+        bot = SmartBot.__new__(SmartBot)
+        bot.config = BotConfig()
+        bot.minimap = MinimapAnalyzer(
+            transition=TransitionDetector(clock=lambda: clock[0])
+        )
+        bot.minimap._region = (0, 0, 200, 150)
+        bot.minimap._region_source = "auto"
+        seq = list(frames)
+
+        def capture(rect):
+            clock[0] += 0.1
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+
+        bot.screen = Mock(capture=Mock(side_effect=capture))
+        bot.window = Mock(client_left=0, client_top=0)
+        bot.identity = Mock(version=0)
+        bot._identity_version = 0
+        bot._minimap_warned = False
+        bot.viz = {"img": None}
+        bot.event = Mock()
+        bot.log = Mock()
+        return bot
+
+    def test_arrival_requests_title_and_drops_region(self):
+        black = np.zeros((150, 200, 3), np.uint8)
+        lit = np.full((150, 200, 3), 90, np.uint8)
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self._bot(tmp, [black] * 8 + [lit] * 12)
+            for _ in range(20):
+                bot.minimap_frame()
+                if bot.minimap.region is None:
+                    break
+        bot.identity.request.assert_called_once_with("arrival", clear=True)
+        self.assertIsNone(bot.minimap.region)
+
+    def test_no_title_reads_while_loading(self):
+        black = np.zeros((150, 200, 3), np.uint8)
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self._bot(tmp, [black])
+            for _ in range(6):
+                bot.minimap_frame()
+        self.assertTrue(bot.minimap.loading)
+        # pumped only for the first pre-confirmation frames
+        self.assertLess(bot.identity.pump.call_count, 6)
 
 
 class TargetSnapTests(unittest.TestCase):
@@ -716,57 +734,6 @@ class TargetSnapTests(unittest.TestCase):
         self.assertTrue(_drive(bot))
         bot.up_jump.assert_not_called()
         self.assertIsNone(bot.viz["target"])
-
-
-class ResolveRegionTests(unittest.TestCase):
-    def _bot(self, tmp):
-        bot = SmartBot.__new__(SmartBot)
-        bot.config = BotConfig()
-        bot.maps = MapStore(tmp)
-        bot.minimap = MinimapAnalyzer()
-        bot.screen = Mock()
-        bot.window = Mock(client_left=0, client_top=0)
-        bot.events = EventBus()
-        bot._log_callback = None
-        bot._notify_callback = None
-        bot._stop_event = threading.Event()
-        bot.viz = {"img": None}
-        return bot
-
-    def _map_img(self):
-        img = np.zeros((150, 200, 3), dtype=np.uint8)
-        img[::20, :] = (228, 228, 228)  # ink lines in border color
-        return img
-
-    def test_stored_layout_wins_before_locate(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            bot = self._bot(tmp)
-            img = self._map_img()
-            c = bot.minimap.colors
-            fp = fingerprint(
-                img,
-                ignore_colors=(c.player, c.other_player, c.rune),
-                include_colors=(c.ink or c.border,),
-            )
-            bot.maps.save(MapEntry(
-                name="m1", fingerprint=fp,
-                minimap_region=(8, 40, 200, 150)))
-            bot.screen.capture = Mock(return_value=img)
-            region = bot._resolve_region(np.zeros((600, 800, 3), np.uint8))
-            self.assertEqual(region, (8, 40, 200, 150))
-            self.assertEqual(bot.minimap.region_source, "stored")
-
-    def test_falls_back_to_locate_when_nothing_matches(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            bot = self._bot(tmp)
-            bot.maps.save(MapEntry(
-                name="m1", fingerprint="00" * 512,
-                minimap_region=(8, 40, 200, 150)))
-            bot.screen.capture = Mock(return_value=self._map_img())
-            # Blank window: no border pixels -> locate returns None.
-            self.assertIsNone(
-                bot._resolve_region(np.zeros((600, 800, 3), np.uint8)))
-            self.assertIsNone(bot.minimap.region)
 
 
 if __name__ == "__main__":

@@ -82,7 +82,6 @@ class BotConfig:
     maps_dir: str = "maps"
     auto_select_map: bool = True
     active_map: Optional[str] = None      # force a map by name (skip auto-match)
-    map_match_threshold: float = 15.0     # fingerprint distance bound (0-255)
     marker_inset_px: int = 4              # marker scans ignore this many rim px
     name_ocr: bool = True                 # OCR the map-name strip (preferred ID)
     minimap_name_region: Optional[Tuple[int, int, int, int]] = None
@@ -178,8 +177,6 @@ class BotConfig:
             cfg.active_map = str(v) if v else None
         if "auto_select_map" in data:
             cfg.auto_select_map = bool(data["auto_select_map"])
-        if "map_match_threshold" in data:
-            cfg.map_match_threshold = float(data["map_match_threshold"])
         if not (isinstance(data.get("skills"), dict) and data["skills"]):
             # No explicit skills map: rebuild from the (possibly overridden)
             # legacy key lists.

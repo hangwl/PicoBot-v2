@@ -8,7 +8,7 @@ minimap and works a perception-driven farming rotation. Docs live in
 ## Commands
 
 ```bash
-.venv/bin/python -m pytest tests/ -x -q   # test suite (~283 tests)
+.venv/bin/python -m pytest tests/ -x -q   # test suite (~300 tests)
 .venv/bin/python -m picobot               # run host (WS :8765, HTTP :8000)
 ```
 
@@ -27,16 +27,19 @@ what was tried and what was learned in `docs/learnings.md` instead.
 ## Invariants — don't break these
 
 - **Map identity**: `MapEntry.name` = user alias; `MapEntry.map_name` =
-  OCR'd in-game title only. Fingerprints are `g2:` structural hashes —
-  never colour-based.
-- **OCR is event-gated** (map change, pin change, cal save, map|list) —
-  never run it per-frame.
+  OCR'd in-game title only — it's what identity matches. One
+  `MapIdentity` is shared by host and bot; don't add parallel resolvers.
+- **Map change = loading blackout** (`vision/transition.py`). Never use
+  pixel-content change as a trigger — translucent UI defeats it.
+- **OCR is request-driven** (startup, arrival, pin, title band) and runs
+  on the `TitleOCR` worker — never per-frame, never on the frame thread.
 - **Manual geometry is authoritative**: drawn platforms/walls/floor drive
-  navigation. Ink/platform auto-detection feeds fingerprints only.
-- **Watchdog self-consistency**: a miss counts only when it matches the
-  previous miss frame; on confirm, drop non-`config` regions.
-- **Pin semantics**: `active_map` survives unless its stored fingerprint
-  verifiably mismatches or OCR names a different stored map.
+  navigation. No line auto-detection.
+- **Panel region**: found by `find_frame` (sizes differ per map); dropped
+  on arrival unless `config`-pinned; relocated only when a frame is
+  actually found elsewhere.
+- **Pin semantics**: `active_map` stands unless a confident title match
+  names a different stored map. Blank-name layout writes need `via: ocr`.
 - **Calibration save preserves** walls/platforms/`map_name`/skills —
   `merge_recording` exists because a fresh `MapEntry` wiped layouts.
 - Region/coords: client-area px for rects; 0–1 normalized in map files.

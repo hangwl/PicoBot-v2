@@ -38,26 +38,22 @@ class NormalizeTests(unittest.TestCase):
 
 
 class NameStripRegionTests(unittest.TestCase):
-    def test_band_spans_window_top_into_region(self):
-        # Window top → header_px into the region: covers titles drawn
-        # above the map frame AND inside the panel border.
+    def test_band_is_panel_width_from_window_top(self):
         self.assertEqual(
             name_strip_region((100, 200, 300, 150)),
-            (0, 0, 300, 290),
+            (96, 0, 308, 290),
         )
 
-    def test_full_window_width_when_known(self):
-        # Titles can overflow the map frame — the band must not clip
-        # them at region width.
+    def test_clamped_at_window_left(self):
         self.assertEqual(
-            name_strip_region((100, 200, 300, 150), window_w=800),
-            (0, 0, 800, 290),
+            name_strip_region((2, 68, 216, 90), header_px=160),
+            (0, 0, 222, 158),
         )
 
     def test_capped_at_region_bottom(self):
         self.assertEqual(
             name_strip_region((100, 100, 300, 50)),
-            (0, 0, 300, 150),
+            (96, 0, 308, 150),
         )
 
 

@@ -17,17 +17,17 @@ for free at each mark:
 - **Dwell range** — how long you stood there.
 - **`on_arrive` skills** — keys pressed in the ~8s arrival window,
   resolved through registered skill bindings.
-- **Fingerprint + `minimap_region` + OCR title** (`map_name`) — identity
-  data captured at save. If OCR can't read the title a `notify` event
-  warns (that map then just skips OCR matching).
+- **`minimap_region` + OCR title** (`map_name`) — identity data captured
+  at save (the title comes from the identity's latest accepted read). If
+  no title has been read a `notify` event warns (the map then can't be
+  auto-identified until a save captures it).
 
 Marks taken mid-air or off a platform warn immediately; saved anchors are
 snapped onto the nearest drawn platform so targets stay reachable.
 
 **Saving preserves.** `merge_recording` carries over everything recording
 can't observe — walls, floor, platforms, `map_name`, tuned skills —
-re-recording only replaces anchors. (An earlier bug wiped drawn layouts
-on save; fixed and tested.)
+re-recording only replaces anchors.
 
 ## Drawing layout (dashboard)
 
@@ -35,25 +35,26 @@ All layout tools act on the **Map** panel's selection — one source of
 truth, no per-section map names.
 
 - **Draw minimap** — drag the minimap rect on the Window view when
-  auto-detection fails. Persisted to `config.json` (`minimap_region`),
-  treated as trusted provenance (the watchdog won't drop it).
+  frame detection fails. Persisted to `config.json` (`minimap_region`)
+  as a hard pin that survives map changes — since minimap size differs
+  per map, prefer fixing detection over pinning.
 - **Draw title** — drag the title strip on the Window view; pins
   `minimap_name_region` when auto segmentation fails on a client.
 - **Draw plats** — drag a segment along each platform line on the Panel
   view; stays armed for successive drags. **Undo** pops, **Clear** wipes.
   Platforms are the *authoritative* walkable geometry: anchor snapping,
   nav target projection (~8px snap radius), weave bounds, and Floor
-  placement all consult them. Auto-detected platform ink is intentionally
-  not used for navigation.
+  placement all consult them.
 - **L wall / R wall** — stand at a wall, press the button: stores the
   boundary (normalized x) and shades the blocked side red. Overrides
   `wall_zone_px` on that side.
 - **Floor** — stand on the lowest platform: shades below; the bot stops
   attempting down-jumps at/below it.
-- **Save layout / Forget / Re-detect** — commit the located region +
-  fingerprint to the map file, drop it, or force re-detection. On
-  `auto`, Save/Forget only act when the live fingerprint verifies the
-  detected map — a stale pin can't redirect a write to the wrong file.
+- **Save layout / Forget / Re-detect** — commit the located region to
+  the map file (backfilling `map_name` from the current title when it's
+  missing), drop it, or force re-detection. With no map named, writes
+  only act when the title OCR verifies the map — a pin can't redirect a
+  write to the wrong file.
 
 ## Coordinate conventions
 
