@@ -49,6 +49,25 @@ class EventBusTests(unittest.TestCase):
         bus.subscribe(lambda e: None)
         bus.emit("log", "ok")  # no raise
 
+    def test_level_defaults_from_kind(self):
+        bus = EventBus()
+        bus.subscribe(lambda e: None)
+        ev = bus.emit("hid", "key|a|press")
+        self.assertEqual(ev["level"], "debug")
+        for kind, expected in (
+            ("log", "info"), ("nav", "info"), ("notify", "warn"),
+            ("safety", "warn"), ("error", "error"),
+        ):
+            self.assertEqual(bus.emit(kind, "m")["level"], expected)
+
+    def test_level_explicit_and_history(self):
+        bus = EventBus()
+        ev = bus.emit("nav", "careful", level="warn")
+        self.assertEqual(ev["level"], "warn")
+        # An unknown level falls back to the kind default.
+        self.assertEqual(bus.emit("log", "m", level="nope")["level"], "info")
+        self.assertTrue(all("level" in it for it in bus.history()))
+
 
 class AnnotateTests(unittest.TestCase):
     def test_draws_markers(self):

@@ -115,7 +115,11 @@ class BotHost:
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
-            log=lambda m: self.bus.emit("remote", m),
+            # TX:/RX: wire chatter rides at debug with the hid relays.
+            log=lambda m: self.bus.emit(
+                "remote", m,
+                level="debug" if m.startswith(("TX:", "RX:")) else "info",
+            ),
             set_status=lambda m: self.bus.emit("status", m),
             set_ws_port=lambda p: self.bus.emit("status", f"ws port: {p}"),
             start_macro=lambda: None,
