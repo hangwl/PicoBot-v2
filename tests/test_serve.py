@@ -16,7 +16,11 @@ from picobot.remote.control import (
 )
 from picobot.remote.streamer import annotate, encode_jpeg
 from picobot.serve import BotHost
-from picobot.vision.minimap import MinimapAnalyzer, fingerprint
+from picobot.vision.minimap import (
+    MinimapAnalyzer,
+    fingerprint,
+    structure_mask,
+)
 
 
 class EventBusTests(unittest.TestCase):
@@ -343,6 +347,38 @@ class HostCommandTests(unittest.TestCase):
             )
             self.assertFalse(MapStore(tmp).get("m1").rotation.patrol)
 
+    def test_ink_pick_stores_sampled_platform_color(self):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        img[40, 40:80] = (5, 5, 200)        # a line to click on
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        self.host._feed = feed
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.assertTrue(
+                self.host._handle_command("layout|ink|60,40|m1")
+            )
+            self.assertEqual(
+                MapStore(tmp).get("m1").platform_color, (5, 5, 200)
+            )
+            # Clearing removes the override -> structural detection.
+            self.assertTrue(
+                self.host._handle_command("layout|ink|clear|m1")
+            )
+            self.assertIsNone(MapStore(tmp).get("m1").platform_color)
+
+    def test_ink_pick_rejects_off_map_click(self):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        self.host._feed = feed
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.host._handle_command("layout|ink|999,999|m1")
+            self.assertIsNone(MapStore(tmp).get("m1").platform_color)
+
     def _inked_img(self, w=200, h=150):
         """Minimap-like frame: platform rows in border/ink color."""
         img = np.zeros((h, w, 3), dtype=np.uint8)
@@ -360,7 +396,7 @@ class HostCommandTests(unittest.TestCase):
         fp = fingerprint(
             img,
             ignore_colors=(c.player, c.other_player, c.rune),
-            include_colors=(c.ink or c.border,),
+            include_mask=structure_mask(img, c),
         )
         feed = Mock()
         feed.minimap = analyzer
@@ -389,7 +425,7 @@ class HostCommandTests(unittest.TestCase):
         fp = fingerprint(
             img,
             ignore_colors=(c.player, c.other_player, c.rune),
-            include_colors=(c.ink or c.border,),
+            include_mask=structure_mask(img, c),
         )
         feed = Mock()
         feed.minimap = analyzer

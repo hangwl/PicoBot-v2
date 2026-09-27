@@ -296,7 +296,7 @@ class BotHost:
             img = feed.minimap_img()
             colors = feed.minimap.colors
         if img is not None and colors is not None:
-            from .vision.minimap import fingerprint
+            from .vision.minimap import fingerprint, structure_mask
 
             try:
                 fp = fingerprint(
@@ -304,7 +304,7 @@ class BotHost:
                     ignore_colors=(
                         colors.player, colors.other_player, colors.rune,
                     ),
-                    include_colors=(colors.ink or colors.border,),
+                    include_mask=structure_mask(img, colors),
                 )
                 entry = self.maps.match(
                     fp, self.bot_config.map_match_threshold
@@ -385,8 +385,8 @@ class BotHost:
         }
 
     def _live_fingerprint(self, feed=None) -> Optional[str]:
-        """Ink fingerprint of the current minimap capture, or None."""
-        from .vision.minimap import fingerprint
+        """Structure fingerprint of the current minimap capture, or None."""
+        from .vision.minimap import fingerprint, structure_mask
 
         feed = feed or self._get_feed()
         img = feed.minimap_img() if feed is not None else None
@@ -396,7 +396,7 @@ class BotHost:
         return fingerprint(
             img,
             ignore_colors=(c.player, c.other_player, c.rune),
-            include_colors=(c.ink or c.border,),
+            include_mask=structure_mask(img, c),
         ) or None
 
     def _layout_target(self, name: str):
@@ -585,7 +585,9 @@ class BotHost:
         if side == "floor" and img is not None:
             # Snap onto the platform ink under the player — the drawn
             # boundary should sit on the floor line, not hover above it.
-            snapped = mm.platform_y(img, pos[0], pos[1], max_snap=10)
+            snapped = mm.platform_y(
+                img, pos[0], pos[1], max_snap=10, ink=entry.platform_color
+            )
             if isinstance(snapped, int):
                 v = snapped
         walls[side] = round(max(0.0, min(1.0, v / span)), 4)
@@ -596,6 +598,77 @@ class BotHost:
         axis = "y" if side == "floor" else "x"
         self.bus.emit(
             "map", f"{side} wall set at {axis}={v} for {entry.name}"
+        )
+
+    def _layout_set_ink(self, msg: str) -> None:
+        """layout|ink|x,y[|<name>] — sample platform colour off a click.
+
+        The default platform detector is structural (thin horizontal
+        lines) and needs no colour. When a map's minimap art defeats it —
+        e.g. long horizontal scenery edges on a translucent background —
+        clicking a platform line stores that pixel's colour on the map;
+        the detector then colour-matches it (authoritative) instead.
+        ``layout|ink|clear[|<name>]`` removes the override.
+        """
+        parts = msg.split("|", 3)
+        if len(parts) < 3:
+            return
+        payload = parts[2]
+        name = parts[3].strip() if len(parts) > 3 else ""
+        if payload == "clear":
+            entry, err = self._layout_target(name)
+            if entry is None:
+                self.bus.emit("error", err)
+                return
+            entry.platform_color = None
+            self.maps.save(entry)
+            self.maps.reload()
+            self._send_maps()
+            self.bus.emit("map", f"platform colour cleared for {entry.name}")
+            return
+        try:
+            x, y = (int(float(v)) for v in payload.split(","))
+        except (TypeError, ValueError):
+            return
+        img = None
+        bot = self.bot
+        if bot is not None:
+            img = bot.minimap_frame()
+        feed = self._get_feed()
+        if img is None and feed is not None:
+            img = feed.minimap_img()
+        if img is None:
+            self.bus.emit("error", "no minimap frame to sample")
+            return
+        h, w = img.shape[:2]
+        if not (0 <= x < w and 0 <= y < h):
+            self.bus.emit("error", "pick is off the minimap")
+            return
+        import numpy as np
+
+        patch = (
+            img[max(0, y - 1) : y + 2, max(0, x - 1) : x + 2]
+            .reshape(-1, 3).astype(np.int32)
+        )
+        # The line pixel is the local outlier — a patch median would land
+        # on the background since neighbours of a thin line mostly aren't
+        # line. Works whether the line is brighter or darker than the bg.
+        mean = patch.mean(axis=0)
+        color = tuple(
+            int(v) for v in patch[int(np.abs(patch - mean).sum(axis=1).argmax())]
+        )
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        entry.platform_color = color
+        self.maps.save(entry)
+        self.maps.reload()
+        self._send_maps()
+        self.bus.emit(
+            "map",
+            f"platform colour {list(color)} set for {entry.name} "
+            "(B,G,R) — 'show platforms' now colour-matches it",
         )
 
     def _layout_set_patrol(self, msg: str) -> None:
@@ -666,15 +739,20 @@ class BotHost:
         return snap
 
     def _attach_ink(self, snap: dict, mm) -> None:
-        """When enabled, attach the platform-ink mask for the overlay."""
+        """When enabled, attach the platform mask for the overlay.
+
+        This is the *effective* mask the bot's platform logic uses — the
+        resolved map's ``platform_color`` override, else the configured
+        ``colors.ink``, else structural line detection — so the tint is
+        an honest view of what the bot sees as walkable geometry.
+        """
         snap["ink_on"] = self._show_ink
         img = snap.get("img")
         if not self._show_ink or img is None or mm is None:
             return
-        from .vision.minimap import color_mask
-
-        ink = mm.colors.ink or mm.colors.border
-        snap["ink_mask"] = color_mask(img, ink, 10)
+        entry = self._resolved_map_cached()
+        ink = entry.platform_color if entry is not None else None
+        snap["ink_mask"] = mm.platform_mask(img, ink=ink)
 
     # -- Dashboard commands ------------------------------------------------------
     def _handle_command(self, msg: str) -> bool:
@@ -706,6 +784,8 @@ class BotHost:
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg.startswith("layout|wall|"):
             self._layout_set_wall(msg)
+        elif msg.startswith("layout|ink|"):
+            self._layout_set_ink(msg)
         elif msg.startswith("layout|patrol|"):
             self._layout_set_patrol(msg)
         elif msg == "layout|reset":
@@ -981,11 +1061,20 @@ class BotHost:
             return
         from .bot.calibrate import CalibrationRunner
 
+        def _snap(img, x, y):
+            # Honour the resolved map's platform-colour override when
+            # re-calibrating a map that has one.
+            entry = self._resolved_map_cached()
+            return feed.minimap.platform_y(
+                img, x, y,
+                ink=entry.platform_color if entry is not None else None,
+            )
+
         self.calibrator = CalibrationRunner(
             feed.minimap_img,
             feed.minimap.player_pos,
             event=lambda k, m, d=None: self.bus.emit(k, m, d),
-            snap_fn=feed.minimap.platform_y,
+            snap_fn=_snap,
         )
         img = feed.minimap_img()
         wh = (img.shape[1], img.shape[0]) if img is not None else (200, 150)
@@ -1004,13 +1093,13 @@ class BotHost:
         if feed is not None:
             img = feed.minimap_img()
             if img is not None:
-                from .vision.minimap import fingerprint
+                from .vision.minimap import fingerprint, structure_mask
 
                 c = feed.minimap.colors
                 fp = fingerprint(
                     img,
                     ignore_colors=(c.player, c.other_player, c.rune),
-                    include_colors=(c.ink or c.border,),
+                    include_mask=structure_mask(img, c),
                 ) or None
         try:
             entry = self.calibrator.finish(

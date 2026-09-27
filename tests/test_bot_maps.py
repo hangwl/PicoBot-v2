@@ -188,6 +188,19 @@ class MapStoreTests(unittest.TestCase):
         self.assertIsNone(entry.walls)
         self.assertIsNone(entry.to_dict()["walls"])
 
+    def test_platform_color_roundtrip(self):
+        entry = MapEntry(name="m", platform_color=(5, 5, 200))
+        data = entry.to_dict()
+        self.assertEqual(data["platform_color"], [5, 5, 200])
+        self.assertEqual(
+            MapEntry.from_dict(data).platform_color, (5, 5, 200)
+        )
+        entry = MapEntry.from_dict({"name": "m", "platform_color": "bad"})
+        self.assertIsNone(entry.platform_color)
+        entry = MapEntry.from_dict({"name": "m"})
+        self.assertIsNone(entry.platform_color)
+        self.assertIsNone(entry.to_dict()["platform_color"])
+
     def test_missing_dir_is_empty(self):
         store = MapStore("/nonexistent/dir")
         self.assertEqual(store.load_all(), [])

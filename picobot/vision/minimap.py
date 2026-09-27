@@ -1,9 +1,13 @@
 """Minimap analysis for PicoBot.
 
-Pure-NumPy color-keyed detection over a screenshot of the game's minimap
-region. No OpenCV dependency: detection is a per-pixel color distance mask
-plus a 3x3 binary erosion (implemented as shifted ANDs) to reject single
-pixel noise, mirroring the approach used by OpenCV-based bots.
+Pure-NumPy detection over a screenshot of the game's minimap region. No
+OpenCV dependency: markers use a per-pixel color distance mask plus a 3x3
+binary erosion (implemented as shifted ANDs) to reject single pixel noise,
+mirroring the approach used by OpenCV-based bots. Platform/line detection
+is structural — thin horizontal runs with vertical contrast — because
+translucent minimaps alpha-blend the lines over the live scene and no
+single colour can match them; a configured ``colors.ink`` or a map's
+``platform_color`` overrides the structural default when set.
 
 All colors are BGR tuples and configurable because marker colors differ
 between game clients (e.g. GMS-based private servers vs. other versions).
@@ -28,7 +32,8 @@ class MinimapColors:
     other_player: Tuple[int, int, int] = (118, 45, 253)  # pink/red dots
     rune: Tuple[int, int, int] = (255, 102, 221)         # purple rune
     border: Tuple[int, int, int] = (228, 228, 228)       # minimap frame
-    # Platform/line color used to mask fingerprints. None -> reuse `border`.
+    # Platform-line colour override for platform detection. None ->
+    # structural line detection (colour-free — see platform_mask()).
     ink: Optional[Tuple[int, int, int]] = None
 
     @classmethod
@@ -55,6 +60,80 @@ def color_mask(img: np.ndarray, bgr: Tuple[int, int, int], tolerance: int) -> np
     target = np.asarray(bgr, dtype=np.int32)
     diff = np.abs(img.astype(np.int32) - target).sum(axis=2)
     return diff < tolerance * 3
+
+
+def platform_mask(
+    img: np.ndarray,
+    *,
+    tolerance: int = 12,
+    min_run: int = 8,
+    vband: int = 2,
+    contrast: int = 10,
+) -> np.ndarray:
+    """Mask of platform/rope line pixels — detected structurally, color-free.
+
+    Platform lines are UI-drawn thin horizontal strokes. On translucent
+    minimaps their rendered color is alpha-blended with whatever the live
+    scene behind the panel shows, so it varies pixel-to-pixel and
+    location-to-location — no single BGR color can match them. Geometry
+    is invariant instead: a platform is a horizontal run of near-uniform
+    rendered color at least ``min_run`` px long whose row differs from
+    the rows ``vband`` px above/below (a thin line over a different
+    background). The vertical-contrast test rejects filled regions,
+    marker blobs, and tall uniform areas; the run-length test rejects
+    dots, text strokes, and short noise.
+    """
+    px = img.astype(np.int16)
+    h, w = px.shape[:2]
+    mask = np.zeros((h, w), dtype=bool)
+    if h < 2 * vband + 2 or w < min_run + 2:
+        return mask
+    def _h_runs(similar: np.ndarray, out: np.ndarray) -> np.ndarray:
+        """Mark pixels covered by a horizontal run of >=min_run similars."""
+        last_false = np.maximum.accumulate(
+            np.where(similar, -1, np.arange(w - 1)), axis=1
+        )
+        ends = similar & (np.arange(w - 1) - last_false >= min_run - 1)
+        pad = np.zeros((h, w + min_run), dtype=bool)
+        pad[:, 1:w] = ends
+        for s in range(min_run):
+            out |= pad[:, s : s + w]
+        return out
+
+    # hsim[i] = pixel i similar to pixel i+1 (summed per-channel diff).
+    _h_runs(np.abs(np.diff(px, axis=1)).sum(axis=2) < tolerance * 3, mask)
+    # Thin-line test: the row must contrast with rows vband away on BOTH
+    # sides — otherwise every uniform background row adjacent to a line
+    # would qualify (halo) and fill regions would pass at their interior.
+    v = np.ones((h, w), dtype=bool)
+    v[vband:] &= np.abs(px[vband:] - px[:-vband]).sum(axis=2) > contrast * 3
+    v[:-vband] &= np.abs(px[:-vband] - px[vband:]).sum(axis=2) > contrast * 3
+    mask &= v
+    # Second pass in mask space: a real platform survives as a contiguous
+    # run of mask pixels; sporadic noise that lucked through run+contrast
+    # is scattered and dies here.
+    if mask.any():
+        mask = _h_runs(mask[:, 1:] & mask[:, :-1], np.zeros_like(mask))
+    return mask
+
+
+def structure_mask(
+    img: np.ndarray,
+    colors: Optional["MinimapColors"] = None,
+    tolerance: int = 10,
+) -> np.ndarray:
+    """Fingerprint include-mask: platform-line geometry (+ configured ink).
+
+    Map identity fingerprints hash only platform structure, so they are
+    stable on translucent minimaps and across clients regardless of the
+    platform-line color. When ``colors.ink`` is explicitly configured the
+    color match is unioned in as an additional stable signal.
+    """
+    mask = platform_mask(img)
+    ink = getattr(colors, "ink", None)
+    if ink is not None:
+        mask |= color_mask(img, ink, tolerance)
+    return mask
 
 
 def erode3(mask: np.ndarray) -> np.ndarray:
@@ -137,6 +216,7 @@ def fingerprint(
     img: np.ndarray,
     ignore_colors: Optional[Iterable[Tuple[int, int, int]]] = None,
     include_colors: Optional[Iterable[Tuple[int, int, int]]] = None,
+    include_mask: Optional[np.ndarray] = None,
     tolerance: int = 10,
     size: int = 16,
 ) -> str:
@@ -148,26 +228,31 @@ def fingerprint(
     out. Pixels matching ``ignore_colors`` (e.g. the roaming marker dots)
     are excluded, so markers don't perturb the hash of a static minimap.
 
-    ``include_colors`` inverts the selection: only pixels matching those
-    colors (the minimap's platform/border "ink") contribute — crucial on
-    translucent minimaps where the live scene shows through the background
-    and would otherwise drift the hash as the character moves. Returns ""
-    when too few pixels qualify (blank/transition frames), which never
-    matches anything in :func:`fingerprint_distance`.
+    ``include_colors``/``include_mask`` invert the selection: only
+    matching pixels (the minimap's platform "ink" — see
+    :func:`structure_mask`) contribute — crucial on translucent minimaps
+    where the live scene shows through the background and would otherwise
+    drift the hash as the character moves. Returns "" when too few
+    pixels qualify (blank/transition frames), which never matches
+    anything in :func:`fingerprint_distance`.
     """
     h, w = img.shape[:2]
     bh, bw = max(1, h // size), max(1, w // size)
     crop = img[: bh * size, : bw * size].astype(np.float32)
     excluded = np.zeros(crop.shape[:2], dtype=bool)
-    if include_colors:
+    if include_colors or include_mask is not None:
         included = np.zeros(crop.shape[:2], dtype=bool)
-        for bgr in include_colors:
-            included |= color_mask(crop.astype(np.uint8), bgr, tolerance)
+        if include_colors:
+            for bgr in include_colors:
+                included |= color_mask(crop.astype(np.uint8), bgr, tolerance)
+        if include_mask is not None:
+            m = np.asarray(include_mask, dtype=bool)
+            included |= m[: crop.shape[0], : crop.shape[1]]
         excluded |= ~included
     if ignore_colors:
         for bgr in ignore_colors:
             excluded |= color_mask(crop.astype(np.uint8), bgr, tolerance)
-    if include_colors or ignore_colors:
+    if include_colors or include_mask is not None or ignore_colors:
         weights = (~excluded).astype(np.float32)
     else:
         weights = np.ones(crop.shape[:2], dtype=np.float32)
@@ -287,13 +372,18 @@ class MinimapAnalyzer:
         On confirmation an auto-located region is cleared so ``locate`` runs
         again on the next capture; the baseline is reset either way.
         """
-        fp = fingerprint(
-            minimap_img,
-            ignore_colors=(
-                self.colors.player, self.colors.other_player, self.colors.rune
-            ),
-            include_colors=(self.colors.ink or self.colors.border,),
+        ignore = (
+            self.colors.player, self.colors.other_player, self.colors.rune
         )
+        mask = structure_mask(minimap_img, self.colors)
+        if mask.sum() >= 8:
+            fp = fingerprint(
+                minimap_img, ignore_colors=ignore, include_mask=mask
+            )
+        else:
+            # No platform structure at all — hash the whole frame instead
+            # so background drift still registers as change.
+            fp = fingerprint(minimap_img, ignore_colors=ignore)
         with self._lock:
             if not fp:
                 # Blank/transition frame — no signal; neither match nor miss.
@@ -422,6 +512,25 @@ class MinimapAnalyzer:
         mask = erode3(color_mask(inner, self.colors.other_player, tolerance))
         return bool(mask.any())
 
+    def platform_mask(
+        self,
+        img: np.ndarray,
+        ink: Optional[Tuple[int, int, int]] = None,
+        tolerance: int = 10,
+    ) -> np.ndarray:
+        """Effective platform mask for whatever image is passed in.
+
+        An explicit ``ink`` color (per-map override, else the configured
+        ``colors.ink``) wins — an authoritative match for clients whose
+        platforms render at a known stable color. Otherwise the
+        structural :func:`platform_mask` detects thin horizontal lines,
+        which works on any map regardless of color or alpha-blending.
+        """
+        color = ink if ink is not None else self.colors.ink
+        if color is not None:
+            return color_mask(img, color, tolerance)
+        return platform_mask(img)
+
     def platform_y(
         self,
         minimap_img: np.ndarray,
@@ -431,6 +540,7 @@ class MinimapAnalyzer:
         column: int = 2,
         tolerance: int = 10,
         max_snap: int = 8,
+        ink: Optional[Tuple[int, int, int]] = None,
     ) -> Optional[int]:
         """Platform surface (nearest ink row) around column ``x`` at ``y``.
 
@@ -453,9 +563,10 @@ class MinimapAnalyzer:
         x1 = min(w, xi + column + 1)
         if x0 >= x1:
             return None
-        ink = self.colors.ink or self.colors.border
-        mask = color_mask(inner[:, x0:x1], ink, tolerance)
-        ys = np.nonzero(mask)[0]
+        # The mask needs the full interior: structural detection requires
+        # horizontal context a narrow column slice doesn't have.
+        mask = self.platform_mask(inner, ink, tolerance)[:, x0:x1]
+        ys = np.nonzero(mask.any(axis=1))[0]
         if ys.size == 0:
             return None
         d = np.abs(ys - (y - off))
@@ -474,6 +585,7 @@ class MinimapAnalyzer:
         gap: int = 2,
         max_half: int = 80,
         tolerance: int = 10,
+        ink: Optional[Tuple[int, int, int]] = None,
     ) -> Optional[Tuple[int, int]]:
         """x-extent ``(x0, x1)`` of the platform ink run under ``(x, y)``.
 
@@ -491,8 +603,7 @@ class MinimapAnalyzer:
         y1 = min(h, yi + band + 1)
         if y0 >= y1 or not (0 <= xi < w):
             return None
-        ink = self.colors.ink or self.colors.border
-        cols = color_mask(inner[y0:y1], ink, tolerance).any(axis=0)
+        cols = self.platform_mask(inner, ink, tolerance)[y0:y1].any(axis=0)
         idx = np.nonzero(cols)[0]
         if idx.size == 0 or int(np.abs(idx - xi).min()) > gap:
             return None
@@ -533,4 +644,6 @@ __all__ = [
     "fingerprint",
     "fingerprint_distance",
     "largest_blob_centroid",
+    "platform_mask",
+    "structure_mask",
 ]

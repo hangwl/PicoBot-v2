@@ -8,7 +8,10 @@ from picobot.vision.minimap import (
     blob_centroid,
     color_mask,
     erode3,
+    fingerprint,
     largest_blob_centroid,
+    platform_mask,
+    structure_mask,
 )
 
 
@@ -248,6 +251,100 @@ class LargestBlobTests(unittest.TestCase):
         _dot(img, 90, 10, a.colors.rune, r=1)      # stray speck (survives erosion)
         pos = a.rune_pos(img)
         self.assertTrue(abs(pos[0] - 30) <= 2 and abs(pos[1] - 40) <= 2)
+
+
+class PlatformMaskTests(unittest.TestCase):
+    """Structural line detection — geometry, not colour."""
+
+    def test_detects_line_of_any_colour(self):
+        # A green platform line on dark bg — the whole point of the
+        # structural detector is that colour doesn't matter.
+        img = _blank()
+        img[:] = (10, 20, 30)
+        img[40, 20:120] = (40, 180, 90)
+        mask = platform_mask(img)
+        self.assertTrue(mask[40, 60])
+        self.assertFalse(mask[40, 150])    # past the run's end
+        self.assertFalse(mask[45, 60])     # plain background row
+
+    def test_rejects_dots_and_short_runs(self):
+        img = _blank()
+        _dot(img, 60, 40, (200, 200, 200), r=2)   # 5px marker blob
+        img[70, 20:26] = (200, 200, 200)          # 6px run < min_run
+        self.assertFalse(platform_mask(img).any())
+
+    def test_thick_region_interior_and_edges_rejected(self):
+        # A tall filled block isn't a line: interior rows have no vertical
+        # contrast and its edge rows only contrast on one side.
+        img = _blank()
+        img[30:80, 20:150] = (60, 60, 60)
+        self.assertFalse(platform_mask(img).any())
+
+    def test_blended_line_with_two_rendered_colours(self):
+        # Alpha-blend look: one logical line rendered as two different
+        # colours over different backgrounds — still one platform row.
+        img = _blank()
+        img[:] = (10, 20, 30)
+        img[40, 10:60] = (100, 100, 100)
+        img[40, 60:120] = (80, 90, 95)
+        mask = platform_mask(img)
+        self.assertTrue(mask[40, 30])
+        self.assertTrue(mask[40, 90])
+
+    def test_multiple_platforms_all_detected(self):
+        img = _blank()
+        img[:] = (5, 5, 8)
+        for y in (20, 60, 100):
+            img[y, 30:170] = (150, 140, 130)
+        mask = platform_mask(img)
+        for y in (20, 60, 100):
+            self.assertTrue(mask[y, 100])
+        self.assertFalse(mask[40, 100])
+
+    def test_platform_y_structural_without_ink(self):
+        a = MinimapAnalyzer()   # no colors.ink configured
+        img = _blank()
+        img[80, 40:160] = (40, 180, 90)
+        self.assertEqual(a.platform_y(img, 100, 84), 80)
+
+    def test_platform_y_ink_override_colour_matches(self):
+        a = MinimapAnalyzer()
+        img = _blank()
+        img[80, 40:160] = (40, 180, 90)
+        # Explicit ink (per-map override) switches to colour matching —
+        # a mismatched colour finds nothing, the right one does.
+        self.assertIsNone(a.platform_y(img, 100, 84, ink=(0, 0, 250)))
+        self.assertEqual(a.platform_y(img, 100, 84, ink=(40, 180, 90)), 80)
+
+    def test_platform_extent_structural(self):
+        a = MinimapAnalyzer()
+        img = _blank()
+        img[80, 40:120] = (33, 77, 111)
+        self.assertEqual(a.platform_extent(img, 60, 80), (40, 119))
+
+    def test_fingerprint_include_mask_ignores_background(self):
+        # Same platform lines over a wildly different background must
+        # hash identically — the structural mask isolates the lines.
+        base = _blank()
+        base[:] = (10, 20, 30)
+        other = _blank()
+        other[:] = (250, 200, 100)
+        for img in (base, other):
+            img[40, 10:150] = (90, 90, 90)
+            img[90, 40:180] = (90, 90, 90)
+        fa = fingerprint(base, include_mask=structure_mask(base))
+        fb = fingerprint(other, include_mask=structure_mask(other))
+        self.assertEqual(fa, fb)
+
+    def test_structure_mask_unions_configured_ink(self):
+        # An ink-coloured feature too short for structural detection
+        # still enters the mask when the ink colour is configured.
+        img = _blank()
+        img[40, 10:14] = (7, 8, 9)  # 4px run — too short for geometry
+        colors = MinimapColors(ink=(7, 8, 9))
+        mask = structure_mask(img, colors)
+        self.assertTrue(mask[40, 11])
+        self.assertFalse(platform_mask(img)[40, 11])
 
 
 class PlatformYTests(unittest.TestCase):

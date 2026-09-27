@@ -52,6 +52,11 @@ class MapEntry:
     # whose play area doesn't span the minimap edge-to-edge. "floor" is
     # a normalized y: at/below it, no downward movement is attempted.
     walls: Optional[dict] = None
+    # Optional platform-line BGR colour override (e.g. picked off the
+    # dashboard). When set, platform detection colour-matches it instead
+    # of the default structural line detection — the escape hatch for
+    # maps whose minimap art fools geometry.
+    platform_color: Optional[tuple] = None
     path: Optional[Path] = None
 
     def to_dict(self) -> dict:
@@ -63,6 +68,9 @@ class MapEntry:
                 list(self.minimap_region) if self.minimap_region else None
             ),
             "walls": dict(self.walls) if self.walls else None,
+            "platform_color": (
+                list(self.platform_color) if self.platform_color else None
+            ),
             "rotation": self.rotation.to_dict(),
             "skills": {n: s.to_dict() for n, s in self.skills.items()},
         }
@@ -91,6 +99,11 @@ class MapEntry:
                 if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.5:
                     walls[side] = float(v)
             walls = walls or None
+        pcolor = data.get("platform_color")
+        if not isinstance(pcolor, (list, tuple)) or len(pcolor) != 3:
+            pcolor = None
+        else:
+            pcolor = tuple(int(v) for v in pcolor)
         return cls(
             name=str(data["name"]),
             rotation=Rotation.from_dict(data.get("rotation")),
@@ -99,6 +112,7 @@ class MapEntry:
             map_name=data.get("map_name"),
             minimap_region=region,
             walls=walls,
+            platform_color=pcolor,
             path=path,
         )
 

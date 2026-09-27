@@ -20,6 +20,7 @@ from ..vision.minimap import (
     MinimapAnalyzer,
     fingerprint,
     fingerprint_distance,
+    structure_mask,
 )
 from ..vision.screen import ScreenGrabber
 from .base import BotBase
@@ -179,7 +180,7 @@ class SmartBot(BotBase):
             fp = fingerprint(
                 img,
                 ignore_colors=self._fp_ignored_colors(),
-                include_colors=self._fp_ink_colors(),
+                include_mask=self._fp_mask(img),
             )
             if (
                 fp
@@ -199,9 +200,14 @@ class SmartBot(BotBase):
         c = self.minimap.colors
         return (c.player, c.other_player, c.rune)
 
-    def _fp_ink_colors(self):
-        c = self.minimap.colors
-        return (c.ink or c.border,)
+    def _fp_mask(self, img):
+        """Fingerprint include-mask: platform-line structure (+ ink)."""
+        return structure_mask(img, self.minimap.colors)
+
+    def _ink(self):
+        """Per-map platform colour override (None = structural detect)."""
+        entry = self._current_map_entry()
+        return entry.platform_color if entry is not None else None
 
     def minimap_fingerprint(self, img=None) -> Optional[str]:
         if img is None:
@@ -211,7 +217,7 @@ class SmartBot(BotBase):
         return fingerprint(
             img,
             ignore_colors=self._fp_ignored_colors(),
-            include_colors=self._fp_ink_colors(),
+            include_mask=self._fp_mask(img),
         ) or None
 
     def player_pos(self, img=None) -> Optional[Tuple[int, int]]:
@@ -273,7 +279,7 @@ class SmartBot(BotBase):
             fp = fingerprint(
                 img,
                 ignore_colors=self._fp_ignored_colors(),
-                include_colors=self._fp_ink_colors(),
+                include_mask=self._fp_mask(img),
             )
             if fingerprint_distance(fp, self._leg_fp) > cfg.map_match_threshold:
                 reason = "map changed unexpectedly (portal?)"
@@ -509,7 +515,9 @@ class SmartBot(BotBase):
                     # recorded beneath the lowest platform is unreachable,
                     # so snap to the nearest real floor instead.
                     snapped = True
-                    py = self.minimap.platform_y(img, target_x, target_y)
+                    py = self.minimap.platform_y(
+                        img, target_x, target_y, ink=self._ink()
+                    )
                     if py is not None and py != target_y:
                         self.log(
                             f"Target snapped to platform: y {target_y}→{py}"
@@ -824,7 +832,7 @@ class SmartBot(BotBase):
         # cached per dwell; ±weave_range fallback when ink reads empty.
         if self._weave_bounds is None:
             self._weave_bounds = (
-                self.minimap.platform_extent(img, ax, ay)
+                self.minimap.platform_extent(img, ax, ay, ink=self._ink())
                 if img is not None else None
             )
         m = cfg.weave_edge_margin_px

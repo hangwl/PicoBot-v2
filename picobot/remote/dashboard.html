@@ -145,7 +145,11 @@
       </div>
       <div class="row" style="margin-top:8px">
         <label><input type="checkbox" id="inkChk"> show platforms</label>
-        <label>tint the ink the bot reads as geometry</label>
+        <button id="pickInk" title="arm, then click a platform line on the Minimap view — stores that colour as the map's platform override">Pick ink</button>
+        <button id="inkClear" title="remove the map's platform colour override (back to auto line detection)">Clr</button>
+      </div>
+      <div class="row">
+        <label>tints detected platform lines; Pick ink = colour override for maps geometry misses (uses map field)</label>
       </div>
     </div>
     <div class="panel">
@@ -483,6 +487,16 @@ $("patrolChk").onchange = () =>
 $("inkChk").onchange = () =>
   send("dash|ink|" + ($("inkChk").checked ? "on" : "off"));
 
+// --- Click-to-pick platform colour on the Minimap view -----------------
+let pickMode = false;
+function armPick() {
+  pickMode = !pickMode;
+  if (pickMode) send("dash|view|minimap");
+  $("pickInk").className = pickMode ? "armed" : "";
+}
+$("pickInk").onclick = () => armPick();
+$("inkClear").onclick = () => send("layout|ink|clear" + layTarget());
+
 // --- Drag-to-draw regions on the Window view ---------------------------
 let drawMode = null, drawStart = null, lastImg = null;
 const viewEl = $("view");
@@ -516,6 +530,12 @@ viewEl.addEventListener("pointermove", e => {
   ctx.strokeRect(drawStart[0], drawStart[1], x - drawStart[0], y - drawStart[1]);
 });
 viewEl.addEventListener("pointerup", e => {
+  if (pickMode) {
+    const [x, y] = viewXY(e);
+    send(`layout|ink|${Math.round(x)},${Math.round(y)}` + layTarget());
+    armPick();  // toggles off
+    return;
+  }
   if (!drawStart) return;
   const [ex, ey] = viewXY(e);
   const x = Math.round(Math.min(drawStart[0], ex));

@@ -426,10 +426,11 @@ class CalibrationRunner:
             if off:
                 self._emit(
                     "error",
-                    f"{off} anchor(s) are off-platform (no ink within "
+                    f"{off} anchor(s) are off-platform (no line within "
                     "reach) — left as recorded; they may be unreachable. "
-                    "Re-mark while standing on a floor, or check "
-                    "minimap_colors.ink matches your client.",
+                    "Re-mark while standing on a floor; if the dashboard "
+                    "'show platforms' tint misses your floors, use "
+                    "Pick ink to set the map's platform colour.",
                 )
         entry = recorder.finish(
             name,
@@ -461,7 +462,11 @@ def main() -> None:
     from ..config import load_config
     from ..settings import configure_logging
     from ..vision.game_window import GameWindow
-    from ..vision.minimap import MinimapAnalyzer, fingerprint
+    from ..vision.minimap import (
+        MinimapAnalyzer,
+        fingerprint,
+        structure_mask,
+    )
     from ..vision.screen import ScreenGrabber
     from .config import BotConfig
 
@@ -512,7 +517,7 @@ def main() -> None:
             minimap.colors.other_player,
             minimap.colors.rune,
         ),
-        include_colors=(minimap.colors.ink or minimap.colors.border,),
+        include_mask=structure_mask(first, minimap.colors),
     ) or None
     done = {"flag": False}
     keyboard.on_press_key(

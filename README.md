@@ -132,9 +132,16 @@ you verified in the dashboard carries over to the bot at Start:
   **Floor** does the same vertically: stand on the bottom platform and
   the bot stops attempting down-jumps at/below it. **Clear** removes
   all boundaries; the map field targets a different map.
-- **show platforms** (View panel): tints every pixel the bot reads as
-  platform/rope ink — verify the minimap geometry the bot actually sees,
-  useful when anchors or walls land oddly on a translucent minimap.
+- **show platforms** (View panel): tints the pixels the bot reads as
+  platform lines — verify the minimap geometry the bot actually sees.
+  Detection is **structural**: thin horizontal runs of uniform colour
+  with contrast on both sides — no colour config needed, which matters
+  on translucent minimaps where platform lines alpha-blend with the live
+  scene and no single colour can match them. If a map's art defeats
+  geometry (e.g. long horizontal scenery edges), **Pick ink** samples a
+  clicked platform pixel into that map's `platform_color` override —
+  colour-matching then replaces structural detection for that map;
+  **Clr** removes it.
 - Player positions are **feet-anchored**: `player_pos` reports the
   marker icon's bottom row — the point touching the platform — so
   recorded anchors and the Floor boundary land on the platform ink
@@ -215,11 +222,10 @@ Notes:
   travel, and vertical jumps that produce no progress twice in a row end
   the leg (aligned in x = "arrived"; misaligned = abort) — a target
   recorded beneath the lowest platform can no longer loop the bot forever.
-- `minimap_colors.ink` is the platform/line color used to mask fingerprints —
-  defaults to `border`. It matters on translucent minimaps: only ink pixels
-  feed the fingerprint, so scene pixels showing through the background can't
-  drift map matching as the character moves. Set it to your client's minimap
-  line color if that differs from the border color.
+- `minimap_colors.ink` is an optional *global* platform-line colour override
+  — the per-map `platform_color` (Pick ink) or structural detection are the
+  normal paths. Fingerprints hash structural platform lines (+ configured
+  ink) only, so translucent backgrounds can't drift map matching.
 - Safety: losing window focus, a rune marker, other players on the minimap, or
   an unexpected map change mid-leg pauses the bot (and fires a Telegram alert
   if configured). Solve the check via the dashboard's remote input pad.
