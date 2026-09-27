@@ -77,6 +77,29 @@ class TitleLinesTests(unittest.TestCase):
         self.assertTrue(lines)
         self.assertGreaterEqual(min(b[0] for b in lines), 45)
 
+    def _tile_band(self):
+        """Client layout: framed colourful region icon left of two title
+        lines (street / map), frame top as the divider."""
+        band = _band()
+        band[29:65, 3:41] = (60, 160, 200)             # colourful interior
+        band[29:65, 3:5] = band[29:65, 38:41] = 235    # light frame sides
+        band[29:31, 3:41] = band[63:65, 3:41] = 235    # frame top/bottom
+        _text(band, 32, 43, 46, 150)
+        _text(band, 50, 61, 46, 150)
+        band[68:70, :] = 255
+        return band
+
+    def test_colourful_region_icon_tile_is_cut(self):
+        lines = title_lines(self._tile_band())
+        self.assertEqual(len(lines), 2)                # lines split again
+        self.assertTrue(all(b[0] >= 42 for b in lines))
+
+    def test_crop_excludes_tile_and_has_background_margin(self):
+        crop = title_crop(self._tile_band())
+        tile_px = (crop == (60, 160, 200)).all(axis=2)
+        self.assertFalse(tile_px.any())
+        self.assertTrue((crop[:8] == 40).all())        # margin = band bg
+
     def test_divider_row_cuts_map_content(self):
         band = _band()
         _text(band, 30, 45, 52, 180)               # title

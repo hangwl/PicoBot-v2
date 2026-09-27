@@ -87,8 +87,13 @@ at the panel edge, so nothing lies outside; a wider band only picks up
 other UI text. `minimap_name_region` pins a band rect instead.
 
 **Segmentation** (`title_scan`): near-white mask; cut at the divider
-(the frame's top edge — first row with a ≥120px bright run); row-group
-text lines; drop dense icon columns; extend over faded tails.
+(the frame's top edge — first row with a ≥120px bright run); cut the
+region-icon tile left of the title by its frame (unbroken white columns
+≥70% of the two-line zone height — no glyph is that tall; the colourful
+interior defeats a density test); row-group text lines; drop remaining
+dense icon columns; extend over faded tails. `title_crop` pads the crop
+with its median background colour (4px vertical, 8px margin) — the
+recogniser misreads glyphs touching the crop edge.
 
 **Reads** run on a `TitleOCR` worker thread (~2s each on CPU); the
 monitor only captures the band (`MapIdentity.pump`). A request

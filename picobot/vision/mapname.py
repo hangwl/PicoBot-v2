@@ -125,6 +125,29 @@ def _row_groups(white: np.ndarray, min_row_px: int, gap: int):
     return lines
 
 
+def _icon_tile_end(zone: np.ndarray, min_h: int = 20) -> Optional[int]:
+    """Right edge of the region-icon tile left of the title, or None.
+
+    The tile is a square with a light frame spanning both title lines,
+    so its sides are near-full-height unbroken white columns — taller
+    than any glyph. Its colourful interior can fail the near-white test,
+    so density alone doesn't catch it.
+    """
+    h, w = zone.shape
+    if h < min_h:
+        return None
+    run = np.zeros(w, dtype=np.int32)
+    best = np.zeros(w, dtype=np.int32)
+    for row in zone:
+        run = (run + 1) * row
+        np.maximum(best, run, out=best)
+    tall = np.flatnonzero(best >= 0.7 * h)
+    if tall.size == 0 or tall[0] >= w // 2:
+        return None
+    side = tall[tall <= tall[0] + int(1.6 * h)]
+    return int(side[-1]) + 1
+
+
 def title_scan(
     band: np.ndarray,
     white_thresh: int = 170,
@@ -151,10 +174,10 @@ def title_scan(
       and the colored map icon mostly fail the all-channels test.
     - Rows with text are grouped into lines — the divider and thin map
       lines are 1-2px tall and never reach ``min_line_h``.
-    - The map icon *does* have white highlights, so within the text zone
-      columns are split on ``col_gap``-wide gaps and dense runs
-      (``fill > icon_fill``) are dropped — icons are filled blocks,
-      text is sparse. Works at any panel width.
+    - The region-icon tile left of the title is cut by its frame
+      (:func:`_icon_tile_end`); remaining dense column runs
+      (``fill > icon_fill``) are dropped too — icons are filled blocks,
+      text is sparse.
     - Stops at the divider row — the first row with a contiguous
       bright run ≥ ``divider_run`` px (a solid panel separator vs.
       ~15px glyph runs) — so map content can't be mistaken for text.
@@ -182,13 +205,23 @@ def title_scan(
     white = white[:cut]
     if white.size == 0:
         return [], div
-    groups = [
-        (a, b)
-        for a, b in _row_groups(white, min_row_px, gap_rows)
-        if b - a + 1 >= min_line_h and white[a : b + 1].sum() >= min_line_px
-    ]
+    def line_groups():
+        return [
+            (a, b)
+            for a, b in _row_groups(white, min_row_px, gap_rows)
+            if b - a + 1 >= min_line_h and white[a : b + 1].sum() >= min_line_px
+        ]
+
+    groups = line_groups()
     if not groups:
         return [], div
+    tile_end = _icon_tile_end(white[groups[0][0] : groups[-1][1] + 1])
+    if tile_end is not None:
+        white = white.copy()
+        white[:, : tile_end + 1] = False
+        groups = line_groups()
+        if not groups:
+            return [], div
     # Icon cut: column runs over the whole text zone; dense leading
     # runs are icons, sparse runs are glyphs.
     zone = white[groups[0][0] : groups[-1][1] + 1]
@@ -248,24 +281,35 @@ def title_lines(band: np.ndarray, **kw) -> list:
     return title_scan(band, **kw)[0]
 
 
-def title_crop(band: np.ndarray, **kw) -> Optional[np.ndarray]:
-    """One tight crop covering all detected title lines, else None.
+def title_crop(
+    band: np.ndarray, vpad: int = 4, margin: int = 8, **kw
+) -> Optional[np.ndarray]:
+    """Crop covering all detected title lines, else None.
 
     The right edge extends to the divider's end — the game fades the
-    title out at the panel edge, so the tail's glyphs can drop below
-    the near-white threshold mid-word. RapidOCR is a CNN and can still
-    read the faded tail; leaving it out silently truncates long names.
+    title out at the panel edge and RapidOCR can still read the faded
+    tail. The crop is framed by ``margin`` px of its median background
+    colour: the recogniser misreads glyphs touching the crop edge, and
+    padding from the band itself would pull the region icon back in.
     """
     lines, div = title_scan(band, **kw)
     if not lines:
         return None
-    y0 = min(b[1] for b in lines)
-    y1 = max(b[3] for b in lines)
+    y0 = max(0, min(b[1] for b in lines) - vpad)
+    y1 = min(band.shape[0], max(b[3] for b in lines) + vpad)
     x0 = min(b[0] for b in lines)
     x1 = max(b[2] for b in lines)
     if div is not None:
         x1 = max(x1, div[2])
-    return band[y0:y1, x0 : min(x1, band.shape[1])]
+    crop = band[y0:y1, x0 : min(x1, band.shape[1])]
+    bg = np.median(crop.reshape(-1, crop.shape[2]), axis=0).astype(band.dtype)
+    out = np.empty(
+        (crop.shape[0] + 2 * margin, crop.shape[1] + 2 * margin, crop.shape[2]),
+        dtype=band.dtype,
+    )
+    out[:] = bg
+    out[margin : margin + crop.shape[0], margin : margin + crop.shape[1]] = crop
+    return out
 
 
 class MapNameReader:

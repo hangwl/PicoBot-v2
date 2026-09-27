@@ -78,6 +78,16 @@ and the dashboard only in Panel view. Blackouts can be as short as
 the shortest); a dedicated 20 Hz `MapMonitor` catches 100%. Lesson: a
 trigger must own its sampling rate — never piggyback on consumers.
 
+### Region-icon tile in the title (2026-09-27, third batch)
+
+Colourful region icons (Chu Chu Island, Five-Color Hill, Skywhale)
+survived the density-based icon cut — only their light frame is
+near-white — and OCR read them as `QY`/`FQY`/`50`. White-heavy icons
+(Limina, Lachelein) were already cut. Cutting by the frame's tall
+unbroken side columns removes all of them, but the tighter crop then
+caused edge misreads (`11-1`, `Pa ath`); a background-colour margin
+fixed that — all 15 captured reads exact afterwards.
+
 ## Geometry
 
 - **Platform auto-detection** by ink colour, then colour-free
