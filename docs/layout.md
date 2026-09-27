@@ -60,8 +60,9 @@ truth, no per-section map names.
   boundary (normalized x) and shades the blocked side red. Overrides
   `wall_zone_px` on that side. A lighter line shows the `wall_pad_px`
   buffer — the bot never goes past it.
-- **Floor** — stand where the forbidden area begins: shades below; the
-  padded line above it is the lowest the bot will go (see
+- **Floor** — stand on the lowest platform and click: the line is placed
+  just below that platform (so it stays walkable) and everything below
+  is forbidden; the lighter padded line shows the effective limit (see
   [bot-behavior.md](bot-behavior.md#wall-zones)).
 - **Save layout / Forget / Re-detect** — commit the located region to
   the map file (backfilling `map_name` from the current title when it's

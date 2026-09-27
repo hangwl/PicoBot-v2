@@ -67,18 +67,26 @@ class MoveMeasurer:
                 )
                 return
             self._emit("measure", "measuring moves — keep the game focused")
+            measured, skipped = [], {}
             for move in self.PLAN:
                 n = self.reps if move not in ("up_flash", "rope_lift") else 1
                 for _ in range(n):
                     if self._stop.is_set() or not bot.is_window_focused():
                         self._emit("measure", "measurement stopped")
                         return
-                    self._measure(move)
+                    if self._measure(move):
+                        measured.append(move)
+                    else:
+                        skipped[move] = skipped.get(move, 0) + 1
             bot.reach.save(force=True)
-            self._emit(
-                "measure",
-                "done — reach saved; check the Route overlay to see the new graph",
+            summary = "done — reach saved. Measured: " + (
+                ", ".join(sorted(set(measured))) or "nothing"
             )
+            if skipped:
+                summary += "; skipped: " + ", ".join(
+                    f"{m} x{n}" for m, n in skipped.items()
+                )
+            self._emit("measure", summary)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("move measurement failed: %s", exc, exc_info=True)
             self._emit("error", f"measurement failed: {exc}")
@@ -93,18 +101,29 @@ class MoveMeasurer:
         vertical = move in ("up_flash", "rope_lift")
         if vertical:
             if graph.above(start[0], start[1]) is None:
+                self._emit("measure", f"{move}: skipped — no platform above the player")
                 return False
             direction = None
         else:
             span = platform_span_at(bot._platform_segments_px(), *start)
             if span is None:
+                self._emit(
+                    "measure",
+                    f"{move}: skipped — player not on a drawn platform",
+                )
                 return False
             room_r, room_l = span[1] - start[0], start[0] - span[0]
             if max(room_r, room_l) < self.ROOM[move]:
+                self._emit(
+                    "measure",
+                    f"{move}: skipped — only {max(room_r, room_l):.0f}px of "
+                    "platform room (needs "
+                    f"{self.ROOM[move]:.0f})",
+                )
                 return False
             direction = "right" if room_r >= room_l else "left"
         if move == "rope_lift" and not bot.rope_lift():
-            self._emit("measure", "rope lift not bound — skipped")
+            self._emit("measure", "rope_lift: skipped — skill key not bound")
             return False
         if direction:
             bot.hid.key_down(direction)
@@ -123,6 +142,7 @@ class MoveMeasurer:
                 bot.hid.key_up(direction)
         land = self._settle(timeout=1.2)
         if land is None or land == start:
+            self._emit("measure", f"{move}: skipped — the character didn't move")
             return False
         dx = abs(land[0] - start[0])
         rise = start[1] - land[1]

@@ -48,9 +48,23 @@ class Patrol:
             bot._blind_wait()
             return
         graph = bot._nav_graph()
-        if graph is None or graph.locate(*pos) is None:
-            # No drawn platforms (or standing off them): straight-line patrol.
+        if graph is None:
+            # No drawn platforms: straight-line patrol.
             bot._patrol_tick()
+            return
+        if graph.locate(*pos) is None:
+            # Platforms exist but the player isn't on any of them (mid-move,
+            # or the drawing/floor line is off). Wait — running the legacy
+            # patrol from here would plan routes with an off-graph start
+            # and ban every anchor.
+            now = time.time()
+            if now - getattr(self, "_off_graph_logged", 0.0) > 5.0:
+                self._off_graph_logged = now
+                bot.log(
+                    "Player is not on any drawn platform — waiting "
+                    "(check platform rows / the floor line)"
+                )
+            bot._blind_wait()
             return
         if self._nav is None or self._nav.graph is not graph:
             self._nav = Navigator(bot, graph, rng=self.rng)

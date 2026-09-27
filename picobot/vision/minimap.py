@@ -156,17 +156,21 @@ def platform_span_at(
     x: float,
     y: float,
     *,
-    band: float = 4.0,
+    band: float = 6.0,
     x_slack: float = 3.0,
 ) -> Optional[Tuple[int, int]]:
-    """(x0, x1) px extent of the drawn segment under ``(x, y)``, or None."""
+    """(x0, x1) px extent of the drawn segment under ``(x, y)``, or None.
+
+    Asymmetric: the point may sit up to ``band`` px ABOVE the drawn row
+    (the player glyph floats above the line) and up to 2px below it —
+    stacked tiers stay unambiguous."""
     best = None
     for s in segments:
         lo, hi = min(s[0], s[2]), max(s[0], s[2])
         if not lo - x_slack <= x <= hi + x_slack:
             continue
-        d = abs(_seg_y(s, x) - y)
-        if d <= band and (best is None or d < best[0]):
+        d = _seg_y(s, x) - y                 # +: point floats above the row
+        if -2 <= d <= band and (best is None or d < best[0]):
             best = (d, lo, hi)
     if best is None:
         return None

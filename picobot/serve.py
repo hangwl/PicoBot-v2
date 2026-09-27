@@ -664,15 +664,22 @@ class BotHost:
         walls = dict(entry.walls or {})
         v = pos[1] if side == "floor" else pos[0]
         if side == "floor" and entry.platforms:
-            # Snap onto the drawn platform under the player — the boundary
-            # should sit on the floor line, not hover above it.
+            # Snap just BELOW the drawn platform under the player: the
+            # padded floor band then starts under it, so the platform the
+            # character stands on stays walkable and everything below is
+            # forbidden.
             from .vision.minimap import platform_row_at
 
             snapped = platform_row_at(
                 self._platforms_px(entry), pos[0], pos[1], max_snap=10
             )
             if isinstance(snapped, int):
-                v = snapped
+                v = snapped + self.bot_config.wall_pad_px + 2
+                self.bus.emit(
+                    "map",
+                    f"floor placed just below the platform row ({snapped}) "
+                    "so it stays walkable",
+                )
         walls[side] = round(max(0.0, min(1.0, v / span)), 4)
         entry.walls = walls
         self._save_entry(entry)

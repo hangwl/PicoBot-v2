@@ -29,7 +29,7 @@ class PatrolBot(SimBot):
         return self.rot
 
     def _nav_graph(self):
-        return self.g
+        return self.g if self.g.platforms else None
 
     def _rx(self, v):
         return round(v * 200)
@@ -128,10 +128,20 @@ class PatrolTests(unittest.TestCase):
         bot._blind_wait.assert_called_once()
         self.assertEqual((bot.attacks, bot.moves), (0, []))
 
-    def test_off_graph_falls_back_to_straight_line_patrol(self):
-        bot = PatrolBot([FLOOR], (10, 40), [(20, 100), (180, 100)])   # mid-air
+    def test_no_platforms_falls_back_to_straight_line_patrol(self):
+        bot = PatrolBot([], (10, 40), [(20, 100), (180, 100)])
         Patrol(bot).tick()
         bot._patrol_tick.assert_called_once()
+
+    def test_player_off_graph_waits_instead_of_legacy_cascade(self):
+        # Platforms drawn, player mid-air: waiting — the legacy patrol
+        # would plan routes from an off-graph start and ban every anchor.
+        bot = PatrolBot([FLOOR], (10, 40), [(20, 100), (180, 100)])
+        bot._blind_wait = Mock()
+        Patrol(bot).tick()
+        bot._blind_wait.assert_called_once()
+        bot._patrol_tick.assert_not_called()
+        self.assertTrue(any("not on any drawn platform" in l for l in bot.log_lines))
 
     def test_anchor_off_platform_is_banned_with_message(self):
         bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (95, 20)])

@@ -24,10 +24,16 @@ loop:
   on any drawn platform — "re-place it"), or 3 missed landings → skipped
   for 30s, so one bad anchor can't shrink or stall the patrol.
 - Hand-authored `legs` for a pair still win (ropes aren't in the graph).
-- Fallbacks: no drawn platforms (or standing off them) → the older
-  straight-line patrol; one anchor → weave on its platform; no anchors →
-  weave around where grinding started (`dwell_weave: false` attacks in
-  place).
+- Fallbacks: no drawn platforms → the older straight-line patrol;
+  platforms drawn but the player off all of them → wait with a throttled
+  "not on any drawn platform" diagnostic (the legacy patrol would plan
+  routes from an off-graph start and ban every anchor); one anchor →
+  weave on its platform; no anchors → weave around where grinding
+  started (`dwell_weave: false` attacks in place).
+- Platform matching is asymmetric: the player glyph floats above the
+  drawn row, so a point matches its platform when it sits up to
+  `snap_px` above the row (and up to 2px below) — stacked tiers stay
+  unambiguous.
 
 ## Anchors
 

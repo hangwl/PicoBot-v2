@@ -182,13 +182,17 @@ class NavGraph:
         return best[1] if best else None
 
     def locate(self, x: float, y: float) -> Optional[int]:
-        """Platform the point stands on (within ``snap_px``), or None."""
+        """Platform the point stands on, or None.
+
+        Asymmetric: the point may sit up to ``snap_px`` ABOVE the drawn
+        row (the player glyph floats above the line) and up to 2px below
+        it — stacked tiers stay unambiguous."""
         best = None
         for i, p in enumerate(self.platforms):
             if not p.spans(x, slack=3.0):
                 continue
-            d = abs(p.y_at(x) - y)
-            if d <= self.snap_px and (best is None or d < best[0]):
+            d = p.y_at(x) - y                 # +: point floats above the row
+            if -2 <= d <= self.snap_px and (best is None or d < best[0]):
                 best = (d, i)
         return best[1] if best else None
 
