@@ -80,11 +80,13 @@ class _VisionFeed:
 
     def name_img(self, scan_px: int = 90, name_region=None):
         """BGR band spanning the title zone (window top → into the
-        minimap region); title_lines() segments the text out of it."""
+        minimap region, full client width); title_lines() segments the
+        text out of it."""
         from .vision.mapname import name_strip_region
 
+        l, t, r, b = self.window.client_rect()
         region = name_region or (
-            name_strip_region(self.minimap.region, scan_px)
+            name_strip_region(self.minimap.region, scan_px, r - l)
             if self.minimap.region
             else None
         )
@@ -357,12 +359,13 @@ class BotHost:
         # only runs when identity is dirty (startup/change/pin/save) —
         # the engine is too heavy to poll every frame.
         ocr_entry, ocr_text = self._live_ocr
-        if self._map_dirty and self.bot_config.name_ocr:
+        dirty, self._map_dirty = self._map_dirty, False
+        if dirty and self.bot_config.name_ocr:
             ocr_entry, ocr_text = None, None
             reader = getattr(self.bot, "map_name", None)
             if self.bot is not None and callable(reader):
                 try:
-                    ocr_text = reader()
+                    ocr_text = reader(force=True)  # post-change — never cached
                 except Exception:
                     ocr_text = None
             elif feed is not None:
@@ -379,7 +382,6 @@ class BotHost:
                 except Exception:
                     ocr_entry = None
             self._live_ocr = (ocr_entry, ocr_text)
-            self._map_dirty = False
         if self.bot is not None and self.bot._map is not None:
             return self.bot._map
         if ocr_entry is not None:
@@ -391,15 +393,36 @@ class BotHost:
         return None
 
     def _resolved_map_cached(self):
-        """``_resolved_map_entry`` throttled to ~2s for per-frame use."""
+        """``_resolved_map_entry`` throttled to ~2s for per-frame use.
+
+        A change in the resolved name broadcasts the refreshed evidence
+        (detected/via/score) and logs it — without this the dashboard's
+        detected label never sees a watchdog-driven re-resolve.
+        """
         now = time.time()
         if now - self._map_res_ts < 2.0:
             return self._map_res
+        prev = self._map_res
         try:
             self._map_res = self._resolved_map_entry()
         except Exception:
             self._map_res = None
         self._map_res_ts = now
+        prev_name = prev.name if prev is not None else None
+        cur_name = self._map_res.name if self._map_res is not None else None
+        if cur_name != prev_name:
+            # Refresh OCR evidence for the broadcast — e.g. while the
+            # bot runs, the feed watchdog is dormant and _map_dirty
+            # never got set by the change that produced this resolve.
+            self._map_dirty = True
+            self._send_maps()
+            ocr_entry, ocr_text = self._live_ocr
+            via = "ocr" if ocr_entry is not None else "fp"
+            detail = f" via OCR \"{ocr_text}\"" if ocr_text else ""
+            self.bus.emit(
+                "map",
+                f"map resolved: {cur_name or '–'} ({via}){detail}",
+            )
         return self._map_res
 
     def _map_meta(self) -> dict:
@@ -930,7 +953,11 @@ class BotHost:
 
     def _send_maps(self) -> None:
         # Refresh the live evidence so the dashboard shows what's
-        # actually on screen, not just the resolution.
+        # actually on screen, not just the resolution. Dirty identity
+        # forces a full re-resolve (OCR included) regardless of the
+        # throttle window.
+        if self._map_dirty:
+            self._map_res_ts = 0.0
         self._resolved_map_cached()
         live, dist = self._live_match
         ocr_entry, ocr_text = self._live_ocr
@@ -1254,6 +1281,13 @@ class BotHost:
                 map_name = self._name_reader().read(strip)
             except Exception:
                 map_name = None
+            if not map_name:
+                self.bus.emit(
+                    "notify",
+                    "map title unreadable — saved without map_name; "
+                    "OCR matching will skip this map until a save "
+                    "captures it (check the Title view)",
+                )
         try:
             entry = self.calibrator.finish(
                 name,

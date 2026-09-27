@@ -477,7 +477,10 @@ def main() -> None:
         from ..vision.mapname import MapNameReader, name_strip_region
 
         if minimap.region:
-            x, y, w, h = name_strip_region(minimap.region)
+            l, t, r, b = window.client_rect()
+            x, y, w, h = name_strip_region(
+                minimap.region, window_w=r - l
+            )
             strip = screen.capture(
                 (window.client_left + x, window.client_top + y, w, h)
             )

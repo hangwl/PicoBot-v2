@@ -63,19 +63,23 @@ def normalize_name(text: Optional[str]) -> str:
 
 
 def name_strip_region(
-    minimap_region: Region, header_px: int = 90
+    minimap_region: Region,
+    header_px: int = 90,
+    window_w: Optional[int] = None,
 ) -> Region:
     """Capture band covering the title wherever the client draws it.
 
     Spans from the window's top edge to ``header_px`` into the minimap
     region — covers both layouts: the title strip *above* the map frame
     (border-box detection) and the title *inside* the panel top (panel
-    detection). :func:`title_lines` finds the text inside either way,
-    so the capture can be generous. Width follows the region, which is
-    map-dependent — no fixed pixel widths anywhere.
+    detection). Width is the full window width (``window_w``) when
+    known — titles can overflow the map frame, so a region-width band
+    would clip long names mid-glyph. :func:`title_lines` finds the text
+    inside either way, so the capture can be generous.
     """
     x, y, w, h = minimap_region
-    return (x, 0, w, min(y + header_px, y + h))
+    band_w = max(w, window_w) if window_w else w
+    return (0, 0, band_w, min(y + header_px, y + h))
 
 
 def _row_groups(white: np.ndarray, min_row_px: int, gap: int):
@@ -104,9 +108,9 @@ def _row_groups(white: np.ndarray, min_row_px: int, gap: int):
 def title_lines(
     band: np.ndarray,
     white_thresh: int = 170,
-    min_row_px: int = 3,
-    gap_rows: int = 2,
-    min_line_h: int = 5,
+    min_row_px: int = 2,
+    gap_rows: int = 3,
+    min_line_h: int = 4,
     min_line_px: int = 15,
     col_gap: int = 4,
     icon_fill: float = 0.5,

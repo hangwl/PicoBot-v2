@@ -190,18 +190,26 @@ class MapStore:
     def match_name(self, ocr_text: Optional[str]) -> Optional[MapEntry]:
         """Match on the OCR'd map title (normalized), else None.
 
-        The stored ``map_name`` only needs to appear inside the OCR'd
-        text — the strip may also pick up neighbouring UI text. Longest
-        stored name wins, so overlapping names stay unambiguous.
+        Each entry is tried under both its ``map_name`` (the game's
+        title text) and its ``name`` (the user's alias). A stored name
+        only needs to appear inside the OCR'd text — the strip may also
+        pick up neighbouring UI text — and a long-enough OCR fragment
+        inside a stored name counts too, so a truncated read can still
+        resolve. Longest candidate wins, so overlapping names stay
+        unambiguous.
         """
         norm = normalize_name(ocr_text)
         if not norm:
             return None
         best, best_len = None, 0
         for entry in self.load_all():
-            en = normalize_name(entry.map_name)
-            if en and en in norm and len(en) > best_len:
-                best, best_len = entry, len(en)
+            for cand in (entry.map_name, entry.name):
+                en = normalize_name(cand)
+                if not en:
+                    continue
+                hit = en in norm or (len(norm) >= 6 and norm in en)
+                if hit and len(en) > best_len:
+                    best, best_len = entry, len(en)
         return best
 
     def save(self, entry: MapEntry) -> Path:

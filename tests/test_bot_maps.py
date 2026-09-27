@@ -150,6 +150,48 @@ class MapStoreTests(unittest.TestCase):
             self.assertIsNone(entry)
             self.assertEqual(dist, float("inf"))
 
+    def test_match_name_on_stored_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="lake1f", map_name="Lake of Oblivion"))
+            # OCR text includes the subtitle line — stored title
+            # substring-matches inside it.
+            hit = store.match_name(
+                "Lake of Oblivion Weathered Land of Happiness"
+            )
+            self.assertEqual(hit.name, "lake1f")
+
+    def test_match_name_falls_back_to_alias(self):
+        # File named like the title matches even without map_name set.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="lake_of_oblivion"))
+            self.assertEqual(
+                store.match_name("Lake of Oblivion").name,
+                "lake_of_oblivion",
+            )
+
+    def test_match_name_truncated_ocr(self):
+        # OCR clipped mid-name — a ≥6-char fragment inside a stored
+        # name still resolves.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="m", map_name="Lake of Oblivion"))
+            self.assertEqual(
+                store.match_name("Lake of Obliv").name, "m"
+            )
+            # ...but a tiny fragment must not.
+            self.assertIsNone(store.match_name("Lake"))
+
+    def test_match_name_longest_wins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="short", map_name="Limina"))
+            store.save(MapEntry(name="east", map_name="Limina : 1-5 East"))
+            self.assertEqual(
+                store.match_name("Limina : 1-5 East").name, "east"
+            )
+
     def test_map_name_preserved_as_label(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = MapStore(tmp)

@@ -241,7 +241,10 @@ class SmartBot(BotBase):
         region = self.minimap.region
         if region is None:
             return None
-        return name_strip_region(region, self.config.name_scan_px)
+        l, t, r, b = self.window.client_rect()
+        return name_strip_region(
+            region, self.config.name_scan_px, window_w=r - l
+        )
 
     def name_img(self):
         """BGR band spanning the title zone (window top → into the
@@ -278,7 +281,9 @@ class SmartBot(BotBase):
         OCR result is kept — the title literally names the map — but
         the conflict is logged so a misread can be spotted.
         """
-        name = self.map_name()
+        # force=True: resolution is change-gated and rare — a cached
+        # title from the previous map must never decide identity.
+        name = self.map_name(force=True)
         ocr_entry = self.maps.match_name(name) if name else None
         fp = self.minimap_fingerprint(img)
         fp_entry, _ = self.maps.match_scored(

@@ -43,13 +43,21 @@ class NameStripRegionTests(unittest.TestCase):
         # above the map frame AND inside the panel border.
         self.assertEqual(
             name_strip_region((100, 200, 300, 150)),
-            (100, 0, 300, 290),
+            (0, 0, 300, 290),
+        )
+
+    def test_full_window_width_when_known(self):
+        # Titles can overflow the map frame — the band must not clip
+        # them at region width.
+        self.assertEqual(
+            name_strip_region((100, 200, 300, 150), window_w=800),
+            (0, 0, 800, 290),
         )
 
     def test_capped_at_region_bottom(self):
         self.assertEqual(
             name_strip_region((100, 100, 300, 50)),
-            (100, 0, 300, 150),
+            (0, 0, 300, 150),
         )
 
 
