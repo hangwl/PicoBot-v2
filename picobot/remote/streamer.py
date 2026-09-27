@@ -91,6 +91,15 @@ def _line(img: np.ndarray, x0, y0, x1, y1, color) -> None:
                 img[y + 1, x] = color  # 2px thick so it reads on the stream
 
 
+NAV_COLORS = {                                  # BGR
+    "up_jump": (80, 220, 80),       # green
+    "down_jump": (0, 140, 255),     # orange
+    "drop": (0, 90, 200),           # dark orange
+    "jump": (255, 80, 255),         # magenta
+    "flash": (200, 60, 200),        # purple
+}
+
+
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
@@ -106,6 +115,11 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
         _zone(out, 0, int(floor), w, h, zone)                  # below floor
     for seg in meta.get("platforms") or []:
         _line(out, *seg, (255, 200, 40))                  # cyan platforms
+    for kind, *seg in meta.get("nav_edges") or []:
+        _line(out, *seg, NAV_COLORS.get(kind, (200, 200, 200)))
+    for kind, *seg in meta.get("nav_route") or []:
+        _line(out, *seg, (0, 255, 255))                   # yellow route
+        _line(out, seg[0] + 1, seg[1], seg[2] + 1, seg[3], (0, 255, 255))
     for x, y in meta.get("anchors") or []:
         _box(out, int(x), int(y), 3, (255, 128, 0))      # blue anchors
     pos = meta.get("player")

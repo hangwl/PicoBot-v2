@@ -30,7 +30,7 @@ __all__ = [
 # Pico's hid|... payload path.
 DASHBOARD_PREFIXES = (
     "bot|", "map|", "cal|", "dash|", "host|",
-    "events|", "config|", "layout|", "skills|", "movekeys|",
+    "events|", "config|", "layout|", "skills|", "movekeys|", "nav|",
 )
 
 

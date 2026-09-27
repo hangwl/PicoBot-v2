@@ -48,6 +48,9 @@ class BotConfig:
     nav_threshold_px: int = 5             # minimap px tolerance for "arrived"
     nav_stuck_limit: int = 40             # identical polls before rope-escape
     wander_edge_margin_px: int = 20       # turn around this close to map edge
+    nav_up_px: float = 20.0               # highest platform an up-jump reaches
+    nav_jump_px: float = 8.0              # widest gap a plain jump clears
+    nav_gap_px: float = 25.0              # widest gap a flash jump clears
 
     # -- Dwell weave -------------------------------------------------------------
     dwell_weave: bool = True              # move + weave attacks at anchors
@@ -117,7 +120,7 @@ class BotConfig:
                 setattr(cfg, name, bool(data[name]))
         floats = (
             "buff_interval_seconds", "stationary_seconds", "wander_seconds",
-            "up_jump_skill_cooldown",
+            "up_jump_skill_cooldown", "nav_up_px", "nav_jump_px", "nav_gap_px",
         )
         for name in floats:
             if name in data:

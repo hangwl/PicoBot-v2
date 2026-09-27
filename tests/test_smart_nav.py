@@ -14,6 +14,7 @@ from picobot.bot.maps import MapEntry, MapStore
 from picobot.bot.rotation import Rotation, Anchor, Step
 from picobot.bot.smart_bot import SmartBot
 from picobot.bot.identity import MapIdentity
+from picobot.bot.navgraph import GraphCache
 from picobot.vision.minimap import MinimapAnalyzer
 
 
@@ -40,6 +41,7 @@ class FakeHid:
 def _bot(positions, target=(50, 50), threshold=4, stuck_limit=40):
     """Bare SmartBot scripted to emit ``positions`` then sit on the last."""
     bot = SmartBot.__new__(SmartBot)
+    bot._nav_cache = GraphCache()
     bot.config = BotConfig()
     bot.config.nav_threshold_px = threshold
     bot.config.nav_stuck_limit = stuck_limit
@@ -187,6 +189,7 @@ class FloorZoneTests(unittest.TestCase):
         from picobot.bot.maps import MapEntry
 
         bot = SmartBot.__new__(SmartBot)
+        bot._nav_cache = GraphCache()
         bot.config = BotConfig()
         bot.config.jump_key = "space"
         bot.hid = FakeHid()
@@ -206,6 +209,7 @@ class FloorZoneTests(unittest.TestCase):
 
     def test_down_jump_normal_without_floor(self):
         bot = SmartBot.__new__(SmartBot)
+        bot._nav_cache = GraphCache()
         bot.config = BotConfig()
         bot.config.jump_key = "space"
         bot.hid = FakeHid()
@@ -224,6 +228,7 @@ class RopeLiftCooldownTests(unittest.TestCase):
 
     def _bot(self):
         bot = SmartBot.__new__(SmartBot)
+        bot._nav_cache = GraphCache()
         bot.config = BotConfig()
         bot.config.up_jump_skill_key = "alt"
         bot.config.up_jump_skill_cooldown = 3.0
@@ -271,6 +276,7 @@ class RopeLiftCooldownTests(unittest.TestCase):
 
 def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot = SmartBot.__new__(SmartBot)
+        bot._nav_cache = GraphCache()
         bot.config = BotConfig()
         bot.config.dwell_weave = True
         bot.config.flash_jump_enabled = True
@@ -472,6 +478,44 @@ class PatrolTests(unittest.TestCase):
         self.assertEqual(bot._route, [])
         self.assertTrue(bot.dwell_done())
 
+    def _two_ledges(self, bot):
+        # Same height, separated by a gap: 10–90 and 110–190 at y=50.
+        bot._map = MapEntry(name="m", platforms=[
+            [0.05, 50 / 150, 0.45, 50 / 150], [0.55, 50 / 150, 0.95, 50 / 150],
+        ])
+        return bot
+
+    def test_same_height_other_platform_hands_off_to_travel(self):
+        bot = self._two_ledges(self._bot((60, 50), self._rot()))
+        bot._route = [1, 0]                    # head a1 is across the gap
+        bot._patrol_tick()
+        self.assertEqual(bot._travel_target, 1)
+        self.assertEqual(bot.hid.presses, [])  # no blind weave into the gap
+
+    def test_run_travel_uses_navgraph(self):
+        bot = self._two_ledges(self._bot((60, 50), self._rot()))
+        bot.unsafe_reason = Mock(return_value=None)
+        bot._run_leg = Mock(return_value=True)
+        bot._travel_target, bot._anchor_idx = 1, 0
+        with patch("picobot.bot.smart_bot.Navigator") as nav:
+            nav.return_value.go.return_value = True
+            self.assertTrue(bot.run_travel())
+        goal = nav.return_value.go.call_args[0][0]
+        self.assertEqual(goal, (150, 50))
+        bot._run_leg.assert_not_called()
+        self.assertEqual(bot._anchor_idx, 1)
+
+    def test_recorded_leg_wins_over_navgraph(self):
+        rot = self._rot()
+        rot.legs[(0, 1)] = [Step("walk_to", x=0.75, y=0.33)]
+        bot = self._two_ledges(self._bot((60, 50), rot))
+        bot._run_leg = Mock(return_value=True)
+        bot._travel_target, bot._anchor_idx = 1, 0
+        with patch("picobot.bot.smart_bot.Navigator") as nav:
+            self.assertTrue(bot.run_travel())
+        nav.assert_not_called()
+        bot._run_leg.assert_called_once()
+
     def test_unreachable_checkpoint_is_skipped(self):
         bot = self._bot((60, 50), self._rot())
         bot._route = [1, 0]  # head = a1
@@ -596,6 +640,7 @@ class SyncMapTests(unittest.TestCase):
 
     def _bot(self, identity):
         bot = SmartBot.__new__(SmartBot)
+        bot._nav_cache = GraphCache()
         bot.config = BotConfig()
         bot.identity = identity
         bot.maps = identity.store
@@ -661,6 +706,7 @@ class MinimapFrameTests(unittest.TestCase):
 
     def _bot(self, region):
         bot = SmartBot.__new__(SmartBot)
+        bot._nav_cache = GraphCache()
         bot.config = BotConfig()
         bot.minimap = MinimapAnalyzer()
         bot.minimap._region = region

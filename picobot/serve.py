@@ -14,6 +14,7 @@ import json
 import logging
 import ssl
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -106,6 +107,12 @@ def _offset_meta(snap: dict, dx: int, dy: int) -> None:
         ]
     if snap.get("anchors"):
         snap["anchors"] = [(x + dx, y + dy) for x, y in snap["anchors"]]
+    for key in ("nav_edges", "nav_route"):
+        if snap.get(key):
+            snap[key] = [
+                (k, a + dx, b + dy, c + dx, d + dy)
+                for k, a, b, c, d in snap[key]
+            ]
     for key in ("player", "target", "rune"):
         pos = snap.get(key)
         if pos:
@@ -145,6 +152,11 @@ class BotHost:
             on_event=lambda k, m: self.bus.emit(k, m),
         )
         self._maps_sent_version = -1
+        self._nav_show = False
+        self._nav_preview = None      # (legs, expires_at)
+        from .bot.navgraph import GraphCache
+
+        self._nav_cache = GraphCache()
 
         self.bot = None
         self.bot_thread: Optional[threading.Thread] = None
@@ -393,7 +405,21 @@ class BotHost:
             res.score
             if entry is not None and res.title_map == entry.name else None
         )
+        nav_edges = nav_route = None
+        if self._nav_show:
+            graph = self._nav_graph(entry, region)
+            if graph is not None:
+                nav_edges = [
+                    (l.kind, l.x0, l.y0, l.x1, l.y1) for l in graph.transfer_legs()
+                ]
+            prev = self._nav_preview
+            if prev is not None and time.monotonic() < prev[1]:
+                nav_route = [(l.kind, l.x0, l.y0, l.x1, l.y1) for l in prev[0]]
+        if bot is not None and bot.viz.get("route"):
+            nav_route = list(bot.viz["route"])
         return {
+            "nav_edges": nav_edges,
+            "nav_route": nav_route,
             "map": entry.name if entry else None,
             "map_via": res.via,
             "map_conf": conf,
@@ -404,6 +430,60 @@ class BotHost:
             "anchors": anchors,
             "platforms": platforms,
         }
+
+    def _nav_graph(self, entry, region):
+        return self._nav_cache.get(entry, region, self.bot_config)
+
+    def _nav_command(self, msg: str) -> None:
+        """nav|show|on|off, nav|preview|x,y (minimap px) — route preview
+        from the player to a clicked point."""
+        parts = msg.split("|")
+        if len(parts) < 3:
+            return
+        if parts[1] == "show":
+            self._nav_show = parts[2] == "on"
+            if not self._nav_show:
+                self._nav_preview = None
+            return
+        if parts[1] != "preview":
+            return
+        try:
+            gx, gy = (float(v) for v in parts[2].split(","))
+        except ValueError:
+            return
+        self._nav_show = True
+        entry = self._resolved_entry()
+        pos = region = None
+        bot = self.bot
+        if bot is not None:
+            img = bot.viz.get("img")
+            region = bot.minimap.region
+            pos = bot.minimap.player_pos(img) if img is not None else None
+        feed = self._get_feed()
+        if pos is None and feed is not None:
+            img = feed.minimap_img()
+            region = region or feed.minimap.region
+            pos = feed.minimap.player_pos(img) if img is not None else None
+        graph = self._nav_graph(entry, region)
+        if graph is None:
+            self.bus.emit("error", "route preview needs a resolved map with drawn platforms")
+            return
+        if pos is None:
+            self.bus.emit("error", "route preview: no player position")
+            return
+        legs = graph.route(pos, (gx, gy))
+        if legs is None:
+            self.bus.emit(
+                "nav",
+                f"no route from {pos} to ({gx:.0f}, {gy:.0f}) — off the drawn "
+                "platforms, or beyond jump reach",
+            )
+            self._nav_preview = None
+            return
+        self._nav_preview = (legs, time.monotonic() + 20.0)
+        self.bus.emit(
+            "nav", "route: " + " → ".join(l.kind for l in legs)
+        )
 
     def _layout_target(self, name: str):
         """Which map file a layout write applies to, or (None, error).
@@ -804,6 +884,8 @@ class BotHost:
             self._layout_reset()
         elif msg.startswith("layout|region|"):
             self._layout_set_region(msg)
+        elif msg.startswith("nav|"):
+            self._nav_command(msg)
         elif msg == "skills|list":
             self._send_skills()
         elif msg.startswith("skills|set|"):

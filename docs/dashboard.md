@@ -26,6 +26,10 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
     `ox`/`oy` minimap offset that the client subtracts.
   - **Title** — the raw segmented band as OCR sees it (verification).
   - **Window** — the full client area (used for Draw minimap/title).
+  - **Route** — overlays the movement graph (green up-jump, orange
+    down-jump/drop, magenta/purple jump/flash); click the Panel view to
+    preview the route from the player (yellow). The bot's active route
+    is drawn in yellow whenever it travels.
   - fps selector persists `view_fps` (default 10, 1–30).
 - **Bot** — Start/Stop.
 - **Calibrate** — Record / Mark anchor (F9) / Save. See
@@ -54,6 +58,7 @@ client → host:  map|set|<name> | map|list | cal|start|mark|finish|<name>
                 dash|view|<minimap|window|title> | dash|fps|<n>
                 skills|set|{json} | hid|… | host|window|<title> | host|serial|…
                 dash|subscribe|frames            (opt in to view frames)
+                nav|show|on|off | nav|preview|x,y   (minimap px)
 host → client:  binary frame: b"PBF1" | u32 BE json len | {"event":"frame","ox":…,"oy":…,"map":…} | JPEG
                 dash|{"event":"evt","kind":…,"level":…,"msg":…}
                 dash|{"event":"maps"|"skills"|"history"|…}

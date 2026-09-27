@@ -27,6 +27,8 @@ from .config import BotConfig
 from .identity import MapIdentity
 from .inputs import HidController
 from .monitor import MapMonitor
+from .navgraph import GraphCache, NavGraph
+from .navigator import Navigator
 from .machine import Machine
 from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step, resolve_coord
@@ -81,6 +83,7 @@ class SmartBot(BotBase):
             config=config, on_event=lambda k, m: self.event(k, m),
         )
         self._identity_version = -1
+        self._nav_cache = GraphCache()
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0
         self._travel_target: Optional[int] = None
@@ -106,7 +109,7 @@ class SmartBot(BotBase):
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
-            "target": None, "map": None, "title": None,
+            "target": None, "map": None, "title": None, "route": None,
         }
 
     def _viz_state(self, name: str) -> None:
@@ -372,6 +375,12 @@ class SmartBot(BotBase):
         if self._map is None:
             return None
         return self.maps.get(self._map.name) or self._map
+
+    def _nav_graph(self) -> Optional[NavGraph]:
+        """Movement graph of the current map's drawn platforms, or None."""
+        return self._nav_cache.get(
+            self._current_map_entry(), self.minimap.region, self.config
+        )
 
     def _map_walls(self) -> Optional[dict]:
         entry = self._current_map_entry()
@@ -687,7 +696,18 @@ class SmartBot(BotBase):
         target = self._travel_target
         if target is None:
             return False
-        ok = self._run_leg(rot.leg_steps(self._anchor_idx, target))
+        anchor = rot.anchors[target]
+        goal = (self._rx(anchor.x), self._ry(anchor.y))
+        graph = self._nav_graph()
+        # Hand-authored legs win — they can express ropes the graph lacks.
+        recorded = rot.legs.get((self._anchor_idx, target))
+        if recorded is None and graph is not None and graph.locate(*goal) is not None:
+            try:
+                ok = Navigator(self, graph).go(goal) and self.unsafe_reason() is None
+            finally:
+                self.viz["route"] = None
+        else:
+            ok = self._run_leg(rot.leg_steps(self._anchor_idx, target))
         self._travel_target = None
         if ok:
             self._anchor_idx = target
@@ -955,7 +975,7 @@ class SmartBot(BotBase):
             idx = self._route[0]
             target = rot.anchors[idx]
             tx, ty = self._rx(target.x), self._ry(target.y)
-            if abs(ty - pos[1]) > level_band:
+            if abs(ty - pos[1]) > level_band or self._other_platform(pos, (tx, ty)):
                 # Different level — TRAVEL owns this transition.
                 self._route.pop(0)
                 self._ckpt_idx = None
@@ -1015,6 +1035,14 @@ class SmartBot(BotBase):
             direction = "left"
         self._weave_dir = direction
         self._weave_hop(direction)
+
+    def _other_platform(self, pos, goal) -> bool:
+        """Both points are on drawn platforms, but different ones."""
+        graph = self._nav_graph()
+        if graph is None:
+            return False
+        a, b = graph.locate(*pos), graph.locate(*goal)
+        return a is not None and b is not None and a != b
 
     def _travel_attack(self) -> None:
         """Weave one attack press into a travel leg, cooldown-spaced.

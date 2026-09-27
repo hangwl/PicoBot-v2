@@ -16,6 +16,9 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "wander_seconds": 15,
     "skill_gap_seconds": [0.5, 1.0],
     "nav_threshold_px": 5,
+    "nav_up_px": 20,
+    "nav_jump_px": 8,
+    "nav_gap_px": 25,
     "dwell_weave": true,
     "weave_range_px": 24,
     "wall_zone_px": 16,
@@ -70,6 +73,9 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 - Vertical jumps that produce no progress twice in a row end the leg
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.
+- `nav_up_px` / `nav_jump_px` / `nav_gap_px` (minimap px) bound the
+  pathfinding graph: highest up-jump, widest plain-jump gap, widest
+  flash-jump gap. See [bot-behavior.md](bot-behavior.md#pathfinding-navgraphpy-navigatorpy).
 - `pause_on_lie_detector` is a stub seam — keep it off.
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest

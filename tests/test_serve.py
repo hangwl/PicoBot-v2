@@ -562,6 +562,7 @@ class HostCommandTests(unittest.TestCase):
         self._region_feed()
         bot = Mock()
         bot._map = None
+        bot.viz = {}
         bot.minimap.region = (0, 0, 200, 150)
         self.host.bot = bot
         with tempfile.TemporaryDirectory() as tmp:
@@ -585,6 +586,49 @@ class HostCommandTests(unittest.TestCase):
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
         self.assertEqual(meta["walls"], {"right": 160})  # 0.8 * 200
+
+    def _nav_setup(self, tmp, player=(20, 100)):
+        feed = self._region_feed()
+        feed.minimap_img.return_value = np.zeros((150, 200, 3), np.uint8)
+        feed.minimap.player_pos.return_value = player
+        self._use_store(tmp, pin="m1").save(MapEntry(name="m1", platforms=[
+            [0.0, 100 / 150, 1.0, 100 / 150],          # floor y=100
+            [0.2, 84 / 150, 0.6, 84 / 150],            # ledge 16px up
+        ]))
+        self.host.identity.refresh()
+
+    def test_nav_preview_plans_route_into_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._nav_setup(tmp)
+            self.assertTrue(self.host._handle_command("nav|preview|80,84"))
+            meta = self.host._map_meta()
+        kinds = [leg[0] for leg in meta["nav_route"]]
+        self.assertIn("up_jump", kinds)
+        self.assertTrue(any(e[0] == "down_jump" for e in meta["nav_edges"]))
+        evts = [e["msg"] for e in self.host.bus.history() if e["kind"] == "nav"]
+        self.assertTrue(any("up_jump" in m for m in evts))
+
+    def test_nav_show_off_hides_overlay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._nav_setup(tmp)
+            self.host._handle_command("nav|preview|80,84")
+            self.host._handle_command("nav|show|off")
+            meta = self.host._map_meta()
+        self.assertIsNone(meta["nav_edges"])
+        self.assertIsNone(meta["nav_route"])
+
+    def test_nav_preview_errors_without_platforms(self):
+        self._region_feed()
+        self.host._handle_command("nav|preview|10,10")
+        errs = [e["msg"] for e in self.host.bus.history() if e["kind"] == "error"]
+        self.assertTrue(any("drawn platforms" in m for m in errs))
+
+    def test_offset_meta_shifts_nav_overlay(self):
+        from picobot.serve import _offset_meta
+
+        snap = {"nav_route": [("walk", 1, 2, 3, 4)], "nav_edges": None}
+        _offset_meta(snap, 10, 20)
+        self.assertEqual(snap["nav_route"], [("walk", 11, 22, 13, 24)])
 
     def test_layout_save_backfills_title(self):
         feed = self._region_feed()

@@ -14,13 +14,36 @@ checkpoint — it never stands still:
 - Arriving pops the checkpoint, fires its `on_arrive` skills
   (summons/buffs registered in the map's `skills`), and keeps moving.
 - Route exhausted → replan from wherever the player ended up.
-- Cross-level checkpoints hand off to TRAVEL; a missing direct leg is
-  composed by shortest path through the recorded-leg graph (BFS), else
-  direct `walk_to` fallback.
+- Checkpoints on another level — or on another drawn platform at the
+  same height — hand off to TRAVEL (see Pathfinding below).
 - **Stall guard**: a checkpoint unreachable for ~20s is skipped with a
   log line; failed legs and stalled heads are banned ~30–45s so one bad
   anchor can't hold the route.
 - Single-anchor maps still weave in place; `dwell_weave: false` parks.
+
+## Pathfinding (`navgraph.py`, `navigator.py`)
+
+TRAVEL legs are planned over a movement graph built from the map's
+**drawn platforms** (so drawing them is what enables pathfinding):
+
+- Nodes: platform ends plus transfer points (inset 4px from overlap
+  edges). Edges: `walk`; `down_jump` onto the next platform below;
+  `up_jump` onto the next platform above within `nav_up_px`; `drop` off
+  an end; `jump`/`flash` across gaps within `nav_jump_px`/`nav_gap_px`
+  (target no more than 4px higher). Costs are rough seconds.
+- Dijkstra with ±15% cost jitter per query, so near-equal routes vary.
+- `Navigator` walks to each transfer point (±3px), performs the move,
+  waits for the landing, and checks the player is on the expected
+  platform. A miss replans from the actual position (up to 3 times).
+  Rope-lift cooldowns are waited out rather than counted as failures.
+- Hand-authored `legs` for a pair still win (ropes aren't in the graph
+  yet); without drawn platforms the old leg/`walk_to` path runs.
+- The active route is drawn on the Panel view in yellow; the dashboard's
+  **Route** button shows the graph and previews routes on click.
+
+Tune `nav_up_px`/`nav_jump_px`/`nav_gap_px` (minimap px) if routes
+include moves your character can't make — the Route preview shows
+exactly which edges exist.
 
 ## Attack weaving
 

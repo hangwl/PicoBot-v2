@@ -164,6 +164,10 @@
         <button id="platClear" title="remove all platforms for this map">Clear</button>
         <label>platforms are hand-drawn — the bot's walkable geometry (uses Map selection)</label>
       </div>
+      <div class="row" style="margin-top:8px">
+        <button id="navRoute" title="show the movement graph (green up-jump, orange down-jump/drop, magenta/purple jump/flash); click the minimap to preview the route from the player (yellow)">Route</button>
+        <label>preview planned routes — click a destination on the Panel view</label>
+      </div>
     </div>
     <div class="panel">
       <h3>Bot</h3>
@@ -569,6 +573,7 @@ $("vWin").onclick = () => {
   // Platform drags are minimap-space — disarm so a window-view drag
   // can't record bogus coordinates.
   if (platMode) armPlats();
+  if (routeMode) armRoute();
   send("dash|view|window");
 };
 $("vTitle").onclick = () => {
@@ -601,9 +606,19 @@ $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 
 // --- Drag-to-draw platforms on the Minimap view ------------------------
 let platMode = false, platStart = null;
+let routeMode = false;
+function armRoute() {
+  routeMode = !routeMode;
+  if (routeMode && platMode) armPlats();
+  if (routeMode) send("dash|view|minimap");
+  send("nav|show|" + (routeMode ? "on" : "off"));
+  $("navRoute").className = routeMode ? "armed" : "";
+}
+$("navRoute").onclick = () => armRoute();
 function armPlats() {
   platMode = !platMode;
   platStart = null;
+  if (platMode && routeMode) armRoute();
   if (platMode) send("dash|view|minimap");
   $("drawPlats").className = platMode ? "armed" : "";
 }
@@ -664,6 +679,11 @@ viewEl.addEventListener("pointermove", e => {
   ctx.strokeRect(drawStart[0], drawStart[1], x - drawStart[0], y - drawStart[1]);
 });
 viewEl.addEventListener("pointerup", e => {
+  if (routeMode) {
+    const [x, y] = viewXY(e);
+    send(`nav|preview|${Math.round(x - viewOX)},${Math.round(y - viewOY)}`);
+    return;
+  }
   if (platMode) {
     if (platStart) {
       const [x, y] = viewXY(e);

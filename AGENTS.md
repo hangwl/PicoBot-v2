@@ -58,6 +58,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Area | Files |
 |---|---|
 | Bot loop / FSM | `picobot/bot/smart_bot.py`, `bot/states/` |
+| Pathfinding | `bot/navgraph.py` (graph + Dijkstra), `bot/navigator.py` (execution) |
 | Map-change monitor + identity | `bot/monitor.py`, `bot/identity.py`, `vision/transition.py` |
 | Map store + identity | `bot/maps.py`, `vision/minimap.py`, `vision/mapname.py` |
 | Recording | `bot/calibrate.py` |
