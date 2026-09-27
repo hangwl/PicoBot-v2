@@ -1,6 +1,7 @@
 """SmartBot navigation/layout tests — construct via __new__ so no
 GameWindow/ScreenGrabber (Windows-only) is needed."""
 
+import random
 import tempfile
 import threading
 import time
@@ -281,6 +282,7 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot.config.dwell_weave = True
         bot.config.flash_jump_enabled = True
         bot.config.jump_key = "space"
+        bot.config.weave_double_chance = 0.0
         bot.hid = FakeHid()
         bot.minimap = Mock()
         bot.minimap.region = (0, 0, 200, 150)
@@ -318,6 +320,69 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         rot = Rotation(anchors=[Anchor("a0", *anchor_xy)])
         bot.effective_rotation = Mock(return_value=rot)
         return bot
+
+
+class MovementRuleTests(unittest.TestCase):
+    """Point-to-point travel = flash weaves (jump → FJ → 1–2 attacks);
+    walking only for the final approach."""
+
+    def test_flash_weave_attacks_after_flash_triggers(self):
+        bot = _weave_bot((50, 50))
+        bot.config.weave_double_chance = 1.0
+        bot._flash_weave("right")
+        self.assertEqual(bot.hid.presses, ["space", "space", "a", "a"])
+        self.assertEqual(bot.hid.downs, ["right"])
+        self.assertEqual(bot.hid.ups, ["right"])
+
+    def test_flash_weave_one_or_two_attacks(self):
+        counts = set()
+        for seed in range(30):
+            bot = _weave_bot((50, 50))
+            bot.config.weave_double_chance = 0.4
+            with patch("random.random", side_effect=random.Random(seed).random):
+                bot._flash_weave("left")
+            counts.add(bot.hid.presses.count("a"))
+        self.assertEqual(counts, {1, 2})
+
+    def test_far_target_travels_by_flash_weave_then_walks(self):
+        bot = _bot([(10, 50), (30, 50), (50, 50), (70, 50), (76, 50), (80, 50)],
+                   target=(80, 50))
+        bot.config.flash_jump_enabled = True
+        bot._flash_weave = Mock()
+        self.assertTrue(bot.move_to_point(80, 50, style="mixed"))
+        self.assertGreaterEqual(bot._flash_weave.call_count, 3)
+        self.assertIn("right", bot.hid.downs)       # walked the last stretch
+        self.assertGreater(bot._hop_px, 14.0)       # learned 20px hops
+
+    def test_walk_style_never_flashes(self):
+        bot = _bot([(10, 50), (40, 50), (80, 50)], target=(80, 50))
+        bot.config.flash_jump_enabled = True
+        bot._flash_weave = Mock()
+        self.assertTrue(bot.move_to_point(80, 50, style="walk"))
+        bot._flash_weave.assert_not_called()
+
+    def test_blocked_flash_falls_back_to_walking(self):
+        bot = _bot([(10, 50)] * 8 + [(80, 50)], target=(80, 50))
+        bot.config.flash_jump_enabled = True
+        bot._flash_weave = Mock()
+        self.assertTrue(bot.move_to_point(80, 50, style="mixed"))
+        self.assertEqual(bot._flash_weave.call_count, 5)
+        self.assertTrue(any("walking instead" in c.args[0] for c in bot.log.call_args_list))
+
+
+class ArrivalSkillTests(unittest.TestCase):
+    def test_placed_anchor_falls_back_to_summons(self):
+        from picobot.bot.skills import Skill, SkillBook
+
+        bot = _weave_bot((50, 50))
+        bot.skills = SkillBook({
+            "main": Skill("main", "a"),
+            "fountain": Skill("fountain", "d", 57, "summon"),
+        })
+        bare = Anchor("a0", 0.2, 0.3)
+        self.assertEqual([s.name for s, _ in bot._arrival_skills(bare, 0.0)], ["fountain"])
+        listed = Anchor("a1", 0.2, 0.3, on_arrive=("main",))
+        self.assertEqual([s.name for s, _ in bot._arrival_skills(listed, 0.0)], ["main"])
 
 
 class WeaveTests(unittest.TestCase):

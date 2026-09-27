@@ -33,7 +33,7 @@ from .machine import Machine
 from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step, resolve_coord
 from .skills import Skill, SkillBook
-from .timing import human_delay, jittered
+from .timing import human_between
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ _UNSET = object()
 
 
 class SmartBot(BotBase):
+    _hop_px: float = 14.0   # learned minimap px one flash weave covers
     def __init__(
         self,
         controller: HidController,
@@ -351,17 +352,17 @@ class SmartBot(BotBase):
                 return False
             self._last_up_skill = now
             self.hid.press(self.config.up_jump_skill_key)
-            self.sleep(0.3)
+            self.sleep(human_between(0.3, 0.22, 0.45))
             return True
         jk = self.config.jump_key
         self.hid.press(jk)
-        self.sleep(0.1)
+        self.sleep(human_between(0.1, 0.07, 0.14))
         self.hid.key_down("up")
         self.hid.key_down(jk)
-        self.sleep(0.5)
+        self.sleep(human_between(0.5, 0.4, 0.62))
         self.hid.key_up(jk)
         self.hid.key_up("up")
-        self.sleep(0.3)
+        self.sleep(human_between(0.3, 0.22, 0.45))
         return True
 
     def _current_map_entry(self) -> Optional[MapEntry]:
@@ -403,20 +404,56 @@ class SmartBot(BotBase):
                 return  # bottom of the map — nothing to drop through
         self.hid.key_down("down")
         self.hid.press(self.config.jump_key)
-        self.sleep(0.1)
+        self.sleep(human_between(0.1, 0.07, 0.14))
         self.hid.key_up("down")
-        self.sleep(0.4)
+        self.sleep(human_between(0.4, 0.3, 0.55))
 
     def _flash_key(self) -> str:
         return self.config.flash_jump_key or self.config.jump_key
 
     def _flash_hop(self) -> None:
-        """One flash-jump pair with irregular, human-ish spacing."""
+        """One attack-free flash jump (gap crossings)."""
         jk = self._flash_key()
         self.hid.press(jk)
-        self.sleep(random.uniform(0.13, 0.26))
+        self.sleep(human_between(0.17, 0.11, 0.26))
         self.hid.press(jk)
-        self.sleep(random.uniform(0.32, 0.62))
+        self.sleep(human_between(0.42, 0.30, 0.65))
+
+    def _flash_weave(self, direction: str) -> None:
+        """The movement rule: hold ``direction`` through jump → flash-jump
+        re-press → 1–2 attacks once the flash has triggered (an earlier
+        attack eats the re-press window). Keys are released before return
+        so a hazard pause can't leave a direction held. Without flash
+        jump, attacks weave into a short walk instead."""
+        cfg = self.config
+        self.hid.key_down(direction)
+        try:
+            if cfg.flash_jump_enabled:
+                jk = self._flash_key()
+                self.hid.press(jk)
+                self.sleep(human_between(0.17, 0.11, 0.26))
+                self.hid.press(jk)
+                self.sleep(human_between(0.09, 0.05, 0.15))
+                n = self._weave_attacks()
+                self.sleep(human_between(0.34 if n < 2 else 0.22, 0.14, 0.55))
+            else:
+                self._weave_attacks()
+                self.sleep(human_between(0.4, 0.28, 0.6))
+        finally:
+            self.hid.key_up(direction)
+
+    def _weave_attacks(self) -> int:
+        """1 attack, or 2 with ``weave_double_chance``; returns how many."""
+        n = 2 if random.random() < self.config.weave_double_chance else 1
+        done = 0
+        for i in range(n):
+            skill = self._pick_attack()
+            if skill is None:
+                break
+            if i:
+                self.sleep(human_between(0.13, 0.08, 0.22))
+            done += bool(self._use_skill(skill))
+        return done
 
     def move_to_point(
         self,
@@ -428,11 +465,11 @@ class SmartBot(BotBase):
     ) -> bool:
         """Navigate on the minimap toward (x, y); True if reached.
 
-        Polls the player dot while holding the correct direction key.
-        ``style`` controls horizontal travel: ``walk`` holds the key,
-        ``flash`` chains flash-jump hops, ``mixed`` mostly flashes with
-        occasional plain-walk stretches. Aborts (False) on hazards,
-        focus loss, or stop.
+        ``walk`` holds the direction key. ``flash``/``mixed``: while the
+        target is farther than one flash hop, travel by flash weaves
+        (jump → flash → 1–2 attacks); inside that, walk for a precise
+        stop. Hop distance is learned from observed hops. Aborts (False)
+        on hazards, focus loss, or stop.
         """
         threshold = threshold or self.config.nav_threshold_px
         # Hysteresis band: release the direction inside `stop_band`, only
@@ -475,6 +512,7 @@ class SmartBot(BotBase):
 
         stuck = 0
         last = None
+        hop_from = None
         try:
             while self.should_continue() and self.is_window_focused():
                 img = self.minimap_frame()
@@ -490,6 +528,11 @@ class SmartBot(BotBase):
                     self.sleep(0.5)
                     continue
                 cx, cy = pos
+                if hop_from is not None:
+                    moved = abs(cx - hop_from)
+                    if moved > 2:
+                        self._hop_px = 0.7 * self._hop_px + 0.3 * moved
+                    hop_from = None
                 if not snapped:
                     # Project the target onto the map's drawn platform —
                     # a target recorded beneath the lowest platform is
@@ -509,7 +552,19 @@ class SmartBot(BotBase):
                     self.log("Navigation target reached")
                     self.viz["target"] = None
                     return True
-                self._travel_attack()
+                if flash_ok and abs(dx) > max(self._hop_px, start_band):
+                    sync_dir(None)
+                    hop_from = cx
+                    self._flash_weave("right" if dx > 0 else "left")
+                    stuck = stuck + 1 if last == pos else 0
+                    last = pos
+                    if stuck >= 4:
+                        self.log("Flash hops aren't moving — walking instead")
+                        flash_ok = False
+                        stuck = 0
+                    continue
+                if not flash_ok:
+                    self._travel_attack()
                 if held_dir == "right" and dx <= stop_band:
                     sync_dir(None)
                 elif held_dir == "left" and dx >= -stop_band:
@@ -556,10 +611,6 @@ class SmartBot(BotBase):
                         self.down_jump(img)
                     else:
                         self.sleep(0.05)
-                elif flash_ok and (
-                    style == "flash" or random.random() < 0.6
-                ):
-                    self._flash_hop()
                 else:
                     self.sleep(0.05)
                 stuck = stuck + 1 if last == pos else 0
@@ -573,7 +624,7 @@ class SmartBot(BotBase):
                     sync_dir(None)
                     back = "left" if dx > 0 else "right"
                     self.hid.key_down(back)
-                    self.sleep(0.4)
+                    self.sleep(human_between(0.4, 0.28, 0.6))
                     self.hid.key_up(back)
                     self.up_jump()
                     stuck = 0
@@ -764,17 +815,13 @@ class SmartBot(BotBase):
             anchor = rot.anchors[self._anchor_idx]
             if anchor.face:
                 self.hid.press(anchor.face)
-            self._arrive_pending = [
-                (s, now + s.wait_on_arrival)
-                for name in anchor.on_arrive
-                if (s := self.skills.get(name)) is not None
-            ]
+            self._arrive_pending = self._arrival_skills(anchor, now)
             dwell = anchor.dwell_seconds()
             self._dwell_end = (
                 float("inf") if len(rot.anchors) >= 2 else now + dwell
             )
             if random.random() < rot.rest_chance:
-                self._rest_until = now + min(dwell * 0.6, random.uniform(5, 25))
+                self._rest_until = now + min(dwell * 0.6, human_between(12, 5, 25, 0.4))
                 self.log("Taking a breather")
             else:
                 self._rest_until = 0.0
@@ -782,6 +829,19 @@ class SmartBot(BotBase):
             self._arrive_pending = []
             self._rest_until = 0.0
             self._dwell_end = now + self.config.stationary_seconds
+
+    def _arrival_skills(self, anchor, now: float) -> list:
+        """(skill, deadline) pairs to fire at ``anchor``: its ``on_arrive``
+        list, or — for anchors placed without one — every registered
+        summon (cast at the next checkpoint once off cooldown)."""
+        names = anchor.on_arrive or [
+            s.name for s in self.skills.skills.values() if s.kind == "summon"
+        ]
+        return [
+            (s, now + s.wait_on_arrival)
+            for name in names
+            if (s := self.skills.get(name)) is not None
+        ]
 
     def dwell_done(self) -> bool:
         return time.time() >= self._dwell_end
@@ -802,7 +862,7 @@ class SmartBot(BotBase):
             if not self.should_continue():
                 break
             if self._use_skill(buff):
-                self.sleep(jittered(0.6))
+                self.sleep(human_between(0.6, 0.4, 0.9))
         if len(self.effective_rotation().anchors) >= 2:
             self._patrol_tick()
         elif self.config.dwell_weave:
@@ -871,31 +931,7 @@ class SmartBot(BotBase):
         self._weave_hop(direction)
 
     def _weave_hop(self, direction: str) -> None:
-        """Hold ``direction`` through one jump→FJ→attack weave.
-
-        Bounded inside the call (keys released before return) so a hazard
-        pause can't leave a direction held.
-        """
-        cfg = self.config
-        skill = self._pick_attack()
-        self.hid.key_down(direction)
-        try:
-            if cfg.flash_jump_enabled:
-                self.hid.press(cfg.jump_key)
-                self.sleep(random.uniform(0.12, 0.22))
-                self.hid.press(cfg.jump_key)  # mid-air re-press = FJ
-                self.sleep(random.uniform(0.06, 0.12))
-                # Attack AFTER the FJ triggers — an early press eats the
-                # second jump's input window and the flash never fires.
-                if skill is not None:
-                    self._use_skill(skill)
-                self.sleep(random.uniform(0.28, 0.45))
-            else:
-                if skill is not None:
-                    self._use_skill(skill)
-                self.sleep(random.uniform(0.3, 0.5))
-        finally:
-            self.hid.key_up(direction)
+        self._flash_weave(direction)
 
     def _plan_route(self, pos) -> None:
         """Order the anchors into a checkpoint route from ``pos``.
@@ -987,11 +1023,7 @@ class SmartBot(BotBase):
             self._route.pop(0)
             self._anchor_idx = idx
             self._ckpt_idx = None
-            self._arrive_pending = [
-                (s, now + s.wait_on_arrival)
-                for name in target.on_arrive
-                if (s := self.skills.get(name)) is not None
-            ]
+            self._arrive_pending = self._arrival_skills(target, now)
             if target.face:
                 self.hid.press(target.face)
             self.log(f"Checkpoint: {target.name}")
@@ -1058,7 +1090,7 @@ class SmartBot(BotBase):
             return
         skill = self._pick_attack()
         if skill is not None and self._use_skill(skill):
-            self._travel_attack_at = now + random.uniform(0.35, 0.55)
+            self._travel_attack_at = now + human_between(0.43, 0.33, 0.6)
 
     def _attack_once(self) -> None:
         """Stationary single attack tick (legacy dwell path)."""
@@ -1068,7 +1100,7 @@ class SmartBot(BotBase):
             return
         if self._use_skill(skill):
             lo, hi = self.config.skill_gap_seconds
-            self.sleep(human_delay(random.uniform(lo, hi)))
+            self.sleep(human_between((lo + hi) / 2, lo * 0.8, hi * 1.5, 0.35))
 
     # -- Attacks & skills -----------------------------------------------------------
     def _use_skill(self, skill: Skill) -> bool:
@@ -1093,7 +1125,7 @@ class SmartBot(BotBase):
             if not self.should_continue():
                 break
             if self._use_skill(buff):
-                self.sleep(jittered(0.6))
+                self.sleep(human_between(0.6, 0.4, 0.9))
         self._attack_once()
 
     def grind_once(self) -> None:

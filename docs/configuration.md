@@ -20,6 +20,7 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "nav_jump_px": 8,
     "nav_gap_px": 25,
     "dwell_weave": true,
+    "weave_double_chance": 0.4,
     "weave_range_px": 24,
     "wall_zone_px": 16,
     "stationary_mode": true,

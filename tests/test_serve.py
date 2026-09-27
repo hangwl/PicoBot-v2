@@ -630,6 +630,29 @@ class HostCommandTests(unittest.TestCase):
         _offset_meta(snap, 10, 20)
         self.assertEqual(snap["nav_route"], [("walk", 11, 22, 13, 24)])
 
+    def test_anchor_place_snaps_and_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._nav_setup(tmp)
+            self.host._handle_command("layout|anchor|20,95|m1")    # near floor
+            self.host._handle_command("layout|anchor|80,80|m1")    # near ledge
+            self.host._handle_command("layout|anchor|190,20|m1")   # mid-air
+            rot = MapStore(tmp).get("m1").rotation
+            self.assertEqual([a.name for a in rot.anchors], ["a0", "a1", "a2"])
+            self.assertEqual(rot.anchors[0].y, round(100 / 150, 4))  # snapped
+            self.assertEqual(rot.anchors[1].y, round(84 / 150, 4))
+            self.assertEqual(rot.anchors[2].y, round(20 / 150, 4))   # left as-is
+            self.host._handle_command("layout|anchor|del|78,84|m1")
+            names = [a.name for a in MapStore(tmp).get("m1").rotation.anchors]
+            self.assertEqual(names, ["a0", "a2"])
+            self.host._handle_command("layout|anchor|20,95|m1")
+            self.assertEqual(MapStore(tmp).get("m1").rotation.anchors[-1].name, "a1")
+            self.host._handle_command("layout|anchor|undo|m1")
+            self.assertEqual(len(MapStore(tmp).get("m1").rotation.anchors), 2)
+            self.host._handle_command("layout|anchor|clear|m1")
+            self.assertEqual(MapStore(tmp).get("m1").rotation.anchors, [])
+        msgs = [e["msg"] for e in self.host.bus.history() if e["kind"] == "map"]
+        self.assertTrue(any("no drawn platform under it" in m for m in msgs))
+
     def test_layout_save_backfills_title(self):
         feed = self._region_feed()
         feed.minimap.region = (8, 40, 200, 150)

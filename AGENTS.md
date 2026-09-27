@@ -43,6 +43,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
   actually found elsewhere.
 - **Pin semantics**: `active_map` stands unless a confident title match
   names a different stored map. Blank-name layout writes need `via: ocr`.
+- **Movement rule (human-like)**: bot-controlled travel between points
+  is flash hops — jump, then the mid-air re-press — with **1–2 attacks
+  woven after the flash triggers** (never before: it eats the re-press
+  window). Walk only for short final approaches. Delays are log-normal
+  (`timing.human_between`/`human_delay`), never flat `uniform`.
 - **Calibration save preserves** walls/platforms/`map_name`/skills —
   `merge_recording` exists because a fresh `MapEntry` wiped layouts.
 - Region/coords: client-area px for rects; 0–1 normalized in map files.

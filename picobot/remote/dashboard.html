@@ -165,6 +165,12 @@
         <label>platforms are hand-drawn — the bot's walkable geometry (uses Map selection)</label>
       </div>
       <div class="row" style="margin-top:8px">
+        <button id="placeAnchors" title="arm, then click the Panel view to place a patrol anchor (snaps onto the drawn platform); shift-click removes the nearest — click again to stop">Place anchors</button>
+        <button id="anchorUndo" title="remove the last placed anchor">Undo</button>
+        <button id="anchorClear" title="remove all anchors for this map">Clear</button>
+        <label>anchors = patrol checkpoints (uses Map selection)</label>
+      </div>
+      <div class="row" style="margin-top:8px">
         <button id="navRoute" title="show the movement graph (green up-jump, orange down-jump/drop, magenta/purple jump/flash); click the minimap to preview the route from the player (yellow)">Route</button>
         <label>preview planned routes — click a destination on the Panel view</label>
       </div>
@@ -574,6 +580,7 @@ $("vWin").onclick = () => {
   // can't record bogus coordinates.
   if (platMode) armPlats();
   if (routeMode) armRoute();
+  if (anchorMode) armAnchors();
   send("dash|view|window");
 };
 $("vTitle").onclick = () => {
@@ -606,10 +613,21 @@ $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 
 // --- Drag-to-draw platforms on the Minimap view ------------------------
 let platMode = false, platStart = null;
-let routeMode = false;
+let routeMode = false, anchorMode = false;
+function armAnchors() {
+  anchorMode = !anchorMode;
+  if (anchorMode && platMode) armPlats();
+  if (anchorMode && routeMode) armRoute();
+  if (anchorMode) send("dash|view|minimap");
+  $("placeAnchors").className = anchorMode ? "armed" : "";
+}
+$("placeAnchors").onclick = () => armAnchors();
+$("anchorUndo").onclick = () => send("layout|anchor|undo" + layTarget());
+$("anchorClear").onclick = () => send("layout|anchor|clear" + layTarget());
 function armRoute() {
   routeMode = !routeMode;
   if (routeMode && platMode) armPlats();
+  if (routeMode && anchorMode) armAnchors();
   if (routeMode) send("dash|view|minimap");
   send("nav|show|" + (routeMode ? "on" : "off"));
   $("navRoute").className = routeMode ? "armed" : "";
@@ -619,6 +637,7 @@ function armPlats() {
   platMode = !platMode;
   platStart = null;
   if (platMode && routeMode) armRoute();
+  if (platMode && anchorMode) armAnchors();
   if (platMode) send("dash|view|minimap");
   $("drawPlats").className = platMode ? "armed" : "";
 }
@@ -679,6 +698,12 @@ viewEl.addEventListener("pointermove", e => {
   ctx.strokeRect(drawStart[0], drawStart[1], x - drawStart[0], y - drawStart[1]);
 });
 viewEl.addEventListener("pointerup", e => {
+  if (anchorMode) {
+    const [x, y] = viewXY(e);
+    const xy = `${Math.round(x - viewOX)},${Math.round(y - viewOY)}`;
+    send((e.shiftKey ? `layout|anchor|del|${xy}` : `layout|anchor|${xy}`) + layTarget());
+    return;
+  }
   if (routeMode) {
     const [x, y] = viewXY(e);
     send(`nav|preview|${Math.round(x - viewOX)},${Math.round(y - viewOY)}`);

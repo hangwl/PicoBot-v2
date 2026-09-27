@@ -672,6 +672,80 @@ class BotHost:
             "map", f"{side} wall set at {axis}={v} for {entry.name}"
         )
 
+    def _minimap_frame_img(self):
+        """Latest minimap image: the running bot's, else a feed capture."""
+        img = self.bot.viz.get("img") if self.bot is not None else None
+        feed = self._get_feed()
+        if img is None and feed is not None:
+            img = feed.minimap_img()
+        return img
+
+    def _layout_anchor(self, msg: str) -> None:
+        """layout|anchor|x,y | del|x,y | undo | clear [|<name>] — anchors
+        placed by clicking the minimap (px here, stored normalized). A
+        click snaps onto the drawn platform under it."""
+        from .bot.rotation import Anchor
+        from .vision.minimap import platform_row_at
+
+        parts = msg.split("|")
+        if len(parts) < 3:
+            return
+        op = parts[2]
+        if op == "del":
+            coords, rest = (parts[3] if len(parts) > 3 else ""), parts[4:]
+        else:
+            coords, rest = op, parts[3:]
+        name = rest[0].strip() if rest else ""
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        rot = entry.rotation
+        if op in ("undo", "clear"):
+            if not rot.anchors:
+                self.bus.emit("map", f"{entry.name}: no anchors")
+                return
+            for i in (range(len(rot.anchors) - 1, -1, -1) if op == "clear"
+                      else [len(rot.anchors) - 1]):
+                rot.remove_anchor(i)
+            self._save_entry(entry)
+            self.bus.emit("map", f"{entry.name}: {len(rot.anchors)} anchor(s) left")
+            return
+        try:
+            x, y = (float(v) for v in coords.split(","))
+        except ValueError:
+            return
+        img = self._minimap_frame_img()
+        if img is None:
+            self.bus.emit("error", "no minimap frame — can't place anchors")
+            return
+        h, w = img.shape[:2]
+        if not (0 <= x <= w and 0 <= y <= h):
+            self.bus.emit("error", "anchor click is off the minimap")
+            return
+        if op == "del":
+            if not rot.anchors:
+                return
+            i = min(range(len(rot.anchors)), key=lambda k: (
+                (rot.anchors[k].x * w - x) ** 2 + (rot.anchors[k].y * h - y) ** 2
+            ))
+            removed = rot.anchors[i].name
+            rot.remove_anchor(i)
+            self._save_entry(entry)
+            self.bus.emit("map", f"{entry.name}: removed anchor {removed}")
+            return
+        snapped = platform_row_at(self._platforms_px(entry), x, y, max_snap=12)
+        if snapped is not None:
+            y = snapped
+        taken = {a.name for a in rot.anchors}
+        n = 0
+        while f"a{n}" in taken:
+            n += 1
+        rot.anchors.append(Anchor(f"a{n}", round(x / w, 4), round(y / h, 4)))
+        self._save_entry(entry)
+        note = "" if snapped is not None else " (no drawn platform under it)"
+        self.bus.emit("map", f"{entry.name}: anchor a{n} placed{note}")
+
     def _layout_platform(self, msg: str) -> None:
         """layout|plat|x0,y0,x1,y1|undo|clear[|<name>] — drawn platforms.
 
@@ -878,6 +952,8 @@ class BotHost:
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg.startswith("layout|wall|"):
             self._layout_set_wall(msg)
+        elif msg.startswith("layout|anchor|"):
+            self._layout_anchor(msg)
         elif msg.startswith("layout|plat|"):
             self._layout_platform(msg)
         elif msg == "layout|reset":

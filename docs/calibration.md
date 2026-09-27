@@ -1,6 +1,20 @@
 # Calibration & map layout
 
-## Recording anchors
+## Placing anchors (preferred)
+
+Draw the platforms first, then on the Panel view press **Place anchors**
+and click each patrol checkpoint. Clicks snap onto the drawn platform
+under them (within 12px; a click with nothing under it stays put and the
+log says so). Shift-click removes the nearest anchor; **Undo**/**Clear**
+act on the Map selection. Anchors are named `a0`, `a1`, … (lowest free
+number) and stored normalized in the map's `rotation.anchors`; removing
+one drops and reindexes any hand-authored `legs`.
+
+Placed anchors have no `on_arrive` list — at arrival the bot fires any
+registered **summon** skill that is off cooldown instead. Order doesn't
+matter: the patrol plans its own route.
+
+## Recording anchors (optional)
 
 Dashboard **Calibrate** panel (or headless
 `python -m picobot.bot.calibrate --window "Eluna (x64)" --name my_map`,

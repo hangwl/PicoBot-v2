@@ -22,6 +22,13 @@ def human_delay(mean: float, sigma: float = 0.35, minimum: float = 0.02) -> floa
     return max(minimum, value)
 
 
+def human_between(mean: float, lo: float, hi: float, sigma: float = 0.3) -> float:
+    """Lognormal delay around ``mean``, clamped to ``[lo, hi]`` — for gaps
+    that must stay inside a game input window (e.g. the flash-jump
+    re-press) while still varying like a person's timing."""
+    return min(hi, max(lo, random.lognormvariate(0.0, sigma) * mean))
+
+
 def human_hold() -> float:
     """Duration to keep a tapped key held, in seconds.
 
@@ -36,4 +43,4 @@ def jittered(base: float, spread: float = 0.15) -> float:
     return base * (1.0 + random.uniform(-spread, spread))
 
 
-__all__ = ["human_delay", "human_hold", "jittered"]
+__all__ = ["human_between", "human_delay", "human_hold", "jittered"]

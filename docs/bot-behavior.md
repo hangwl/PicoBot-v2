@@ -11,8 +11,9 @@ checkpoint — it never stands still:
 - Every patrol tick attacks: arrival bookkeeping, blind frames, and
   stall-skips all fire an attack before returning — there are no dead
   ticks.
-- Arriving pops the checkpoint, fires its `on_arrive` skills
-  (summons/buffs registered in the map's `skills`), and keeps moving.
+- Arriving pops the checkpoint, fires its `on_arrive` skills (or, for
+  anchors placed without a list, any registered summon that is off
+  cooldown), and keeps moving.
 - Route exhausted → replan from wherever the player ended up.
 - Checkpoints on another level — or on another drawn platform at the
   same height — hand off to TRAVEL (see Pathfinding below).
@@ -45,18 +46,24 @@ Tune `nav_up_px`/`nav_jump_px`/`nav_gap_px` (minimap px) if routes
 include moves your character can't make — the Route preview shows
 exactly which edges exist.
 
-## Attack weaving
+## Movement rule & attack weaving
 
-Attacks fire during movement: `move_to_point` (walk legs, rope-alignment
-walks, wander returns) fires a ready registered attack every ~0.4s of
-nav polling — gated so a 0-cooldown key isn't a 20Hz spam loop. The rope
-`climb` loop itself stays attack-free (attacking on a rope drops you).
+Bot-controlled movement looks like a player farming, not a macro:
 
-During dwells the bot flash-hops (or walks) back and forth across the
-anchor's platform — bounds from the drawn platform segment, falling back
-to `weave_range_px` — pressing attack **after** the flash-jump re-press
-(an earlier press eats the FJ input window). `wall_zone_px`/per-map
-walls force inward facing near edges so weave can't wall-bang.
+- **Point to point = flash weaves** (`_flash_weave`): hold the direction,
+  jump, re-press mid-air (the flash jump), then **1–2 attacks** once the
+  flash has triggered (`weave_double_chance`, default 0.4 for two). An
+  attack before the re-press eats its input window and the flash never
+  fires.
+- `move_to_point` flash-weaves while the target is farther than one hop
+  and walks only the final approach. Hop distance is learned from
+  observed hops (starts at 14 minimap px). Hops that don't move fall back
+  to walking; with `flash_jump_enabled: false` attacks weave into walks.
+- Dwell/patrol weaving uses the same primitive, bouncing across the
+  anchor's drawn platform; walls force inward facing.
+- Gap-crossing flashes in pathfinding stay attack-free.
+- All gaps are log-normal (`timing.human_between`: clamped to the game's
+  input windows, e.g. re-press 0.11–0.26s around 0.17s).
 
 ## Skills (`skills.py`, dashboard Skills panel)
 

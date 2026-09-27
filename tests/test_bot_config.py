@@ -91,6 +91,15 @@ class TimingTests(unittest.TestCase):
             self.assertGreaterEqual(value, 0.04)
             self.assertLessEqual(value, 0.25)
 
+    def test_human_between_is_clamped_lognormal(self):
+        from picobot.bot.timing import human_between
+
+        samples = [human_between(0.17, 0.11, 0.26) for _ in range(500)]
+        self.assertTrue(all(0.11 <= v <= 0.26 for v in samples))
+        self.assertGreater(len({round(v, 3) for v in samples}), 50)
+        above = sum(v > 0.17 for v in samples)
+        self.assertTrue(150 < above < 350)       # centred near the mean
+
     def test_jittered_stays_in_band(self):
         for _ in range(100):
             self.assertGreaterEqual(jittered(1.0), 0.85)

@@ -54,6 +54,7 @@ class BotConfig:
 
     # -- Dwell weave -------------------------------------------------------------
     dwell_weave: bool = True              # move + weave attacks at anchors
+    weave_double_chance: float = 0.4      # P(2 attacks) per flash weave, else 1
     weave_range_px: int = 24              # fallback half-width around the anchor
     weave_edge_margin_px: int = 4         # stay this far inside platform bounds
     wall_zone_px: int = 16                # force inward dir inside this edge zone
@@ -121,6 +122,7 @@ class BotConfig:
         floats = (
             "buff_interval_seconds", "stationary_seconds", "wander_seconds",
             "up_jump_skill_cooldown", "nav_up_px", "nav_jump_px", "nav_gap_px",
+            "weave_double_chance",
         )
         for name in floats:
             if name in data:

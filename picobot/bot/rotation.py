@@ -143,7 +143,9 @@ class Anchor:
 
     def dwell_seconds(self) -> float:
         lo, hi = self.dwell
-        return random.uniform(lo, hi) if hi > lo else lo
+        if hi <= lo:
+            return lo
+        return min(hi, max(lo, random.lognormvariate(0.0, 0.25) * (lo + hi) / 2))
 
     def to_dict(self) -> dict:
         out = {"name": self.name, "pos": [self.x, self.y],
@@ -225,6 +227,20 @@ class Rotation:
                     return [self.legs[p] for p in pairs]
                 queue.append(b)
         return None
+
+    # -- Editing --------------------------------------------------------------
+    def remove_anchor(self, index: int) -> None:
+        """Drop an anchor and its legs; later legs shift down one index."""
+        del self.anchors[index]
+
+        def shift(i: int) -> int:
+            return i - 1 if i > index else i
+
+        self.legs = {
+            (shift(f), shift(t)): steps
+            for (f, t), steps in self.legs.items()
+            if index not in (f, t)
+        }
 
     # -- (De)serialisation ----------------------------------------------------
     @classmethod

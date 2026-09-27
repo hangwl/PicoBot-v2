@@ -26,6 +26,8 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
     `ox`/`oy` minimap offset that the client subtracts.
   - **Title** — the raw segmented band as OCR sees it (verification).
   - **Window** — the full client area (used for Draw minimap/title).
+  - **Place anchors** — click to add a patrol checkpoint (snaps to the
+    drawn platform), shift-click to remove the nearest; Undo / Clear.
   - **Route** — overlays the movement graph (green up-jump, orange
     down-jump/drop, magenta/purple jump/flash); click the Panel view to
     preview the route from the player (yellow). The bot's active route
@@ -59,6 +61,7 @@ client → host:  map|set|<name> | map|list | cal|start|mark|finish|<name>
                 skills|set|{json} | hid|… | host|window|<title> | host|serial|…
                 dash|subscribe|frames            (opt in to view frames)
                 nav|show|on|off | nav|preview|x,y   (minimap px)
+                layout|anchor|x,y | layout|anchor|del|x,y | layout|anchor|undo|clear  [|<name>]
 host → client:  binary frame: b"PBF1" | u32 BE json len | {"event":"frame","ox":…,"oy":…,"map":…} | JPEG
                 dash|{"event":"evt","kind":…,"level":…,"msg":…}
                 dash|{"event":"maps"|"skills"|"history"|…}

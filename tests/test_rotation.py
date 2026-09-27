@@ -151,5 +151,21 @@ class RotationTests(unittest.TestCase):
         self.assertEqual(Rotation.from_dict({}).anchors, [])
 
 
+class RemoveAnchorTests(unittest.TestCase):
+    def test_legs_reindexed_and_dangling_dropped(self):
+        from picobot.bot.rotation import Anchor, Rotation, Step
+
+        rot = Rotation(
+            anchors=[Anchor(f"a{i}", 0.1 * i, 0.5) for i in range(4)],
+            legs={(0, 1): [Step("wait", seconds=1)],
+                  (1, 2): [Step("wait", seconds=2)],
+                  (2, 3): [Step("wait", seconds=3)]},
+        )
+        rot.remove_anchor(1)
+        self.assertEqual([a.name for a in rot.anchors], ["a0", "a2", "a3"])
+        self.assertEqual(list(rot.legs), [(1, 2)])
+        self.assertEqual(rot.legs[(1, 2)][0].seconds, 3)
+
+
 if __name__ == "__main__":
     unittest.main()
