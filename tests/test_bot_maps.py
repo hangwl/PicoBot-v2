@@ -132,6 +132,24 @@ class MapStoreTests(unittest.TestCase):
             self.assertIs(store2.match(fp), store2.get("farm_1"))
             self.assertIsNone(store2.match(fingerprint(_img(9)), threshold=5))
 
+    def test_match_scored_returns_distance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            fp = fingerprint(_img(7))
+            store.save(MapEntry(name="farm_1", fingerprint=fp))
+            entry, dist = store.match_scored(fp)
+            self.assertEqual(entry.name, "farm_1")
+            self.assertEqual(dist, 0.0)
+            # No match -> (None, dist-over-threshold).
+            entry, dist = store.match_scored(
+                fingerprint(_img(9)), threshold=5
+            )
+            self.assertIsNone(entry)
+            self.assertGreater(dist, 5)
+            entry, dist = store.match_scored(None)
+            self.assertIsNone(entry)
+            self.assertEqual(dist, float("inf"))
+
     def test_map_name_preserved_as_label(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = MapStore(tmp)

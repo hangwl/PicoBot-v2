@@ -111,6 +111,9 @@ class BotHost:
         self.calibrator: Optional[CalibrationRunner] = None
         self._map_res_ts = 0.0
         self._map_res = None
+        # Latest live-fingerprint evidence: (entry|None, distance) + raw fp.
+        self._live_match = (None, float("inf"))
+        self._live_fp: Optional[str] = None
 
 
         callbacks = RemoteCallbacks(
@@ -288,9 +291,9 @@ class BotHost:
         Evidence order: the running bot's resolution, then a live
         fingerprint match (what's actually on screen), and only then the
         ``active_map`` pin — a stale pin must not shadow the real map.
+        Also refreshes ``_live_match``/``_live_fp`` — the fingerprint
+        evidence for the screen right now (confidence reporting).
         """
-        if self.bot is not None and self.bot._map is not None:
-            return self.bot._map
         img = colors = None
         if self.bot is not None:
             img = self.bot.minimap_frame()
@@ -299,6 +302,7 @@ class BotHost:
         if img is None and feed is not None:
             img = feed.minimap_img()
             colors = feed.minimap.colors
+        live, dist, fp = None, float("inf"), None
         if img is not None and colors is not None:
             from .vision.minimap import fingerprint, structure_mask
 
@@ -310,13 +314,17 @@ class BotHost:
                     ),
                     include_mask=structure_mask(img, colors),
                 )
-                entry = self.maps.match(
+                live, dist = self.maps.match_scored(
                     fp, self.bot_config.map_match_threshold
                 )
             except Exception:
-                entry = None
-            if entry is not None:
-                return entry
+                live, dist, fp = None, float("inf"), None
+        self._live_match = (live, dist)
+        self._live_fp = fp
+        if self.bot is not None and self.bot._map is not None:
+            return self.bot._map
+        if live is not None:
+            return live
         if self._active_map_override:
             return self.maps.get(self._active_map_override)
         return None
@@ -390,8 +398,23 @@ class BotHost:
                 floor = px(fy, h)
         if entry is not None and entry.rotation.anchors and w and h:
             anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
+        # Confidence that the resolved map is what's on screen — the
+        # fingerprint score of the latest live evidence (None when the
+        # entry can't be verified: no fingerprint stored or no frame).
+        conf = None
+        fp = self._live_fp
+        if entry is not None and entry.fingerprint and fp:
+            from .vision.minimap import fingerprint_score
+
+            conf = round(
+                fingerprint_score(
+                    fp, entry.fingerprint, self.bot_config.map_match_threshold
+                ),
+                2,
+            )
         return {
             "map": entry.name if entry else None,
+            "map_conf": conf,
             "no_rotation": not bool(rot.anchors),
             "walls": walls,
             "floor": floor,
@@ -805,10 +828,20 @@ class BotHost:
         return True
 
     def _send_maps(self) -> None:
+        # Refresh the live-fingerprint evidence so the dashboard shows
+        # what's actually on screen, not just the resolution.
+        self._resolved_map_cached()
+        live, dist = self._live_match
+        thresh = self.bot_config.map_match_threshold
         payload = {
             "event": "maps",
             "maps": self.maps.names(),
             "active": self._active_map_override,
+            "detected": live.name if live else None,
+            "score": (
+                round(max(0.0, 1.0 - dist / thresh), 2)
+                if live is not None and thresh > 0 else None
+            ),
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
 

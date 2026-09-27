@@ -9,6 +9,8 @@ from picobot.vision.minimap import (
     color_mask,
     erode3,
     fingerprint,
+    fingerprint_distance,
+    fingerprint_score,
     largest_blob_centroid,
     platform_covered,
     platform_mask,
@@ -155,13 +157,39 @@ class MapChangeWatchdogTests(unittest.TestCase):
         self.assertFalse(a.note_frame(_hlines()))
 
     def test_persistent_change_trips_after_n_frames(self):
-        a = MinimapAnalyzer(region=(0, 0, 200, 150))
-        a._region_explicit = False  # simulate auto-located region
+        a = MinimapAnalyzer()
+        a._region = (0, 0, 200, 150)
+        a._region_source = "auto"   # simulate auto-located region
         a.note_frame(_hlines())     # baseline
         self.assertFalse(a.note_frame(_vlines()))   # miss 1
         self.assertFalse(a.note_frame(_vlines()))   # miss 2
         self.assertTrue(a.note_frame(_vlines()))    # miss 3 → change
         self.assertIsNone(a.region)                 # auto region dropped
+
+    def test_inconsistent_misses_never_confirm(self):
+        # Flicker frames that don't match each other can't accumulate —
+        # translucency noise and loading blanks die here.
+        a = MinimapAnalyzer()
+        a._region = (0, 0, 200, 150)
+        a._region_source = "auto"
+        a.note_frame(_hlines())
+        alt = _vlines()
+        alt2 = np.zeros_like(alt); alt2[:, 3::15] = _BORDER
+        for i in range(6):
+            # alternating new scenes — each disagrees with the last miss
+            self.assertFalse(a.note_frame(alt if i % 2 else alt2))
+        self.assertEqual(a.region, (0, 0, 200, 150))
+
+    def test_manual_region_dropped_on_change(self):
+        # A hand-drawn region belongs to the old map's identity — only a
+        # config-pinned region survives a confirmed change.
+        a = MinimapAnalyzer()
+        a.set_region((0, 0, 200, 150), explicit=True)
+        a.note_frame(_hlines())
+        for _ in range(2):
+            self.assertFalse(a.note_frame(_vlines()))
+        self.assertTrue(a.note_frame(_vlines()))
+        self.assertIsNone(a.region)
 
     def test_explicit_region_kept_on_change(self):
         a = MinimapAnalyzer(region=(0, 0, 200, 150))
@@ -209,16 +237,6 @@ class SetRegionTests(unittest.TestCase):
         self.assertTrue(a.note_frame(_vlines()))
         self.assertIsNone(a.region)                 # watchdog can still drop
         self.assertIsNone(a.region_source)
-
-    def test_explicit_flag_respected(self):
-        a = MinimapAnalyzer()
-        a.set_region((0, 0, 100, 100), explicit=True)
-        self.assertEqual(a.region_source, "manual")
-        a.note_frame(_hlines())
-        for _ in range(2):
-            a.note_frame(_vlines())
-        self.assertTrue(a.note_frame(_vlines()))
-        self.assertEqual(a.region, (0, 0, 100, 100))
 
     def test_config_region_source_and_reset(self):
         a = MinimapAnalyzer(region=(0, 0, 200, 150))
@@ -327,6 +345,45 @@ class PlatformMaskTests(unittest.TestCase):
         mask = structure_mask(img, colors)
         self.assertTrue(mask[40, 11])
         self.assertFalse(platform_mask(img)[40, 11])
+
+
+class GeometryFingerprintTests(unittest.TestCase):
+    """include-mask fingerprints hash structure, not pixel colour."""
+
+    def test_mask_fingerprint_is_colour_free(self):
+        # The translucency fix: identical line *positions* over wildly
+        # different rendered colours hash the same — the scene behind
+        # the translucent panel can no longer perturb the fingerprint.
+        rng = np.random.default_rng(0)
+        mask = np.zeros((150, 200), dtype=bool)
+        mask[40, 10:150] = True
+        mask[90, 40:180] = True
+        fa = fingerprint(
+            rng.integers(0, 256, (150, 200, 3), dtype=np.uint8),
+            include_mask=mask,
+        )
+        fb = fingerprint(
+            rng.integers(0, 256, (150, 200, 3), dtype=np.uint8),
+            include_mask=mask,
+        )
+        self.assertEqual(fa, fb)
+        self.assertTrue(fa.startswith("g2:"))
+
+    def test_geometry_and_legacy_schemes_never_match(self):
+        img = _hlines()
+        g = fingerprint(img, include_mask=structure_mask(img))
+        legacy = "00" * 512
+        self.assertEqual(fingerprint_distance(g, legacy), float("inf"))
+        self.assertEqual(fingerprint_distance(legacy, g), float("inf"))
+
+    def test_score_scale(self):
+        img = _hlines()
+        fa = fingerprint(img, include_mask=structure_mask(img))
+        self.assertEqual(fingerprint_score(fa, fa), 1.0)
+        # Wrong scheme -> no match -> 0 confidence.
+        self.assertEqual(fingerprint_score(fa, "00" * 512), 0.0)
+        other = fingerprint(_vlines()) or "g2:" + "ff" * 512
+        self.assertEqual(fingerprint_score(fa, other), 0.0)
 
 
 class DrawnPlatformTests(unittest.TestCase):

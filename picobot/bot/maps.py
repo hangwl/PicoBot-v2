@@ -31,7 +31,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ..vision.minimap import fingerprint_distance
 from .rotation import Rotation
@@ -164,14 +164,27 @@ class MapStore:
 
     def match(self, fingerprint: Optional[str], threshold: float = 15.0) -> Optional[MapEntry]:
         """Best fingerprint match under ``threshold``, else None."""
+        entry, _ = self.match_scored(fingerprint, threshold)
+        return entry
+
+    def match_scored(
+        self, fingerprint: Optional[str], threshold: float = 15.0
+    ) -> Tuple[Optional[MapEntry], float]:
+        """Best fingerprint match plus its distance (``inf`` = no match).
+
+        The distance doubles as a confidence signal — well under
+        ``threshold`` is a confident match, at/over it is not a match.
+        """
         if not fingerprint:
-            return None
-        best, best_dist = None, threshold
+            return None, float("inf")
+        best, best_dist = None, float("inf")
         for entry in self.load_all():
             dist = fingerprint_distance(fingerprint, entry.fingerprint or "")
             if dist < best_dist:
                 best, best_dist = entry, dist
-        return best
+        if best is None or best_dist >= threshold:
+            return None, best_dist
+        return best, best_dist
 
     def save(self, entry: MapEntry) -> Path:
         """Write the map file; returns its path."""

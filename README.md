@@ -42,16 +42,23 @@ override the remembered values and are persisted the same way.
 
 - **Connection** — pick the Pico DATA serial port (or *Auto*-detect) and the
   game window title. Selections persist to `config.json`.
+- **Map** — the single source of truth for which map every section acts
+  on. The selector pins a map (persisted as `active_map`), *auto-detect*
+  defers to the live minimap fingerprint, and *+ new map* names the file
+  a calibration save will create. The `detected:` readout shows the
+  live fingerprint's best match plus its confidence score. Walls,
+  platforms, layout, and calibration all resolve through this selection —
+  no per-section map names.
 - **View** — live annotated minimap feed (player dot, anchors, nav target,
-  hazard markers) or the full game window on demand. The fps selector sets
-  the stream rate (persisted as `"view_fps"` in `config.json`, default 10;
-  1–30 allowed — higher rates cost more CPU on captures + JPEG encode).
-  Layout controls: *Save layout* / *Forget* / *Re-detect* / *Draw minimap*.
-  With the map field blank, *Save/Forget* only act when the live minimap
-  fingerprint verifies the map — a stale `active_map` pin can't redirect
-  a write to the wrong file. Typing a map name writes that file
-  explicitly (creating a stub if it doesn't exist yet) and refreshes its
-  fingerprint.
+  hazard markers, wall/floor zones) or the full game window on demand.
+  The fps selector sets the stream rate (persisted as `"view_fps"` in
+  `config.json`, default 10; 1–30 allowed — higher rates cost more CPU
+  on captures + JPEG encode). Layout controls: *Save layout* / *Forget* /
+  *Re-detect* / *Draw minimap* / platform drawing. With the Map selector
+  on auto, *Save/Forget* only act when the live fingerprint verifies the
+  detected map — a stale `active_map` pin can't redirect a write to the
+  wrong file. Picking a map in the selector writes that file explicitly
+  (creating a stub if it doesn't exist yet) and refreshes its fingerprint.
 - **Bot** — Start/Stop the smart bot.
 - **Calibrate** — Record → visit each farming spot, pressing *Mark anchor*
   (or F9) at each → Save. Recording captures **anchor positions only** —
@@ -73,9 +80,16 @@ override the remembered values and are persisted the same way.
 
 Each map is a JSON file in `maps/` holding a rotation graph — anchors (farming
 spots) and legs (walk / flash-jump / climb steps between them), plus skill
-bindings. Map identity is a minimap **ink fingerprint** (`fingerprint`) —
-only platform/line pixels feed the hash, so translucent minimap backgrounds
-can't drift matching as the character moves.
+bindings. Map identity is a minimap **structure fingerprint**
+(`fingerprint`, `g2:` scheme) — only platform/line geometry feeds the
+hash, so translucent minimap backgrounds and panel art can't drift
+matching as the character moves. A fingerprint **watchdog** confirms real
+map changes before acting: a miss only counts when the new scene is
+self-consistent across consecutive frames, so loading screens and fades
+can never accumulate into a false positive. On a confirmed change the
+minimap region is dropped (unless it came from config) and the map is
+re-resolved — a stale layout can't persist past a real transition, and a
+pinned map's own stored fingerprint can disprove the pin.
 `minimap_region` is the minimap layout remembered at calibration time — when
 the map is identified, the bot restores that region, so auto-detection drift
 can't accumulate on known maps (delete the key to force re-detection). When
@@ -87,7 +101,7 @@ you verified in the dashboard carries over to the bot at Start:
 {
   "name": "limina_1f_east",
   "map_name": "Limina : 1-5 East",
-  "fingerprint": "<hex>",
+  "fingerprint": "g2:<hex>",
   "minimap_region": [8, 56, 200, 150],
   "rotation": {
     "style": "loop",

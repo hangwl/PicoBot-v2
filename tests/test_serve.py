@@ -413,6 +413,60 @@ class HostCommandTests(unittest.TestCase):
         img[::20, :] = (228, 228, 228)
         return img
 
+    def _feed_with(self, img):
+        """Feed stub whose live frame is ``img``."""
+        analyzer = MinimapAnalyzer(region=(0, 0, 200, 150))
+        feed = Mock()
+        feed.minimap = analyzer
+        feed.minimap_img = Mock(return_value=img)
+        self.host._feed = feed
+        return analyzer
+
+    def _fp_of(self, img, analyzer):
+        c = analyzer.colors
+        return fingerprint(
+            img,
+            ignore_colors=(c.player, c.other_player, c.rune),
+            include_mask=structure_mask(img, c),
+        )
+
+    def test_maps_payload_reports_detected_and_score(self):
+        img = self._inked_img()
+        analyzer = self._feed_with(img)
+        fp = self._fp_of(img, analyzer)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1", fingerprint=fp))
+            self.host._send_maps()
+        payload = json.loads(self.sent[-1][5:])
+        self.assertEqual(payload["event"], "maps")
+        self.assertEqual(payload["detected"], "m1")
+        self.assertGreater(payload["score"], 0.9)
+
+    def test_map_meta_reports_confidence(self):
+        img = self._inked_img()
+        analyzer = self._feed_with(img)
+        fp = self._fp_of(img, analyzer)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1", fingerprint=fp))
+            self.host._resolved_map_cached()   # refresh live evidence
+            meta = self.host._map_meta()
+        self.assertEqual(meta["map"], "m1")
+        self.assertGreater(meta["map_conf"], 0.9)
+
+    def test_map_meta_confidence_none_without_fingerprint(self):
+        img = self._inked_img()
+        self._feed_with(img)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.host.maps = MapStore(tmp)
+            self.host.maps.save(MapEntry(name="m1"))   # no fingerprint
+            self.host._active_map_override = "m1"
+            self.host._resolved_map_cached()
+            meta = self.host._map_meta()
+        self.assertEqual(meta["map"], "m1")
+        self.assertIsNone(meta["map_conf"])
+
     def test_map_meta_walls_survive_bot_without_resolved_map(self):
         # Regression: walls vanished the moment the bot started — the
         # meta path trusted only bot._map (None until the first travel

@@ -577,6 +577,85 @@ class TravelWeaveTests(unittest.TestCase):
         self.assertEqual(bot.hid.presses.count("a"), 1)
 
 
+class ResolveMapTests(unittest.TestCase):
+    """_resolve_map: the active_map pin is rotation scope — live
+    fingerprint evidence beats it when the screen shows another map."""
+
+    def _bot(self):
+        bot = SmartBot.__new__(SmartBot)
+        bot.config = BotConfig()
+        bot._map = None
+        bot._map_warned = False
+        bot._anchor_idx = 0
+        bot._weave_dir = None
+        bot._weave_bounds = None
+        bot._route = []
+        bot.viz = {"map": None}
+        bot.log = Mock()
+        bot.event = Mock()
+        bot.minimap_fingerprint = Mock(return_value="g2:" + "ff" * 512)
+        bot._apply_stored_layout = Mock()
+        return bot
+
+    def test_pin_yields_to_live_fingerprint_match(self):
+        bot = self._bot()
+        bot.config.active_map = "pinned"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(
+                name="pinned", fingerprint="g2:" + "00" * 512
+            ))
+            store.save(MapEntry(
+                name="live", fingerprint="g2:" + "ff" * 512
+            ))
+            bot.maps = store
+            bot._resolve_map()
+        self.assertEqual(bot._map.name, "live")
+
+    def test_pin_kept_when_screen_matches_it(self):
+        bot = self._bot()
+        bot.config.active_map = "pinned"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(
+                name="pinned", fingerprint="g2:" + "ff" * 512
+            ))
+            bot.maps = store
+            bot._resolve_map()
+        self.assertEqual(bot._map.name, "pinned")
+
+    def test_pin_kept_when_unverifiable(self):
+        # Pinned map has no stored fingerprint and the screen matches
+        # nothing stored — the explicit pin stands.
+        bot = self._bot()
+        bot.config.active_map = "pinned"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="pinned"))          # no fingerprint
+            store.save(MapEntry(
+                name="other", fingerprint="g2:" + "00" * 512
+            ))
+            bot.maps = store
+            bot._resolve_map()
+        self.assertEqual(bot._map.name, "pinned")
+
+    def test_unverifiable_pin_stands_under_live_match(self):
+        # Pin can't be verified (no fp) — a fuzzy live match must not
+        # silently override an explicit choice. Only the pin's own
+        # stored fingerprint can disprove it.
+        bot = self._bot()
+        bot.config.active_map = "pinned"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="pinned"))          # no fingerprint
+            store.save(MapEntry(
+                name="live", fingerprint="g2:" + "ff" * 512
+            ))
+            bot.maps = store
+            bot._resolve_map()
+        self.assertEqual(bot._map.name, "pinned")
+
+
 class TargetSnapTests(unittest.TestCase):
     def test_target_snapped_to_platform(self):
         # Target y=60 hovers 6px above the drawn segment at y=54 — within

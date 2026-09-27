@@ -113,6 +113,19 @@
 <main>
   <div class="col" style="flex:1.2 1 360px">
     <div class="panel">
+      <h3>Map</h3>
+      <div class="row">
+        <select id="mapSel" style="min-width:170px"
+          title="auto = fingerprint-detect; picking a map pins it as the target for every section below">
+          <option value="">(auto-detect)</option>
+        </select>
+        <input id="mapNew" placeholder="new map name" size="14"
+          style="display:none" title="name for the map a calibration save will create">
+      </div>
+      <div style="margin-top:6px"><label id="mapDet">detected: –</label></div>
+      <div style="margin-top:4px"><label>one selection drives walls, platforms, layout and calibration below — no per-section map names</label></div>
+    </div>
+    <div class="panel">
       <h3>View</h3>
       <canvas id="view" width="400" height="300"></canvas>
       <div class="row" style="margin-top:8px">
@@ -130,8 +143,7 @@
         <button id="layoutSave">Save layout</button>
         <button id="layoutClear">Forget</button>
         <button id="layoutReset">Re-detect</button>
-        <input id="layName" placeholder="map (blank=auto)" size="11"
-          title="blank = verified map only; type a name to save/clear that map's layout explicitly">
+        <label>targets the Map selection (auto = verified map only)</label>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="drawMinimap">Draw minimap</button>
@@ -142,13 +154,13 @@
         <button id="wallR" title="stand at the right wall, then click — player right of it always faces left">R wall</button>
         <button id="wallF" title="stand on the bottom platform, then click — no downward movement below it">Floor</button>
         <button id="wallClear" title="remove all boundaries for this map">Clear</button>
-        <label>walls at player pos (uses map field)</label>
+        <label>walls at player pos (uses Map selection)</label>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="drawPlats" title="arm, then drag along each platform on the Minimap view — click again to stop">Draw plats</button>
         <button id="platUndo" title="remove the last drawn platform segment">Undo</button>
         <button id="platClear" title="remove all platforms for this map">Clear</button>
-        <label>platforms are hand-drawn — the bot's walkable geometry (uses map field)</label>
+        <label>platforms are hand-drawn — the bot's walkable geometry (uses Map selection)</label>
       </div>
     </div>
     <div class="panel">
@@ -161,7 +173,7 @@
     <details class="panel" open>
       <summary>Calibrate</summary>
       <div class="row">
-        <input id="calName" placeholder="map name (blank = auto)" size="16">
+        <label>saves onto the Map selection — pick "+ new map" there to name a fresh map, or leave auto to update the detected one</label>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="calStart" class="primary">Record</button>
@@ -310,6 +322,7 @@ ws.onopen = () => {
   ws.send("config|get");
   ws.send("skills|list");
   ws.send("host|state");
+  ws.send("map|list");
 };
 ws.onclose = () => chip("ws", "ws: closed", "bad");
 ws.onerror = () => chip("ws", "ws: error", "warn");
@@ -334,7 +347,9 @@ ws.onmessage = e => {
       p.state === "PAUSE" ? "warn" : "");
     if (p.map !== undefined || p.no_rotation !== undefined)
       chip("map",
-        "map: " + (p.map || "–") + (p.no_rotation ? " (no rotation)" : ""),
+        "map: " + (p.map || "–") +
+        (p.map_conf != null ? ` (${Math.round(p.map_conf * 100)}%)` : "") +
+        (p.no_rotation ? " (no rotation)" : ""),
         p.no_rotation ? "warn" : "");
     if (p.layout !== undefined)
       chip("layout", "layout: " + (p.layout || "–"),
@@ -368,6 +383,17 @@ ws.onmessage = e => {
     logBuf.length = 0;
     logEl.innerHTML = "";
     (p.items || []).forEach(it => log(it.kind, it.msg, it.level, it.t));
+  } else if (p.event === "maps") {
+    // Rebuild the selector without losing a "+ new map" pick in flight.
+    const sel = $("mapSel"), cur = sel.value;
+    sel.innerHTML = `<option value="">(auto-detect)</option>` +
+      (p.maps || []).map(n => `<option>${esc(n)}</option>`).join("") +
+      `<option value="__new">+ new map…</option>`;
+    sel.value = (cur === "__new" || (p.maps || []).includes(cur)) ? cur
+      : (p.active || "");
+    $("mapNew").style.display = sel.value === "__new" ? "" : "none";
+    $("mapDet").textContent = "detected: " + (p.detected || "–") +
+      (p.score != null ? ` (${Math.round(p.score * 100)}%)` : "");
   } else if (p.event === "host") {
     fillSel($("portSel"), "(serial)",
       (p.ports || []).map(pt => [pt.device, pt.device + (pt.desc ? " · " + pt.desc : "")]),
@@ -512,8 +538,18 @@ $("vWin").onclick = () => {
   send("dash|view|window");
 };
 $("fpsSel").onchange = () => send("dash|fps|" + $("fpsSel").value);
+
+// The Map section is the single source of truth — every targeted action
+// (walls, platforms, layout, calibration save) resolves through it.
+$("mapSel").onchange = () => {
+  const v = $("mapSel").value;
+  $("mapNew").style.display = v === "__new" ? "" : "none";
+  if (v === "__new") return;            // naming only — nothing to pin yet
+  send("map|set|" + v);               // "" = auto-detect, else pin
+};
 const layTarget = () => {
-  const n = $("layName").value.trim();
+  const v = $("mapSel").value;
+  const n = v === "__new" ? $("mapNew").value.trim() : v;
   return n ? "|" + n : "";
 };
 $("layoutSave").onclick = () => send("layout|save" + layTarget());
@@ -612,7 +648,7 @@ $("connRefresh").onclick = () => send("host|state");
 $("calStart").onclick = () => { calActive = true; send("cal|start"); };
 $("calMark").onclick = () => send("cal|mark");
 $("calFinish").onclick = () => {
-  send("cal|finish|" + $("calName").value); calActive = false;
+  send("cal|finish" + layTarget()); calActive = false;
 };
 $("calCancel").onclick = () => { send("cal|cancel"); calActive = false; };
 

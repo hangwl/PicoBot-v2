@@ -153,6 +153,9 @@ class SmartBot(BotBase):
             if img is not None and self.minimap.note_frame(img):
                 self.event("vision", "map change detected — minimap relocated")
                 self._minimap_warned = False  # re-warn if re-locate fails
+                # Re-identify the map under the new scene so a stale pin
+                # or stored layout can't persist past a real change.
+                self._resolve_map(img)
             return self._stash_frame(img)
         # Region unknown: try each map's remembered layout first (the
         # fingerprint is meaningless under a wrong region, so seeding the
@@ -327,8 +330,30 @@ class SmartBot(BotBase):
             if entry is None and not self._map_warned:
                 self.log(f"Map '{cfg.active_map}' not found in {cfg.maps_dir}/")
                 self._map_warned = True
+            elif entry is not None and entry.fingerprint:
+                # The pin is rotation scope, not identity — when the
+                # screen verifiably shows a different map, the live
+                # evidence wins so a stale pin can't hold a dead layout.
+                fp = self.minimap_fingerprint(img)
+                if fp:
+                    live, dist = self.maps.match_scored(
+                        fp, cfg.map_match_threshold
+                    )
+                    pinned_dist = fingerprint_distance(
+                        fp, entry.fingerprint
+                    )
+                    if (
+                        live is not None
+                        and live.name != entry.name
+                        and pinned_dist > cfg.map_match_threshold
+                    ):
+                        self.log(
+                            f"Pin '{entry.name}' disagrees with the "
+                            f"screen — switching to {live.name}"
+                        )
+                        entry = live
         else:
-            # Ink-masked minimap fingerprint match.
+            # Structure-masked minimap fingerprint match.
             fp = self.minimap_fingerprint(img)
             entry = self.maps.match(fp, cfg.map_match_threshold)
         if entry is not self._map:

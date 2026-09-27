@@ -304,40 +304,47 @@ def fingerprint(
     out. Pixels matching ``ignore_colors`` (e.g. the roaming marker dots)
     are excluded, so markers don't perturb the hash of a static minimap.
 
-    ``include_colors``/``include_mask`` invert the selection: only
-    matching pixels (the minimap's platform "ink" — see
-    :func:`structure_mask`) contribute — crucial on translucent minimaps
-    where the live scene shows through the background and would otherwise
-    drift the hash as the character moves. Returns "" when too few
-    pixels qualify (blank/transition frames), which never matches
+    ``include_colors``/``include_mask`` switch the hash to *geometry*
+    mode: the masked structure itself is hashed (cell coverage + a
+    has-structure bit), not the masked pixels' colours. On translucent
+    minimaps the live scene bleeds through platform-line pixels, so
+    colour content drifts while line positions stay fixed — hashing the
+    mask is what makes the fingerprint stable there. Geometry
+    fingerprints carry a ``g2:`` scheme prefix so legacy colour-hash
+    fingerprints can never match them by accident. Returns "" when too
+    few pixels qualify (blank/transition frames), which never matches
     anything in :func:`fingerprint_distance`.
     """
     h, w = img.shape[:2]
     bh, bw = max(1, h // size), max(1, w // size)
-    crop = img[: bh * size, : bw * size].astype(np.float32)
+    crop = img[: bh * size, : bw * size]
     excluded = np.zeros(crop.shape[:2], dtype=bool)
+    scheme = ""
     if include_colors or include_mask is not None:
         included = np.zeros(crop.shape[:2], dtype=bool)
         if include_colors:
             for bgr in include_colors:
-                included |= color_mask(crop.astype(np.uint8), bgr, tolerance)
+                included |= color_mask(crop, bgr, tolerance)
         if include_mask is not None:
             m = np.asarray(include_mask, dtype=bool)
             included |= m[: crop.shape[0], : crop.shape[1]]
-        excluded |= ~included
+        if included.sum() < 8:
+            # Not enough structure to identify a map — no fingerprint.
+            return ""
+        # Geometry hash: the mask IS the signal (0/255 "image").
+        gray = included.astype(np.float32) * 255.0
+        scheme = "g2:"
+    else:
+        gray = (
+            0.114 * crop[:, :, 0] + 0.587 * crop[:, :, 1]
+            + 0.299 * crop[:, :, 2]
+        ).astype(np.float32)
     if ignore_colors:
         for bgr in ignore_colors:
             excluded |= color_mask(crop.astype(np.uint8), bgr, tolerance)
-    if include_colors or include_mask is not None or ignore_colors:
-        weights = (~excluded).astype(np.float32)
-    else:
-        weights = np.ones(crop.shape[:2], dtype=np.float32)
+    weights = (~excluded).astype(np.float32)
     if weights.sum() < 8:
-        # Not enough signal to identify a map — treat as no fingerprint.
         return ""
-    gray = (
-        0.114 * crop[:, :, 0] + 0.587 * crop[:, :, 1] + 0.299 * crop[:, :, 2]
-    )
     num = (gray * weights).reshape(size, bh, size, bw).sum(axis=(1, 3))
     den = weights.reshape(size, bh, size, bw).sum(axis=(1, 3))
     means = np.where(den > 0, num / np.maximum(den, 1), 127.0)
@@ -345,16 +352,24 @@ def fingerprint(
     maxes = np.where(excluded, -1.0, gray).reshape(size, bh, size, bw).max(axis=(1, 3))
     maxes = np.where(maxes >= 0, maxes, 127.0)
     cells = np.concatenate([means, maxes]).astype(np.uint8)
-    return cells.tobytes().hex()
+    return scheme + cells.tobytes().hex()
 
 
 def fingerprint_distance(a: str, b: str) -> float:
-    """Mean absolute pixel difference between two fingerprints (0-255).
+    """Mean absolute cell difference between two fingerprints (0-255).
 
     Returns ``inf`` for missing/mismatched/invalid inputs so unknown maps
-    never match.
+    never match. Scheme prefixes (``g2:``) are compared — fingerprints
+    from different schemes never match.
     """
     if not a or not b or len(a) != len(b):
+        return float("inf")
+    if ":" in a:
+        sa, a = a.split(":", 1)
+        sb, b = b.split(":", 1) if ":" in b else ("", b)
+        if sa != sb:
+            return float("inf")
+    elif ":" in b:
         return float("inf")
     try:
         pa = np.frombuffer(bytes.fromhex(a), dtype=np.uint8).astype(np.int16)
@@ -362,6 +377,18 @@ def fingerprint_distance(a: str, b: str) -> float:
     except ValueError:
         return float("inf")
     return float(np.abs(pa - pb).mean())
+
+
+def fingerprint_score(a: str, b: str, threshold: float = 15.0) -> float:
+    """Match confidence 0-1: 1.0 = identical, 0 = at/past ``threshold``.
+
+    A convenience for display — distances well under the match threshold
+    read as high confidence, distances past it clamp to 0.
+    """
+    dist = fingerprint_distance(a, b)
+    if dist == float("inf") or threshold <= 0:
+        return 0.0
+    return max(0.0, 1.0 - dist / threshold)
 
 
 class MinimapAnalyzer:
@@ -396,7 +423,10 @@ class MinimapAnalyzer:
         self._map_change_threshold = map_change_threshold
         self._map_change_frames = map_change_frames
         self._baseline_fp: Optional[str] = None
+        self._pending_fp: Optional[str] = None   # candidate new scene
         self._fp_misses = 0
+        # Diagnostics: last frame's distance/score vs the baseline.
+        self.last_dist: Optional[float] = None
         # Guards region/baseline state — the dashboard feed and a running
         # bot can share one analyzer from different threads.
         self._lock = threading.Lock()
@@ -426,6 +456,7 @@ class MinimapAnalyzer:
             self._region_explicit = explicit
             self._region_source = "manual" if explicit else "stored"
             self._baseline_fp = None
+            self._pending_fp = None
             self._fp_misses = 0
 
     def reset_region(self) -> None:
@@ -437,16 +468,27 @@ class MinimapAnalyzer:
             self._region_explicit = False
             self._region_source = None
             self._baseline_fp = None
+            self._pending_fp = None
             self._fp_misses = 0
 
     def note_frame(self, minimap_img: np.ndarray) -> bool:
         """Watchdog: report True when a map change is confirmed.
 
         Compares each capture's content fingerprint to a baseline taken on
-        the current map. ``map_change_frames`` consecutive mismatches confirm
-        a real change (single-frame flicker like loading blanks is ignored).
-        On confirmation an auto-located region is cleared so ``locate`` runs
-        again on the next capture; the baseline is reset either way.
+        the current map. A miss only counts toward a change when it is
+        *self-consistent* — the new frame must match the previous miss
+        frame, i.e. the scene is showing a stable *different* picture.
+        Transitional frames (loading blanks, fades) neither match the
+        baseline nor each other, so they can never accumulate into a
+        false positive no matter how many fire. ``map_change_frames``
+        consecutive consistent misses confirm a real change.
+
+        On confirmation the baseline resets and the region is dropped so
+        ``locate`` re-detects — unless it came from ``config`` (a pinned
+        region is authoritative and survives map changes). Stored and
+        hand-drawn regions belong to the old map's identity and are
+        dropped; a different map's remembered layout is re-applied by the
+        caller's region-seeding pass.
         """
         ignore = (
             self.colors.player, self.colors.other_player, self.colors.rune
@@ -466,21 +508,33 @@ class MinimapAnalyzer:
                 return False
             if self._baseline_fp is None:
                 self._baseline_fp = fp
-                return False
-            if (
-                fingerprint_distance(fp, self._baseline_fp)
-                <= self._map_change_threshold
-            ):
+                self._pending_fp = None
                 self._fp_misses = 0
                 return False
-            self._fp_misses += 1
+            dist = fingerprint_distance(fp, self._baseline_fp)
+            self.last_dist = dist
+            if dist <= self._map_change_threshold:
+                self._fp_misses = 0
+                self._pending_fp = None
+                return False
+            # A miss counts only if the new scene agrees with itself —
+            # flicker frames can't match each other and reset the streak.
+            if self._pending_fp is not None and fingerprint_distance(
+                fp, self._pending_fp
+            ) <= self._map_change_threshold:
+                self._fp_misses += 1
+            else:
+                self._pending_fp = fp
+                self._fp_misses = 1
             if self._fp_misses < self._map_change_frames:
                 return False
             self._fp_misses = 0
+            self._pending_fp = None
             self._baseline_fp = None
-            if not self._region_explicit:
+            if self._region_source != "config":
                 self._region = None
                 self._region_source = None
+                self._region_explicit = False
             return True
 
     def locate(self, window_img: np.ndarray) -> Optional[Region]:
