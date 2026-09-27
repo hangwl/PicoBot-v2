@@ -121,6 +121,85 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     return out
 
 
+def assemble_panel(
+    band: Optional[np.ndarray],
+    map_img: np.ndarray,
+    region: Tuple[int, int, int, int],
+    band_xy: Tuple[int, int] = (0, 0),
+    pad: int = 6,
+) -> Tuple[np.ndarray, int, int]:
+    """Composite the title band + minimap into one panel image.
+
+    ``band_xy`` is the band capture's top-left in window coords —
+    ``(0, 0)`` for the auto band, the override rect's origin when
+    ``minimap_name_region`` pins a custom strip.
+
+    Returns ``(img, dx, dy)`` — ``img`` places the minimap at offset
+    ``(dx, dy)``, so region-space overlay coords shift by that much.
+
+    The panel is the union of the located title zone and the minimap
+    region; its right edge extends to the title text's end so long map
+    names aren't clipped by the map frame's width. A separator line
+    divides the name zone from the map area (the panel's own divider
+    row when detected, else the title zone's bottom edge).
+    """
+    from ..vision.mapname import title_scan
+
+    rx, ry, rw, rh = region
+    bx, by = band_xy
+    lines, div = ([], None)
+    if isinstance(band, np.ndarray) and band.size:
+        lines, div = title_scan(band)
+        lines = [(a + bx, c + by, e + bx, f + by) for a, c, e, f in lines]
+        if div is not None:
+            div += by
+    if lines:
+        tx0 = min(b[0] for b in lines)
+        ty0 = min(b[1] for b in lines)
+        tx1 = max(b[2] for b in lines)
+        ty1 = max(b[3] for b in lines)
+        x0 = max(0, min(rx, tx0 - pad))
+        x1 = max(rx + rw, tx1 + pad)
+        y0 = max(0, min(ry, ty0 - pad))
+    else:
+        tx0 = ty0 = tx1 = ty1 = 0
+        x0, x1, y0 = rx, rx + rw, ry
+    y1 = ry + rh
+    canvas = np.zeros((y1 - y0, x1 - x0, 3), dtype=np.uint8)
+    if isinstance(band, np.ndarray) and band.size:
+        bh, bw = band.shape[:2]
+        # band occupies window rect (bx, by, bw, bh)
+        gx0, gx1 = max(bx, x0) - bx, min(bx + bw, x1) - bx
+        gy0, gy1 = max(by, y0) - by, min(by + bh, y1) - by
+        if gx1 > gx0 and gy1 > gy0:
+            canvas[
+                by + gy0 - y0 : by + gy1 - y0,
+                bx + gx0 - x0 : bx + gx1 - x0,
+            ] = band[gy0:gy1, gx0:gx1]
+    canvas[ry - y0 : ry - y0 + rh, rx - x0 : rx - x0 + rw] = map_img
+    # Title zone markup: green boxes on the accepted lines, the orange
+    # zone is exactly what OCR reads.
+    for bx0, by0, bx1, by1 in lines:
+        _rect(canvas, bx0 - x0, by0 - y0, bx1 - bx0, by1 - by0, (0, 255, 0))
+    if lines:
+        _zone(canvas, tx0 - x0, ty0 - y0, tx1 - x0, ty1 - y0, (0, 120, 255))
+    # Name|map boundary: the panel's own divider row when it was found
+    # inside the canvas, else the bottom of the title zone.
+    sep_win = None
+    if div is not None and y0 <= div <= y1:
+        sep_win = div
+    elif lines:
+        sep_win = ty1 + pad
+    if sep_win is not None:
+        sep = sep_win - y0
+        for sy in (sep, sep + 1):
+            if 0 <= sy < canvas.shape[0]:
+                canvas[sy, :] = (255, 200, 40)
+    # Map-area box so the region extent reads clearly against the band.
+    _rect(canvas, rx - x0, ry - y0, rw, rh, (0, 255, 255))
+    return canvas, rx - x0, ry - y0
+
+
 def annotate_title(band: np.ndarray) -> np.ndarray:
     """Title-band debug view: green boxes on the accepted text lines,
     red outline on the full crop OCR sees. Lets the user verify the
@@ -206,7 +285,7 @@ class FrameStreamer:
                     for key in (
                         "state", "map", "map_conf", "map_title",
                         "hazard", "player",
-                        "layout", "no_rotation",
+                        "layout", "no_rotation", "ox", "oy",
                     ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]

@@ -129,7 +129,7 @@
       <h3>View</h3>
       <canvas id="view" width="400" height="300"></canvas>
       <div class="row" style="margin-top:8px">
-        <button id="vMin">Minimap</button>
+        <button id="vMin" title="the whole located panel: title strip on top, minimap below the divider">Panel</button>
         <button id="vWin">Window</button>
         <button id="vTitle" title="the segmented title band exactly as OCR sees it — green boxes = accepted text lines, orange = OCR input crop">Title</button>
         <select id="fpsSel" title="stream rate">
@@ -345,6 +345,7 @@ ws.onmessage = e => {
     };
     img.src = "data:image/jpeg;base64," + p.jpeg;
     lastImg = img;
+    viewOX = p.ox || 0; viewOY = p.oy || 0;  // minimap offset in panel view
     if (p.state) chip("state", "state: " + p.state,
       p.state === "PAUSE" ? "warn" : "");
     if (p.map !== undefined || p.no_rotation !== undefined)
@@ -582,6 +583,7 @@ $("platClear").onclick = () => send("layout|plat|clear" + layTarget());
 
 // --- Drag-to-draw regions on the Window view ---------------------------
 let drawMode = null, drawStart = null, lastImg = null;
+let viewOX = 0, viewOY = 0;   // minimap region's offset inside the panel view
 const viewEl = $("view");
 
 function armDraw(kind) {
@@ -635,7 +637,9 @@ viewEl.addEventListener("pointerup", e => {
   if (platMode) {
     if (platStart) {
       const [x, y] = viewXY(e);
-      send(`layout|plat|${Math.round(platStart[0])},${Math.round(platStart[1])},${Math.round(x)},${Math.round(y)}` + layTarget());
+      // Panel view: the minimap sits at (viewOX, viewOY) inside the
+      // image — drag coords are panel coords, plat wants minimap px.
+      send(`layout|plat|${Math.round(platStart[0] - viewOX)},${Math.round(platStart[1] - viewOY)},${Math.round(x - viewOX)},${Math.round(y - viewOY)}` + layTarget());
       platStart = null;
     }
     return;  // stays armed — draw the next platform

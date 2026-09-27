@@ -49,8 +49,13 @@ override the remembered values and are persisted the same way.
   live fingerprint's best match plus its confidence score. Walls,
   platforms, layout, and calibration all resolve through this selection —
   no per-section map names.
-- **View** — live annotated minimap feed (player dot, anchors, nav target,
-  hazard markers, wall/floor zones) or the full game window on demand.
+- **View** — the **Panel** feed shows the whole located minimap panel:
+  the title strip on top (text lines boxed, orange = the OCR crop), a
+  separator at the panel's divider row, then the annotated minimap
+  (player dot, anchors, nav target, hazard markers, wall/floor zones)
+  below. The panel's right edge extends to the title text's end so long
+  map names aren't clipped. **Title** shows the raw segmented band;
+  **Window** the full game window.
   The fps selector sets the stream rate (persisted as `"view_fps"` in
   `config.json`, default 10; 1–30 allowed — higher rates cost more CPU
   on captures + JPEG encode). Layout controls: *Save layout* / *Forget* /

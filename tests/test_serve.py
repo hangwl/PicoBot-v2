@@ -94,6 +94,81 @@ class AnnotateTests(unittest.TestCase):
         self.assertTrue(raw.startswith(b"\xff\xd8"))  # JPEG SOI
 
 
+class PanelAssemblyTests(unittest.TestCase):
+    @staticmethod
+    def _band(title_right=180):
+        # 160x400 window band: two sparse text lines (glyph-like 8px
+        # runs with gaps — a solid block would read as the divider),
+        # solid divider row at y=70 spanning 250px.
+        band = np.zeros((160, 400, 3), dtype=np.uint8)
+        for y0, x1 in ((30, min(150, title_right)), (45, title_right)):
+            for x in range(50, x1, 14):
+                band[y0 : y0 + 10, x : x + 8] = 255
+        band[70, :250] = 255
+        return band
+
+    def test_panel_extends_to_title_and_separates_map(self):
+        from picobot.remote.streamer import assemble_panel
+
+        band = self._band()
+        map_img = np.full((100, 200, 3), 40, dtype=np.uint8)
+        map_img[10, 5] = (1, 2, 3)
+        # Map frame below the divider, narrower + right-shifted vs band.
+        comp, dx, dy = assemble_panel(band, map_img, (10, 75, 200, 100))
+        # y0 = title top - pad (23); map at dy=52; right edge reaches
+        # the title's end + pad.
+        self.assertEqual(comp.shape, (152, 200, 3))
+        self.assertEqual((dx, dy), (0, 52))
+        self.assertTrue((comp[62, 5] == (1, 2, 3)).all())  # map px moved
+        # Separator line (cyan) at the divider row (70-23=47).
+        self.assertTrue((comp[47, 100] == (255, 200, 40)).all())
+        self.assertTrue((comp[46, 100] != (255, 200, 40)).any())
+        # Title glyph pixel (window x=52,y=35) shows above the map.
+        self.assertTrue((comp[12, 42] == 255).all())
+
+    def test_panel_extends_right_for_long_title(self):
+        from picobot.remote.streamer import assemble_panel
+
+        # Long name reaching x=320 — past the 200px map frame's right
+        # edge; the panel view must grow to cover it.
+        band = self._band(title_right=320)
+        band[70, :] = 0
+        band[70, :350] = 255          # divider is panel-wide
+        map_img = np.full((100, 200, 3), 40, dtype=np.uint8)
+        comp, dx, dy = assemble_panel(band, map_img, (10, 75, 200, 100))
+        self.assertGreater(comp.shape[1], 210)
+
+    def test_panel_falls_back_to_map_when_no_title(self):
+        from picobot.remote.streamer import assemble_panel
+
+        map_img = np.full((100, 200, 3), 40, dtype=np.uint8)
+        comp, dx, dy = assemble_panel(None, map_img, (10, 75, 200, 100))
+        self.assertEqual((dx, dy), (0, 0))
+        # Interior is the map unchanged; only the border is annotated.
+        self.assertTrue((comp[2:-2, 2:-2] == map_img[2:-2, 2:-2]).all())
+
+    def test_offset_meta_shifts_region_coords(self):
+        from picobot.serve import _offset_meta
+
+        snap = {
+            "walls": {"left": 20, "right": 180},
+            "floor": 120,
+            "platforms": [(10, 60, 100, 60)],
+            "anchors": [(40, 50)],
+            "player": (80, 50),
+            "target": (120, 50),
+            "rune": (60, 30),
+        }
+        _offset_meta(snap, 7, 52)
+        self.assertEqual(snap["walls"], {"left": 27, "right": 187})
+        self.assertEqual(snap["floor"], 172)
+        self.assertEqual(snap["platforms"], [(17, 112, 107, 112)])
+        self.assertEqual(snap["anchors"], [(47, 102)])
+        self.assertEqual(snap["player"], (87, 102))
+        self.assertEqual(snap["target"], (127, 102))
+        self.assertEqual(snap["rune"], (67, 82))
+
+
 def _callbacks(**overrides) -> RemoteCallbacks:
     kw = dict(
         schedule=lambda fn: fn(),
@@ -180,6 +255,22 @@ class HostCommandTests(unittest.TestCase):
 
     def tearDown(self):
         self.save_patch.stop()
+
+    def test_provide_frame_minimap_emits_panel_offset(self):
+        # With a real title band the feed path composites the panel and
+        # reports the minimap's offset inside it.
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        feed.minimap.player_pos.return_value = (100, 75)
+        feed.minimap.region = (10, 75, 200, 150)
+        feed.name_img.return_value = PanelAssemblyTests._band()
+        self.host._feed = feed
+        snap = self.host._provide_frame("minimap")
+        self.assertIn("ox", snap)
+        self.assertEqual(snap["ox"], 0)
+        self.assertGreater(snap["oy"], 0)
+        self.assertEqual(snap["player"], (100, 75 + snap["oy"]))
 
     def test_window_command_updates_and_persists(self):
         self.assertTrue(self.host._handle_command("host|window|NewWin"))

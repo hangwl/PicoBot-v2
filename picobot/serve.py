@@ -101,6 +101,30 @@ class _VisionFeed:
         self.screen.close()
 
 
+def _offset_meta(snap: dict, dx: int, dy: int) -> None:
+    """Shift region-space overlay coords by (dx, dy) — used when the
+    frame image is the panel composite (title zone above the map) so
+    platforms/walls/anchors still land on the minimap."""
+    if not dx and not dy:
+        return
+    walls = snap.get("walls")
+    if walls:
+        snap["walls"] = {k: v + dx for k, v in walls.items()}
+    if snap.get("floor") is not None:
+        snap["floor"] += dy
+    if snap.get("platforms"):
+        snap["platforms"] = [
+            (a + dx, b + dy, c + dx, d + dy)
+            for a, b, c, d in snap["platforms"]
+        ]
+    if snap.get("anchors"):
+        snap["anchors"] = [(x + dx, y + dy) for x, y in snap["anchors"]]
+    for key in ("player", "target", "rune"):
+        pos = snap.get(key)
+        if pos:
+            snap[key] = (pos[0] + dx, pos[1] + dy)
+
+
 class BotHost:
     """Wires transport, bot, streamer, and calibration together."""
 
@@ -869,6 +893,8 @@ class BotHost:
                 "layout": self._layout_source(),
                 **meta,
             }
+        band = None
+        region = None
         if bot is not None:
             snap = bot.viz_snapshot() or {}
             snap["layout"] = self._layout_source()
@@ -878,20 +904,45 @@ class BotHost:
                 # when the bot hasn't resolved the map yet.
                 meta.pop("anchors", None)
             snap.update(meta)
-            return snap
-        feed = self._get_feed()
-        if feed is None:
-            return None
-        img = feed.minimap_img()
-        if img is None:
-            return {"state": "IDLE"}
-        snap = {
-            "img": img,
-            "player": feed.minimap.player_pos(img),
-            "state": "IDLE",
-            "layout": self._layout_source(),
-            **self._map_meta(),
-        }
+            region = bot.minimap.region
+            try:
+                band = bot.name_img()
+            except Exception:
+                band = None
+        else:
+            feed = self._get_feed()
+            if feed is None:
+                return None
+            img = feed.minimap_img()
+            if img is None:
+                return {"state": "IDLE"}
+            snap = {
+                "img": img,
+                "player": feed.minimap.player_pos(img),
+                "state": "IDLE",
+                "layout": self._layout_source(),
+                **self._map_meta(),
+            }
+            region = feed.minimap.region
+            band = feed.name_img(
+                self.bot_config.name_scan_px,
+                self.bot_config.minimap_name_region,
+            )
+        # The minimap view is the whole located panel: title strip on
+        # top, map below, separated at the panel divider. Its right edge
+        # reaches the title text's end so long names aren't clipped.
+        img = snap.get("img")
+        if img is not None and region is not None:
+            from .remote.streamer import assemble_panel
+
+            name_region = self.bot_config.minimap_name_region
+            band_xy = tuple(name_region[:2]) if name_region else (0, 0)
+            comp, dx, dy = assemble_panel(
+                band, img, region, band_xy=band_xy
+            )
+            snap["img"] = comp
+            snap["ox"], snap["oy"] = dx, dy
+            _offset_meta(snap, dx, dy)
         return snap
 
     # -- Dashboard commands ------------------------------------------------------

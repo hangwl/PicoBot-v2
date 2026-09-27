@@ -105,7 +105,7 @@ def _row_groups(white: np.ndarray, min_row_px: int, gap: int):
     return lines
 
 
-def title_lines(
+def title_scan(
     band: np.ndarray,
     white_thresh: int = 170,
     min_row_px: int = 2,
@@ -115,10 +115,13 @@ def title_lines(
     col_gap: int = 4,
     icon_fill: float = 0.5,
     divider_run: int = 120,
-) -> list:
-    """Segment white-text title lines out of a header band.
+) -> tuple:
+    """Segment the header band -> ``(lines, divider_y)``.
 
-    Returns ``[(x0, y0, x1, y1), ...]`` boxes (band coords), top→down.
+    ``lines`` are ``[(x0, y0, x1, y1), ...]`` text-line boxes (band
+    coords), top→down. ``divider_y`` is the row of the panel's solid
+    separator — the boundary between the map-name zone and the map —
+    or ``None`` when no divider was found.
 
     - Near-white mask: the map title renders in white; the toolbar icons
       and the colored map icon mostly fail the all-channels test.
@@ -133,33 +136,34 @@ def title_lines(
       ~15px glyph runs) — so map content can't be mistaken for text.
     """
     if not isinstance(band, np.ndarray) or band.size == 0:
-        return []
+        return [], None
     white = band.min(axis=2) > white_thresh
     w = white.shape[1]
     # Divider: first row carrying a *contiguous* bright run — the panel
     # separator is one solid line, text rows are sparse. Anchored to
     # structure, not to where the minimap region claims the title is.
-    div = white.shape[0]
+    div = None
+    cut = white.shape[0]
     for y in range(white.shape[0]):
         row = white[y]
         # longest contiguous True run
         idx = np.flatnonzero(np.diff(np.concatenate(([False], row, [False]))))
         if len(idx) >= 2 and (idx[1::2] - idx[0::2]).max() >= divider_run:
-            div = y
+            div = cut = y
             break
-    white = white[:div]
+    white = white[:cut]
     if white.size == 0:
-        return []
-    lines = [
+        return [], div
+    groups = [
         (a, b)
         for a, b in _row_groups(white, min_row_px, gap_rows)
         if b - a + 1 >= min_line_h and white[a : b + 1].sum() >= min_line_px
     ]
-    if not lines:
-        return []
+    if not groups:
+        return [], div
     # Icon cut: column runs over the whole text zone; dense leading
     # runs are icons, sparse runs are glyphs.
-    zone = white[lines[0][0] : lines[-1][1] + 1]
+    zone = white[groups[0][0] : groups[-1][1] + 1]
     colc = zone.sum(axis=0)
     on = colc > 0
     # runs of on-columns
@@ -190,9 +194,15 @@ def title_lines(
     x1 = max(b for _, b in keep)
     x0 = max(0, x0 - 2)
     x1 = min(w, x1 + 2)
-    return [
-        (x0, max(0, a - 1), x1, min(div, b + 2)) for a, b in lines
+    lines = [
+        (x0, max(0, a - 1), x1, min(cut, b + 2)) for a, b in groups
     ]
+    return lines, div
+
+
+def title_lines(band: np.ndarray, **kw) -> list:
+    """Accepted text-line boxes of the header band — see title_scan."""
+    return title_scan(band, **kw)[0]
 
 
 def title_crop(band: np.ndarray, **kw) -> Optional[np.ndarray]:
@@ -261,4 +271,5 @@ __all__ = [
     "normalize_name",
     "title_crop",
     "title_lines",
+    "title_scan",
 ]
