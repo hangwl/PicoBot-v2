@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from typing import Iterable, Optional, Tuple
+from typing import Callable, Iterable, Optional, Tuple
 
 import numpy as np
+
+from . import framelog
 
 Region = Tuple[int, int, int, int]  # (left, top, width, height)
 
@@ -471,7 +473,11 @@ class MinimapAnalyzer:
             self._pending_fp = None
             self._fp_misses = 0
 
-    def note_frame(self, minimap_img: np.ndarray) -> bool:
+    def note_frame(
+        self,
+        minimap_img: np.ndarray,
+        context: Optional[Callable[[], dict]] = None,
+    ) -> bool:
         """Watchdog: report True when a map change is confirmed.
 
         Compares each capture's content fingerprint to a baseline taken on
@@ -489,12 +495,16 @@ class MinimapAnalyzer:
         hand-drawn regions belong to the old map's identity and are
         dropped; a different map's remembered layout is re-applied by the
         caller's region-seeding pass.
+
+        ``context`` returns extra images (e.g. ``{"window": ...}``) for
+        debug frame capture; it's only called when an episode starts.
         """
         ignore = (
             self.colors.player, self.colors.other_player, self.colors.rune
         )
         mask = structure_mask(minimap_img, self.colors)
-        if mask.sum() >= 8:
+        mask_px = int(mask.sum())
+        if mask_px >= 8:
             fp = fingerprint(
                 minimap_img, ignore_colors=ignore, include_mask=mask
             )
@@ -503,39 +513,63 @@ class MinimapAnalyzer:
             # so background drift still registers as change.
             fp = fingerprint(minimap_img, ignore_colors=ignore)
         with self._lock:
-            if not fp:
-                # Blank/transition frame — no signal; neither match nor miss.
-                return False
-            if self._baseline_fp is None:
-                self._baseline_fp = fp
-                self._pending_fp = None
-                self._fp_misses = 0
-                return False
-            dist = fingerprint_distance(fp, self._baseline_fp)
-            self.last_dist = dist
-            if dist <= self._map_change_threshold:
-                self._fp_misses = 0
-                self._pending_fp = None
-                return False
-            # A miss counts only if the new scene agrees with itself —
-            # flicker frames can't match each other and reset the streak.
-            if self._pending_fp is not None and fingerprint_distance(
-                fp, self._pending_fp
-            ) <= self._map_change_threshold:
-                self._fp_misses += 1
-            else:
-                self._pending_fp = fp
-                self._fp_misses = 1
-            if self._fp_misses < self._map_change_frames:
-                return False
+            info = {
+                "region": self._region,
+                "region_source": self._region_source,
+                "threshold": self._map_change_threshold,
+                "mask_px": mask_px,
+                "scheme": fp.split(":", 1)[0] if ":" in fp else ("raw" if fp else ""),
+            }
+            changed = self._watch(fp, info)
+        rec = framelog.recorder()
+        if rec.enabled:
+            rec.watchdog_frame(id(self), minimap_img, mask, info, context)
+        return changed
+
+    def _watch(self, fp: str, info: dict) -> bool:
+        """Watchdog state machine; fills ``info`` with the verdict."""
+        if not fp:
+            info["state"] = "blank"
+            return False
+        if self._baseline_fp is None:
+            self._baseline_fp = fp
+            self._pending_fp = None
+            self._fp_misses = 0
+            info["state"] = "baseline"
+            return False
+        dist = fingerprint_distance(fp, self._baseline_fp)
+        self.last_dist = dist
+        info["dist"] = None if dist == float("inf") else round(dist, 2)
+        if dist <= self._map_change_threshold:
             self._fp_misses = 0
             self._pending_fp = None
-            self._baseline_fp = None
-            if self._region_source != "config":
-                self._region = None
-                self._region_source = None
-                self._region_explicit = False
-            return True
+            info["state"] = "match"
+            return False
+        # A miss counts only if the new scene agrees with itself —
+        # flicker frames can't match each other and reset the streak.
+        pend = (
+            fingerprint_distance(fp, self._pending_fp)
+            if self._pending_fp is not None else float("inf")
+        )
+        info["pending_dist"] = None if pend == float("inf") else round(pend, 2)
+        if pend <= self._map_change_threshold:
+            self._fp_misses += 1
+        else:
+            self._pending_fp = fp
+            self._fp_misses = 1
+        info["misses"] = self._fp_misses
+        if self._fp_misses < self._map_change_frames:
+            info["state"] = "miss"
+            return False
+        info["state"] = "confirm"
+        self._fp_misses = 0
+        self._pending_fp = None
+        self._baseline_fp = None
+        if self._region_source != "config":
+            self._region = None
+            self._region_source = None
+            self._region_explicit = False
+        return True
 
     def locate(self, window_img: np.ndarray) -> Optional[Region]:
         """Find the minimap frame in a window capture, once; result is cached.

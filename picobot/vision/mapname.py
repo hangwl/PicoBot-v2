@@ -17,6 +17,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from . import framelog
+
 logger = logging.getLogger(__name__)
 
 Region = Tuple[int, int, int, int]
@@ -265,22 +267,27 @@ class MapNameReader:
         engine = _get_engine()
         if engine is None:
             return None
+        rec = framelog.recorder()
+        crop = None
         try:
             crop = title_crop(img)
             if crop is None:
+                rec.snapshot("ocr_nocrop", {"band": img})
                 return None
-            prep = self._prepare(crop)
-            out = engine(prep)
-        except Exception:
+            out = engine(self._prepare(crop))
+        except Exception as exc:
             logger.debug("map-name OCR failed", exc_info=True)
+            rec.snapshot("ocr_error", {"band": img, "crop": crop}, error=str(exc))
             return None
-        txts = getattr(out, "txts", None)
-        if not txts:
-            return None
-        scores = getattr(out, "scores", None) or (1.0,) * len(txts)
+        txts = list(getattr(out, "txts", None) or ())
+        scores = list(getattr(out, "scores", None) or (1.0,) * len(txts))
         texts = [t for t, c in zip(txts, scores) if c >= self.min_confidence]
-        name = " ".join(texts).strip()
-        return name or None
+        name = " ".join(texts).strip() or None
+        rec.snapshot(
+            "ocr", {"band": img, "crop": crop},
+            text=name, txts=txts, scores=[round(float(s), 3) for s in scores],
+        )
+        return name
 
     def _prepare(self, img: np.ndarray) -> np.ndarray:
         """Upscale small text for the detector; BGR -> RGB."""

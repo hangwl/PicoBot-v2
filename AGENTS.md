@@ -18,6 +18,12 @@ minimap and works a perception-driven farming rotation. Docs live in
   pyserial, pygetwindow, keyboard, websockets).
 - Git: branch `feat/smart-bot`; only push when asked.
 
+## Comments
+
+Keep comments concise, or leave them out. Comments go stale; code is
+always current. Never narrate history or past attempts in code — record
+what was tried and what was learned in `docs/learnings.md` instead.
+
 ## Invariants — don't break these
 
 - **Map identity**: `MapEntry.name` = user alias; `MapEntry.map_name` =
@@ -48,7 +54,8 @@ minimap and works a perception-driven farming rotation. Docs live in
 | Host + dashboard cmds | `serve.py`, `remote/control.py` |
 | Frame pipeline | `remote/streamer.py` (`assemble_panel`, `annotate`) |
 | Dashboard UI | `remote/dashboard.html` |
+| Debug frame capture | `vision/framelog.py` → `debug/frames/` |
 
 See `docs/` for the full picture: `architecture.md`, `map-detection.md`,
 `calibration.md`, `bot-behavior.md`, `dashboard.md`, `configuration.md`,
-`development.md`.
+`development.md`, `learnings.md` (what was tried and why it changed).

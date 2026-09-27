@@ -26,6 +26,7 @@ installed the repo's own venv interpreter works:
   resolution + pin verification.
 - `test_serve.py` — host commands, frame payloads, panel assembly
   (`assemble_panel`/`_offset_meta`), layout drags.
+- `test_framelog.py` — debug capture episodes, snapshots, pruning.
 - `test_calibrate.py`, `test_rotation.py`, `test_bot_skills.py`,
   `test_bot_machine.py`, `test_bot_travel.py`, `test_bot_inputs.py`,
   `test_serial_manager.py`, `test_config.py`.
@@ -49,6 +50,23 @@ installed the repo's own venv interpreter works:
   chatty kinds at `info`.
 - `picobot_controller/` is a separate Flutter remote app; `CIRCUITPY/` is
   the Pico firmware (`code.py`).
+
+## Debug frame captures
+
+With `debug_capture` on (default), the host and headless bot save
+detection evidence to `debug/frames/<timestamp>_<reason>/` (gitignored,
+oldest pruned past `debug_capture_max_events`). Every folder has a
+`meta.json`.
+
+| Reason | When | Contents |
+|---|---|---|
+| `watchdog_recovered` | ≥2 frames missed the baseline, then it matched again (an overlay came and went) | pre-roll + episode frames `NNN.png`, structure masks `NNN_mask.png`, `baseline.png`, `window_onset.png`; per-frame `state`/`dist`/`pending_dist`/`misses`/`mask_px`/`scheme` |
+| `watchdog_confirmed` | watchdog declared a map change | as above + `window_confirm.png` |
+| `ocr` / `ocr_nocrop` / `ocr_error` | every title OCR read | `band.png`, `crop.png`, text + per-line scores |
+| `hazard_leg_fp` | bot paused on "map changed unexpectedly" | `frame.png`, `window.png`, distance |
+
+Single-frame blips are dropped. Captures are written on a background
+thread. Implementation: `picobot/vision/framelog.py`.
 
 ## Verifying vision changes
 

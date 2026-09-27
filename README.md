@@ -86,7 +86,8 @@ override the remembered values and are persisted the same way.
 | [docs/bot-behavior.md](docs/bot-behavior.md) | Patrol routes, weaving, skills, safety |
 | [docs/dashboard.md](docs/dashboard.md) | Panels, views, event levels, WS protocol |
 | [docs/configuration.md](docs/configuration.md) | `config.json` reference |
-| [docs/development.md](docs/development.md) | Setup, tests, conventions |
+| [docs/development.md](docs/development.md) | Setup, tests, conventions, debug frame captures |
+| [docs/learnings.md](docs/learnings.md) | What was tried, what we learned |
 
 ## Remote connections over mobile data (Tailscale)
 

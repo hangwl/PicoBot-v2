@@ -37,3 +37,5 @@ env/
 
 # Ignore VS Code directory
 .vscode/
+# Debug frame captures
+/debug/

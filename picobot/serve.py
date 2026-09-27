@@ -69,7 +69,9 @@ class _VisionFeed:
         img = self.screen.capture(
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
-        if img is not None and self.minimap.note_frame(img):
+        if img is not None and self.minimap.note_frame(
+            img, context=lambda: {"window": self.window_img()}
+        ):
             if self._on_event:
                 self._on_event("vision", "map change detected — minimap relocated")
         return img
@@ -217,6 +219,14 @@ class BotHost:
         return None
 
     def run(self) -> None:
+        from .vision import framelog
+
+        framelog.configure_from(
+            self.bot_config,
+            on_saved=lambda p: self.bus.emit(
+                "vision", f"frames captured: {p}", level="debug"
+            ),
+        )
         self.remote.start()
         self.http = EmbeddedHTTPServer(
             lambda: self.remote.ws_port, self.config.http_port,

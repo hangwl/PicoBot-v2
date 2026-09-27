@@ -11,6 +11,7 @@ import logging
 
 from ..config import AppConfig, load_config
 from ..settings import configure_logging
+from ..vision import framelog
 from .config import BotConfig
 from .smart_bot import SmartBot
 
@@ -29,6 +30,7 @@ def main() -> None:
     app_config = load_config()
     window_title = args.window or AppConfig().default_target_window
     bot_config = BotConfig.from_dict(getattr(app_config, "bot", None))
+    framelog.configure_from(bot_config)
 
     bot = SmartBot.connect(args.port, window_title, bot_config)
     try:

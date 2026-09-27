@@ -91,6 +91,11 @@ class BotConfig:
                                           # divider row is always in the band;
                                           # segmentation cuts it back out
 
+    # -- Debug ------------------------------------------------------------------
+    debug_capture: bool = True            # save frames around detection events
+    debug_capture_dir: str = "debug/frames"
+    debug_capture_max_events: int = 100   # oldest event folders are pruned
+
     def __post_init__(self) -> None:
         if not self.skills:
             self.skills = SkillBook.from_config({
@@ -108,6 +113,7 @@ class BotConfig:
             "stationary_mode", "enable_random_wander",
             "stop_when_players_appear", "stop_when_rune_appears",
             "pause_on_lie_detector", "dwell_weave", "name_ocr",
+            "debug_capture",
         )
         for name in bools:
             if name in data:
@@ -121,7 +127,7 @@ class BotConfig:
                 setattr(cfg, name, float(data[name]))
         ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px",
                 "marker_inset_px", "weave_range_px", "weave_edge_margin_px",
-                "wall_zone_px", "name_scan_px")
+                "wall_zone_px", "name_scan_px", "debug_capture_max_events")
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))
@@ -165,6 +171,8 @@ class BotConfig:
             cfg.travel_style = str(data["travel_style"])
         if "maps_dir" in data:
             cfg.maps_dir = str(data["maps_dir"])
+        if data.get("debug_capture_dir"):
+            cfg.debug_capture_dir = str(data["debug_capture_dir"])
         if "active_map" in data:
             v = data["active_map"]
             cfg.active_map = str(v) if v else None

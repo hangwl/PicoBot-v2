@@ -41,7 +41,10 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "marker_inset_px": 4,
     "name_ocr": true,
     "name_scan_px": 160,
-    "minimap_name_region": null
+    "minimap_name_region": null,
+    "debug_capture": true,
+    "debug_capture_dir": "debug/frames",
+    "debug_capture_max_events": 100
   }
 }
 ```
@@ -73,5 +76,8 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.
 - `pause_on_lie_detector` is a stub seam — keep it off.
+- `debug_capture` saves frames around detection events to
+  `debug_capture_dir`, keeping the newest `debug_capture_max_events`
+  folders. See [development.md](development.md#debug-frame-captures).
 - Key timing is humanized host-side; the Pico firmware relays raw
   down/up events unchanged.

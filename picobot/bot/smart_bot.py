@@ -15,6 +15,7 @@ import random
 import time
 from typing import Dict, List, Optional, Tuple
 
+from ..vision import framelog
 from ..vision.game_window import GameWindow
 from ..vision.mapname import MapNameReader, name_strip_region
 from ..vision.minimap import (
@@ -153,7 +154,9 @@ class SmartBot(BotBase):
             img = self.screen.capture(
                 (self.window.client_left + x, self.window.client_top + y, w, h)
             )
-            if img is not None and self.minimap.note_frame(img):
+            if img is not None and self.minimap.note_frame(
+                img, context=lambda: {"window": self._window_capture()}
+            ):
                 self.event("vision", "map change detected — minimap relocated")
                 self._minimap_warned = False  # re-warn if re-locate fails
                 # Re-identify the map under the new scene so a stale pin
@@ -360,6 +363,7 @@ class SmartBot(BotBase):
             self.viz["hazard"] = None
             return None
         reason = None
+        capture = None
         rune = self.minimap.rune_pos(img)
         self.viz["rune"] = rune
         if cfg.stop_when_rune_appears and rune is not None:
@@ -372,10 +376,22 @@ class SmartBot(BotBase):
                 ignore_colors=self._fp_ignored_colors(),
                 include_mask=self._fp_mask(img),
             )
-            if fingerprint_distance(fp, self._leg_fp) > cfg.map_match_threshold:
+            dist = fingerprint_distance(fp, self._leg_fp)
+            if dist > cfg.map_match_threshold:
                 reason = "map changed unexpectedly (portal?)"
+                capture = {
+                    "dist": None if dist == float("inf") else round(dist, 2),
+                    "fp_blank": not fp,
+                    "region": self.minimap.region,
+                }
         if reason != self.viz["hazard"] and reason is not None:
             self.event("safety", reason)
+            if capture is not None and framelog.recorder().enabled:
+                framelog.recorder().snapshot(
+                    "hazard_leg_fp",
+                    {"frame": img, "window": self._window_capture()},
+                    **capture,
+                )
         self.viz["hazard"] = reason
         return reason
 
