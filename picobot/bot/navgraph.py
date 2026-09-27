@@ -322,10 +322,12 @@ class NavGraph:
             return None
 
         def pos(u: int) -> Tuple[float, float]:
+            # Endpoints keep their given y — anchors float above the row
+            # (like the player icon), so plans connect anchors, not lines.
             if u == s:
-                return (start[0], self.platforms[sp].y_at(start[0]))
+                return start
             if u == g:
-                return (goal[0], self.platforms[gp].y_at(goal[0]))
+                return goal
             return self.point(u)
 
         legs: List[Leg] = []

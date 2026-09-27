@@ -53,7 +53,7 @@ class BotConfig:
     nav_gap_px: float = 20.0              # widest gap a flash jump clears
     nav_double_gap_px: float = 32.0       # widest gap a double flash clears
     nav_reach_file: str = "nav_reach.json"
-    linger_hops: Tuple[int, int] = (0, 1)  # weave hops at each anchor
+    anchor_float_px: float = 4.0           # anchors hover this far above the platform line
     flash_repress_seconds: float = 0.15    # jump -> flash re-press gap
     combo_repress_seconds: float = 0.16    # gap between chained flashes
 
@@ -129,7 +129,7 @@ class BotConfig:
             "up_jump_skill_cooldown", "nav_up_flash_px", "nav_rope_lift_px",
             "nav_up_side_dx_px", "nav_jump_px", "nav_gap_px", "nav_double_gap_px",
             "vert_jump_interval",
-            "weave_double_chance", "wall_pad_px",
+            "weave_double_chance", "wall_pad_px", "anchor_float_px",
             "flash_repress_seconds", "combo_repress_seconds",
         )
         for name in floats:
@@ -152,9 +152,6 @@ class BotConfig:
             cfg.up_jump_skill_key = str(v) if v else None
         if data.get("nav_reach_file"):
             cfg.nav_reach_file = str(data["nav_reach_file"])
-        if "linger_hops" in data:
-            lo, hi = data["linger_hops"]
-            cfg.linger_hops = (max(0, int(lo)), max(int(lo), int(hi)))
         if "skill_gap_seconds" in data:
             lo, hi = data["skill_gap_seconds"]
             cfg.skill_gap_seconds = (float(lo), float(hi))

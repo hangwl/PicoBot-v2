@@ -37,6 +37,14 @@ class Navigator:
         self._seed = self.rng.random()
 
     # -- Entry points ---------------------------------------------------------------
+    def execute_leg(self, leg: Leg) -> str:
+        """Perform one planned leg (the patrol's fixed plan calls this)."""
+        return self._leg(leg)
+
+    def execute_walk(self, x: float) -> bool:
+        """Walk to ``x`` on the current platform (planned walk leg)."""
+        return self._walk_to(x)
+
     def step(self, goal: Point) -> str:
         """One leg toward ``goal``: ``arrived`` | ``moved`` | ``failed`` |
         ``noroute`` | ``lost`` (no player position)."""

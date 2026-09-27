@@ -1,12 +1,13 @@
-"""Continuous patrol: a full traversal plan through every anchor.
+"""Continuous patrol: strictly execute a pre-planned anchor loop.
 
-The loop order is planned greedily by *route cost* (seconds over the
-movement graph, jittered so loops vary), and the complete traversal is
-published for the dashboard. Each tick performs one move toward the
-current anchor — re-planned from the player's actual position — so the
-bot always has a next position to move to. Anchors are pass-through
-waypoints with a brief randomized linger (``linger_hops``, default 0-1
-weave hops).
+The loop is a sequence of anchor-to-anchor segments over the movement
+graph, ordered greedily by route cost (jittered so loops vary). The bot
+follows the planned legs in order — one per tick, no re-planning between
+legs. Only a failed leg splices a re-route from the player's actual
+position; three misses ban the anchor. The next loop is planned before
+the current one finishes, so a planned path always exists; when none
+does, the bot halts and takes a break until planning succeeds. Anchors
+are pure pass-through waypoints — no linger.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import random
 import time
 from typing import List, Optional, Tuple
 
+from .navgraph import Leg
 from .navigator import Navigator
 
 Point = Tuple[float, float]
@@ -27,16 +29,18 @@ class Patrol:
         self.reset()
 
     def reset(self) -> None:
-        self.order: List[int] = []
-        self.linger = 0
+        # Segments: (anchor_idx, legs | None for hand-authored, from_idx).
+        self.plan: List[Tuple[int, Optional[List[Leg]], int]] = []
+        self.seg = 0
+        self.leg_i = 0
         self.fails = 0
         self._nav: Optional[Navigator] = None
         self._replan_at = 0.0
+        self._break_logged = 0.0
 
     # -- Tick -------------------------------------------------------------------------
     def tick(self) -> None:
         bot = self.bot
-        rot = bot.effective_rotation()
         img = bot.minimap_frame()
         pos = bot.minimap.player_pos(img) if img is not None else None
         bot.viz["player"] = pos
@@ -48,53 +52,78 @@ class Patrol:
             # No drawn platforms (or standing off them): straight-line patrol.
             bot._patrol_tick()
             return
-        if self.linger > 0:
-            self.linger -= 1
-            bot._weave_attack()
-            return
-        anchors = [(bot._rx(a.x), bot._ry(a.y)) for a in rot.anchors]
-        if not self.order:
-            if time.monotonic() >= self._replan_at:
-                self._plan(graph, pos, anchors)
-            if not self.order:
-                # Nothing reachable: keep weaving; re-plan in a few seconds.
-                self._replan_at = time.monotonic() + 3.0
-                bot._weave_attack()
-                return
-        idx = self.order[0]
-        goal = anchors[idx]
         if self._nav is None or self._nav.graph is not graph:
             self._nav = Navigator(bot, graph, rng=self.rng)
-        recorded = rot.legs.get((bot._anchor_idx, idx))
-        if recorded is not None:
-            status = "arrived" if bot._run_leg(recorded) else "failed"
-        else:
-            status = self._nav.step(goal)
-        if status == "arrived":
+        if self.seg >= len(self.plan):
+            if time.monotonic() >= self._replan_at:
+                self._replan_at = time.monotonic() + 3.0
+                self._plan_loop(graph, pos)
+            if self.seg >= len(self.plan):
+                self._break()
+                return
+        idx, legs, from_idx = self.plan[self.seg]
+        rot = bot.effective_rotation()
+        if legs is not None and self.leg_i >= len(legs):
             self._arrive(idx, rot.anchors[idx])
-        elif status == "cooldown":
-            pass                    # rope lift cooling — next step re-routes
+            self.seg += 1
+            self.leg_i = 0
+            if self.seg == len(self.plan) - 1:
+                self._plan_next(graph)   # next loop ready before this one ends
+            return
+        if legs is None:                 # hand-authored leg
+            recorded = rot.legs.get((from_idx, idx)) or []
+            status = "ok" if bot._run_leg(recorded) else "failed"
+            if status == "ok":
+                self._arrive(idx, rot.anchors[idx])
+                self.seg += 1
+                if self.seg == len(self.plan) - 1:
+                    self._plan_next(graph)
+                return
+        else:
+            leg = legs[self.leg_i]
+            if leg.kind == "walk":
+                status = "ok" if self._nav.execute_walk(leg.x1) else "failed"
+            else:
+                status = self._nav.execute_leg(leg)
+            if status == "ok":
+                self.leg_i += 1
+                self._publish()
+                return
+        if status == "cooldown":
+            # Rope lift started cooling: re-route without it (up-flash
+            # instead) — never wait, never count a failure.
+            if not self._splice(graph, pos, idx):
+                self._ban(graph, pos, idx, "no route")
         elif status == "noroute":
-            self._ban(idx, "no route")
+            self._ban(graph, pos, idx, "no route")
         elif status == "failed":
             self.fails += 1
-            bot.log(f"Patrol: missed a landing toward {rot.anchors[idx].name} ({self.fails})")
+            bot.log(
+                f"Patrol: missed a landing toward {rot.anchors[idx].name}"
+                f" ({self.fails})"
+            )
             if self.fails >= 3:
-                self._ban(idx, "unreachable after retries")
+                self._ban(graph, pos, idx, "unreachable after retries")
+            else:
+                self._splice(graph, pos, idx)
 
     # -- Planning ----------------------------------------------------------------------
-    def _plan(self, graph, pos: Point, anchors: List[Point]) -> None:
+    def _greedy(self, graph, cur: Point, cur_i: Optional[int]):
+        """Anchor-to-anchor segments by route cost, banning unreachable
+        ones. Returns (segments, flattened legs)."""
         bot = self.bot
+        rot = bot.effective_rotation()
+        anchors = [(bot._rx(a.x), bot._ry(a.y)) for a in rot.anchors]
         now = time.time()
         bot._ckpt_ban = {i: t for i, t in bot._ckpt_ban.items() if t > now}
         tol = bot.config.nav_threshold_px
-        here = graph.locate(*pos)
+        here = graph.locate(*cur)
         remaining = [
             i for i, (ax, ay) in enumerate(anchors)
             if i not in bot._ckpt_ban
-            and not (abs(ax - pos[0]) <= tol and graph.locate(ax, ay) == here)
+            and not (abs(ax - cur[0]) <= tol and graph.locate(ax, ay) == here)
         ]
-        order, legs, cur = [], [], pos
+        segments, flat = [], []
         while remaining:
             costs = {
                 i: graph.route_cost(cur, anchors[i]) * (1 + self.rng.uniform(-0.2, 0.2))
@@ -102,57 +131,124 @@ class Patrol:
             }
             nxt = min(remaining, key=costs.get)
             if costs[nxt] == float("inf"):
-                # Ban it like a failed leg so one bad anchor can't
-                # truncate the rest of the plan.
-                goal = anchors[nxt]
                 why = (
                     "not on a drawn platform — re-place it"
-                    if graph.locate(*goal) is None
+                    if graph.locate(*anchors[nxt]) is None
                     else "no route from here"
                 )
-                bot.log(
-                    f"Patrol: skipping {bot.effective_rotation().anchors[nxt].name}"
-                    f" for a while ({why})"
-                )
+                bot.log(f"Patrol: skipping {rot.anchors[nxt].name} for a while ({why})")
                 bot._ckpt_ban[nxt] = now + 30.0
                 remaining.remove(nxt)
                 continue
-            legs += graph.route(cur, anchors[nxt]) or []
-            order.append(nxt)
+            recorded = rot.legs.get((cur_i, nxt)) if cur_i is not None else None
+            if recorded is not None:
+                segments.append((nxt, None, cur_i))
+            else:
+                legs = graph.route(cur, anchors[nxt]) or []
+                segments.append((nxt, legs, -1))
+                flat += legs
             remaining.remove(nxt)
             cur = anchors[nxt]
-        self.order = order
+            cur_i = nxt
+        return segments, flat
+
+    def _plan_loop(self, graph, pos: Point) -> None:
+        self.plan, _ = self._greedy(graph, pos, None)
+        self.seg = 0
+        self.leg_i = 0
         self.fails = 0
-        bot.viz["plan"] = [(l.kind, l.x0, l.y0, l.x1, l.y1) for l in legs]
-        if order:
-            rot = bot.effective_rotation()
-            bot.log("Patrol plan: " + " → ".join(rot.anchors[i].name for i in order))
+        self._publish()
+        if self.plan:
+            rot = self.bot.effective_rotation()
+            self.bot.log(
+                "Patrol plan: "
+                + " → ".join(rot.anchors[i].name for i, _, _ in self.plan)
+            )
+
+    def _plan_next(self, graph) -> None:
+        """Plan the next loop from the loop's final anchor — runs while the
+        current loop still has a segment to go, so the plan never runs dry."""
+        bot = self.bot
+        rot = bot.effective_rotation()
+        idx = self.plan[self.seg][0]
+        cur = (bot._rx(rot.anchors[idx].x), bot._ry(rot.anchors[idx].y))
+        segments, _ = self._greedy(graph, cur, idx)
+        if segments:
+            self.plan += segments
+            self._publish()
+            bot.log(
+                "Next loop planned: "
+                + " → ".join(rot.anchors[i].name for i, _, _ in segments)
+            )
+
+    def _splice(self, graph, pos: Point, idx: int) -> bool:
+        """Re-route the current segment from the player's actual position."""
+        bot = self.bot
+        exclude = ("rope_lift",) if bot.rope_lift_remaining() > 0 else ()
+        legs = graph.route(pos, self._anchor_pos(idx), exclude=exclude)
+        if legs is None:
+            return False
+        self.plan[self.seg] = (idx, legs, -1)
+        self.leg_i = 0
+        self._publish()
+        return True
 
     # -- Bookkeeping ---------------------------------------------------------------------
+    def _anchor_pos(self, idx: int) -> Point:
+        bot = self.bot
+        a = bot.effective_rotation().anchors[idx]
+        return (bot._rx(a.x), bot._ry(a.y))
+
     def _arrive(self, idx: int, anchor) -> None:
         bot = self.bot
-        now = time.time()
-        self.order.pop(0)
         self.fails = 0
         bot._anchor_idx = idx
         bot._weave_dir = None
         bot._weave_bounds = None
-        bot._arrive_pending = bot._arrival_skills(anchor, now)
+        bot._arrive_pending = bot._arrival_skills(anchor, time.time())
         if anchor.face:
             bot.hid.press(anchor.face)
-        lo, hi = bot.config.linger_hops
-        self.linger = self.rng.randint(lo, hi)
         bot.viz["route"] = None
         bot.log(f"Checkpoint: {anchor.name}")
 
-    def _ban(self, idx: int, why: str) -> None:
+    def _ban(self, graph, pos: Point, idx: int, why: str) -> None:
         bot = self.bot
-        name = bot.effective_rotation().anchors[idx].name
-        bot.log(f"Patrol: skipping {name} for a while ({why})")
+        bot.log(f"Patrol: skipping {bot.effective_rotation().anchors[idx].name} for a while ({why})")
         bot._ckpt_ban[idx] = time.time() + 30.0
-        if self.order and self.order[0] == idx:
-            self.order.pop(0)
-        self.fails = 0
+        if self.seg < len(self.plan) and self.plan[self.seg][0] == idx:
+            self.plan.pop(self.seg)
+            self.leg_i = 0
+            self.fails = 0
+            while self.seg < len(self.plan):
+                nxt = self.plan[self.seg][0]
+                if self._splice(graph, pos, nxt):
+                    break
+                bot._ckpt_ban[nxt] = time.time() + 30.0
+                self.plan.pop(self.seg)
+                bot.log(f"Patrol: skipping {bot.effective_rotation().anchors[nxt].name} for a while (no route)")
+
+    def _break(self) -> None:
+        """No planned path: halt all actions until planning succeeds."""
+        bot = self.bot
+        now = time.time()
+        if now - self._break_logged > 5.0:
+            self._break_logged = now
+            bot.log("No planned path — taking a break")
+        bot.sleep(2.0)
+
+    def _publish(self) -> None:
+        bot = self.bot
+        if self.seg < len(self.plan):
+            legs = self.plan[self.seg][1]
+            if legs:
+                bot.viz["route"] = [
+                    (l.kind, l.x0, l.y0, l.x1, l.y1) for l in legs[self.leg_i:]
+                ]
+        plan = []
+        for _, seg_legs, _ in self.plan[self.seg:]:
+            if seg_legs:
+                plan += [(l.kind, l.x0, l.y0, l.x1, l.y1) for l in seg_legs]
+        bot.viz["plan"] = plan
 
 
 __all__ = ["Patrol"]

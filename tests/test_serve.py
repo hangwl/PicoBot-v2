@@ -638,8 +638,8 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|anchor|190,20|m1")   # mid-air
             rot = MapStore(tmp).get("m1").rotation
             self.assertEqual([a.name for a in rot.anchors], ["a0", "a1", "a2"])
-            self.assertEqual(rot.anchors[0].y, round(100 / 150, 4))  # snapped
-            self.assertEqual(rot.anchors[1].y, round(84 / 150, 4))
+            self.assertEqual(rot.anchors[0].y, round(96 / 150, 4))   # floats 4px
+            self.assertEqual(rot.anchors[1].y, round(80 / 150, 4))
             self.assertEqual(rot.anchors[2].y, round(20 / 150, 4))   # left as-is
             self.host._handle_command("layout|anchor|del|78,84|m1")
             names = [a.name for a in MapStore(tmp).get("m1").rotation.anchors]

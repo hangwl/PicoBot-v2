@@ -21,7 +21,7 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "nav_gap_px": 20,
     "nav_double_gap_px": 32,
     "nav_reach_file": "nav_reach.json",
-    "linger_hops": [0, 1],
+    "anchor_float_px": 4,
     "flash_repress_seconds": 0.15,
     "combo_repress_seconds": 0.16,
     "vert_jump_interval": 0.9,
@@ -88,9 +88,9 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   weaved inside it.
 - Removed keys (`stationary_mode`, `enable_random_wander`,
   `stationary_seconds`, `wander_seconds`, `wander_edge_margin_px`,
-  rotation `wander_chance`/`rest_chance`) are ignored.
-- `linger_hops` — weave hops at each anchor before moving on, random in
-  `[lo, hi]`.
+  `linger_hops`, rotation `wander_chance`/`rest_chance`) are ignored.
+- `anchor_float_px` — how far placed anchors hover above the drawn
+  platform line (matching the player icon).
 - `flash_repress_seconds` / `combo_repress_seconds` — mid-air re-press
   gaps (jump → flash; between chained flashes). Raise them if an
   up-side or double flash rarely chains on your server.

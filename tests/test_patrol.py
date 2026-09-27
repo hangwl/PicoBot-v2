@@ -15,8 +15,7 @@ class PatrolBot(SimBot):
         super().__init__(plats, pos, **kw)
         self.rot = Rotation(anchors=[Anchor(f"a{i}", x / 200, y / 150)
                                      for i, (x, y) in enumerate(anchors)])
-        self.config = SimpleNamespace(nav_threshold_px=4, jump_key="space",
-                                      linger_hops=(0, 0))
+        self.config = SimpleNamespace(nav_threshold_px=4, jump_key="space")
         self._anchor_idx = 0
         self._ckpt_ban = {}
         self._arrive_pending = []
@@ -63,27 +62,23 @@ class PatrolTests(unittest.TestCase):
         anchors = [(20, 100), (80, 66), (170, 84)]
         bot = PatrolBot([FLOOR, MID, TOP, SIDE], (10, 100), anchors)
         p = Patrol(bot, rng=random.Random(2))
-        arrivals = []
         for _ in range(60):
-            before = len(p.order)
             p.tick()
-            if len(p.order) < before or (before and not p.order):
-                arrivals.append(bot._anchor_idx)
+        arrivals = [l.split(": ")[1] for l in bot.log_lines
+                    if l.startswith("Checkpoint:")]
         self.assertGreaterEqual(len(arrivals), 5)          # looped more than once
-        self.assertEqual(set(arrivals), {0, 1, 2})
+        self.assertEqual(set(arrivals), {"a0", "a1", "a2"})
         self.assertEqual(bot.attacks, 0)                   # never parked
+        self.assertEqual(bot.weaves, 0)                    # no linger
         self.assertEqual(bot._patrol_tick.call_count, 0)
 
-    def test_linger_is_bounded_weave_hops(self):
+    def test_no_linger_moves_on_immediately(self):
         bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (180, 100)])
-        bot.config.linger_hops = (2, 2)
         p = Patrol(bot, rng=random.Random(0))
-        for _ in range(9):
+        for _ in range(12):
             p.tick()
-        arrivals = sum(l.startswith("Checkpoint:") for l in bot.log_lines)
-        self.assertGreaterEqual(arrivals, 2)
-        self.assertLessEqual(bot.weaves, 2 * arrivals)
-        self.assertGreaterEqual(bot.weaves, 2 * (arrivals - 1))
+        self.assertGreaterEqual(sum(l.startswith("Checkpoint:") for l in bot.log_lines), 3)
+        self.assertEqual(bot.weaves, 0)            # no pause at anchors at all
 
     def test_unreachable_anchor_is_skipped_not_stuck_on(self):
         # a1 floats 60px above everything — no move reaches it.
@@ -92,19 +87,18 @@ class PatrolTests(unittest.TestCase):
         p = Patrol(bot, rng=random.Random(0))
         for _ in range(12):
             p.tick()
-        self.assertNotIn(1, p.order)
+        self.assertNotIn(1, [i for i, _, _ in p.plan])
         self.assertTrue(any("no route from here" in l for l in bot.log_lines))
         self.assertIn(1, bot._ckpt_ban)                # banned, not retried
 
-    def test_nothing_reachable_weaves_without_replanning_every_tick(self):
+    def test_nothing_plannable_halts_all_actions(self):
         bot = PatrolBot([FLOOR, (60, 40, 100, 40)], (10, 100), [(80, 40), (90, 40)])
         p = Patrol(bot, rng=random.Random(0))
         for _ in range(10):
             p.tick()
-        self.assertEqual(bot.weaves, 10)
-        skips = sum("skipping" in l for l in bot.log_lines)
-        self.assertGreaterEqual(skips, 2)          # both anchors banned once
-        self.assertLessEqual(skips, 3)             # not re-logged every replan
+        self.assertEqual((bot.weaves, bot.moves), (0, []))   # halted, not weaving
+        self.assertGreaterEqual(bot.slept, 2.0)              # taking a break
+        self.assertEqual(sum("taking a break" in l for l in bot.log_lines), 1)
 
     def test_continues_after_first_arrival_near_takeoff(self):
         # Regression: arriving 2px from the next up-flash takeoff stalled
@@ -119,7 +113,9 @@ class PatrolTests(unittest.TestCase):
     def test_repeated_misses_ban_the_anchor(self):
         bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)
         p = Patrol(bot, rng=random.Random(0))
-        p.order = [1]
+        from picobot.bot.navgraph import Leg
+
+        p.plan = [(1, [Leg("up_flash", 60, 100, 80, 84, 1.0)], 0)]
         for _ in range(4):
             p.tick()
         self.assertIn(1, bot._ckpt_ban)
@@ -154,10 +150,48 @@ class PatrolTests(unittest.TestCase):
                  if l.startswith("Checkpoint:")}
         self.assertEqual(names, {"a0", "a2"})           # a1 banned, rest flow
 
+    def test_next_loop_is_planned_before_the_current_ends(self):
+        bot = PatrolBot([FLOOR, MID, TOP], (10, 100),
+                        [(20, 100), (80, 66), (180, 100)], rope=0)
+        p = Patrol(bot, rng=random.Random(2))
+        next_loop_at = completion_at = None
+        for i in range(40):
+            p.tick()
+            if next_loop_at is None and any(
+                l.startswith("Next loop planned:") for l in bot.log_lines
+            ):
+                next_loop_at = i
+            if completion_at is None and sum(
+                l.startswith("Checkpoint:") for l in bot.log_lines
+            ) >= 3:
+                completion_at = i                        # first loop done
+        self.assertIsNotNone(next_loop_at)
+        self.assertLess(next_loop_at, completion_at)     # planned before the loop ends
+        arrivals = sum(l.startswith("Checkpoint:") for l in bot.log_lines)
+        self.assertGreaterEqual(arrivals, 5)            # loops keep flowing
+        self.assertNotIn("taking a break", " ".join(bot.log_lines))
+
+    def test_failed_leg_splices_a_reroute_without_dropping_the_anchor(self):
+        bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)],
+                        up=5, rope=0)
+        from picobot.bot.navgraph import Leg
+
+        p = Patrol(bot, rng=random.Random(0))
+        p.plan = [(1, [Leg("up_flash", 60, 100, 80, 84, 1.0)], 0)]
+        for _ in range(3):
+            p.tick()
+        self.assertNotIn(1, bot._ckpt_ban)              # only 2 misses so far
+        self.assertEqual(sum("missed a landing" in l for l in bot.log_lines), 2)
+        p.tick()
+        self.assertIn(1, bot._ckpt_ban)                 # 3rd miss bans
+
     def test_recorded_leg_wins(self):
+        from picobot.bot.navgraph import Leg
+
         bot = PatrolBot([FLOOR, MID], (20, 100), [(20, 100), (80, 84)])
         bot.rot.legs[(0, 1)] = ["climb"]
         p = Patrol(bot, rng=random.Random(0))
+        p.plan = [(1, None, 0)]
         p.tick()
         bot._run_leg.assert_called_once_with(["climb"])
 

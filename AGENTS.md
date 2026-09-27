@@ -48,11 +48,13 @@ what was tried and what was learned in `docs/learnings.md` instead.
   woven after the flash triggers** (never before: it eats the re-press
   window). Walk only for short final approaches. Delays are log-normal
   (`timing.human_between`/`human_delay`), never flat `uniform`.
-- **Always on the move**: with ≥2 anchors the bot follows a full
-  traversal plan, one move per tick, anchors as pass-through waypoints
-  (short linger only). No wander state, dwell timers, breathers, or
-  stationary attack loops. **Every flash move weaves attacks; no attack
-  outside a flash move** in moving paths.
+- **Always on the move, strictly on plan**: the patrol executes a
+  pre-planned anchor loop leg by leg; the next loop is planned before the
+  current one ends, and with no planned path the bot halts (break) rather
+  than improvise. Anchors are pure pass-through waypoints (no linger).
+  No wander state, dwell timers, breathers, or stationary attack loops.
+  **Every flash move weaves attacks; no attack outside a flash move** in
+  moving paths.
 - **Wall zones bind all movement** (graph clipping, weave, floor), each
   padded by `wall_pad_px`. Rope lift is preferred for rises when ready.
 - **Move reach is learned**, not hard-coded: planner edges come from

@@ -747,7 +747,8 @@ class BotHost:
             return
         snapped = platform_row_at(self._platforms_px(entry), x, y, max_snap=12)
         if snapped is not None:
-            y = snapped
+            # Float above the line like the player icon does.
+            y = snapped - self.bot_config.anchor_float_px
         taken = {a.name for a in rot.anchors}
         n = 0
         while f"a{n}" in taken:

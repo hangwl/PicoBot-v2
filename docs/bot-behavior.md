@@ -2,20 +2,24 @@
 
 ## Continuous patrol (`patrol.py`)
 
-With ≥2 anchors and drawn platforms the bot is always on the move:
+With ≥2 anchors and drawn platforms the bot strictly follows a planned
+loop:
 
-- **Full traversal plan**: anchors are ordered greedily by *route cost*
-  (seconds over the movement graph, ±20% jitter so loops vary), skipping
-  the anchor being stood on. The whole loop's legs are published and
-  drawn on the Panel view (olive); the current segment is yellow.
-- **One move per tick**, re-planned from the player's actual position,
-  so a missed landing is corrected on the next tick. Safety checks run
-  between moves.
-- **Anchors are waypoints**: arriving fires `on_arrive` skills (or, for
-  placed anchors, any summon that is off cooldown), then lingers
-  `linger_hops` (default 0–2, random) weave hops and moves on. No dwell
-  timers, no breathers.
-- Loop finished → re-plan from wherever the player is.
+- **The plan is a fixed loop of anchor-to-anchor segments** over the
+  movement graph, ordered greedily by route cost (±20% jitter so loops
+  vary). Legs execute in order — no re-planning between legs. The plan is
+  drawn on the Panel view (olive), the current segment yellow.
+- **The next loop is planned before the current one ends** (when the bot
+  enters the last segment), so a planned path always exists. If planning
+  ever yields nothing, the bot **halts and takes a break** — no movement,
+  no attacks — and retries every few seconds.
+- **One leg per tick**; safety checks run between legs. A failed leg
+  splices a re-route from the player's actual position into the plan
+  (rope lift excluded while cooling, without counting a failure); 3
+  missed landings ban the anchor for 30s and re-route to the next one.
+- **Anchors are pure pass-through waypoints**: arriving fires `on_arrive`
+  skills (or, for placed anchors, any summon that is off cooldown) and
+  the bot moves on immediately — no linger, no dwell timers.
 - **Bans**: no route, unreachable-at-plan-time (including anchors not
   on any drawn platform — "re-place it"), or 3 missed landings → skipped
   for 30s, so one bad anchor can't shrink or stall the patrol.
@@ -24,6 +28,14 @@ With ≥2 anchors and drawn platforms the bot is always on the move:
   straight-line patrol; one anchor → weave on its platform; no anchors →
   weave around where grinding started (`dwell_weave: false` attacks in
   place).
+
+## Anchors
+
+Anchors float `anchor_float_px` (default 4) above the drawn platform
+line — the same height as the player icon — instead of sitting on it.
+Placement snaps the height to the platform under the click and raises it;
+the runtime checks arrival by platform membership, so older on-row
+anchors keep working.
 
 ## Moves & learned reach (`navgraph.py`, `reach.py`, `navigator.py`)
 
