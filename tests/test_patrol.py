@@ -95,6 +95,24 @@ class PatrolTests(unittest.TestCase):
         self.assertNotIn(1, p.order)
         self.assertTrue(any("unreachable" in l for l in bot.log_lines))
 
+    def test_nothing_reachable_weaves_without_replanning_every_tick(self):
+        bot = PatrolBot([FLOOR, (60, 40, 100, 40)], (10, 100), [(80, 40), (90, 40)])
+        p = Patrol(bot, rng=random.Random(0))
+        for _ in range(10):
+            p.tick()
+        self.assertEqual(bot.weaves, 10)
+        self.assertEqual(sum("unreachable" in l for l in bot.log_lines), 1)
+
+    def test_continues_after_first_arrival_near_takeoff(self):
+        # Regression: arriving 2px from the next up-flash takeoff stalled
+        # the bot (no-op walk leg re-planned forever).
+        bot = PatrolBot([FLOOR, MID], (10, 100), [(78, 100), (80, 84)])
+        p = Patrol(bot, rng=random.Random(0))
+        for _ in range(6):
+            p.tick()
+        self.assertIn("up_flash", bot.moves)
+        self.assertGreaterEqual(sum(l.startswith("Checkpoint:") for l in bot.log_lines), 2)
+
     def test_repeated_misses_ban_the_anchor(self):
         bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5)
         p = Patrol(bot, rng=random.Random(0))

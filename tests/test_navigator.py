@@ -179,6 +179,16 @@ class NavigatorTests(unittest.TestCase):
         self.assertEqual(nav.step((80, 66)), "moved")      # retried from floor
         self.assertEqual(nav.step((80, 66)), "arrived")
 
+    def test_tiny_leading_walk_does_not_stall(self):
+        # Standing 2px from the up-flash takeoff (MID overlap midpoint 80):
+        # the route's first leg is a walk already within tolerance. Each
+        # step must still make progress, not re-plan the same no-op.
+        bot = SimBot([FLOOR, MID], (78, 100))
+        nav = self._nav(bot)
+        statuses = [nav.step((80, 84)) for _ in range(3)]
+        self.assertIn("arrived", statuses)
+        self.assertEqual(bot.moves, ["up_flash"])
+
     def test_landing_outcomes_teach_reach(self):
         # The real flash carries 30px; the model starts at 25 — the first
         # observed flash grows the proven envelope.

@@ -55,7 +55,17 @@ class Navigator:
         if legs is None:
             return "noroute"
         bot.viz["route"] = [(l.kind, l.x0, l.y0, l.x1, l.y1) for l in legs]
-        if not self._leg(legs[0]):
+        # Perform the first leg that needs doing — a walk already within
+        # tolerance would be a no-op and the next step would re-plan the
+        # identical route forever.
+        tol = bot.config.nav_threshold_px
+        leg = next(
+            (l for l in legs if l.kind != "walk" or abs(pos[0] - l.x1) > tol),
+            None,
+        )
+        if leg is None:
+            return "moved"
+        if not self._leg(leg):
             return "failed"
         pos = self._pos()
         return "arrived" if pos is not None and self._arrived(pos, goal, goal_plat) else "moved"

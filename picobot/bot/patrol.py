@@ -30,6 +30,7 @@ class Patrol:
         self.linger = 0
         self.fails = 0
         self._nav: Optional[Navigator] = None
+        self._replan_at = 0.0
 
     # -- Tick -------------------------------------------------------------------------
     def tick(self) -> None:
@@ -52,8 +53,11 @@ class Patrol:
             return
         anchors = [(bot._rx(a.x), bot._ry(a.y)) for a in rot.anchors]
         if not self.order:
-            self._plan(graph, pos, anchors)
+            if time.monotonic() >= self._replan_at:
+                self._plan(graph, pos, anchors)
             if not self.order:
+                # Nothing reachable: keep weaving; re-plan in a few seconds.
+                self._replan_at = time.monotonic() + 3.0
                 bot._weave_attack()
                 return
         idx = self.order[0]
