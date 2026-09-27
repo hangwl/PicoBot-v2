@@ -45,8 +45,9 @@ covers the gap:
   a miss on an exploratory attempt sets a ceiling. The planner may try
   up to 1.15× the proven reach at a cost penalty, so reach grows from
   the conservative start. Learned values persist in `nav_reach_file`.
-- Rope lift: a remaining cooldown ≤1.5s is waited out; longer excludes
-  rope lift from that step's plan (up-flash chains instead).
+- Rope lift is **preferred over up-flash whenever it's ready** (cheapest
+  rise). While it's cooling down it's left out of the plan and the bot
+  up-flashes instead — it never waits on the cooldown.
 - The dashboard's **Route** button shows every edge (colours per move)
   and previews routes on click.
 
@@ -63,9 +64,14 @@ Bot-controlled movement looks like a player farming, not a macro:
   and walks only the final approach. Hop distance is learned from
   observed hops (starts at 14 minimap px). Hops that don't move fall back
   to walking; with `flash_jump_enabled: false` attacks weave into walks.
-- Dwell/patrol weaving uses the same primitive, bouncing across the
-  anchor's drawn platform; walls force inward facing.
-- Gap-crossing flashes in pathfinding stay attack-free.
+- **Every flash move attacks**: gap flashes, double flashes, up flashes
+  and up-then-side flashes all weave 1–2 attacks once the flash has
+  triggered (`_after_flash`). Attacks never fire outside a flash move in
+  the moving paths — with no player dot the bot waits instead of
+  attacking in place. (`dwell_weave: false` is the one stationary mode.)
+- Linger/roam weaving uses the same primitive, bouncing across the
+  platform; it never starts a hop that would land inside a (padded) wall
+  zone.
 - All gaps are log-normal (`timing.human_between`: clamped to the game's
   input windows, e.g. re-press 0.11–0.26s around 0.17s).
 
@@ -79,8 +85,25 @@ Registered skills have `key`, `kind`, `cooldown`:
   `wait_on_arrival` caps how long the bot waits for its cooldown.
 - Movement keys (jump, flash, rope-lift) register the same way.
 
-`dwell` bounds single-anchor parking and the rest-breather window;
-`rest_chance`/`wander_chance`/`position_jitter_px` add entropy.
+`dwell` bounds single-anchor parking; `position_jitter_px` adds entropy
+to hand-authored walk legs. There is no wander state or idle breather —
+the bot keeps moving.
+
+## Wall zones
+
+Drawn walls (L/R) and the floor are forbidden zones, each extended by
+`wall_pad_px` (default 6) of buffer: the left zone grows rightward, the
+right zone leftward, the floor zone upward. They bind everything:
+
+- The movement graph clips platforms to the padded limits, closes
+  clipped ends (no drop or gap move leaves toward a wall), and removes
+  platforms inside the padded floor band — so routes and anchors inside
+  a zone are unreachable (logged) rather than attempted.
+- Weave hops turn before a hop could land in a zone.
+- Without per-map walls, `wall_zone_px` edge margins apply (also padded).
+- Note: a floor placed *on* the lowest platform puts that platform in
+  the padded band — place the floor below the lowest platform you want
+  used, or lower `wall_pad_px`.
 
 ## Safety
 

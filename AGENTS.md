@@ -50,8 +50,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
   (`timing.human_between`/`human_delay`), never flat `uniform`.
 - **Always on the move**: with ≥2 anchors the bot follows a full
   traversal plan, one move per tick, anchors as pass-through waypoints
-  (short linger only). No dwell timers or stationary attack loops in
-  patrol.
+  (short linger only). No wander state, dwell timers, breathers, or
+  stationary attack loops. **Every flash move weaves attacks; no attack
+  outside a flash move** in moving paths.
+- **Wall zones bind all movement** (graph clipping, weave, floor), each
+  padded by `wall_pad_px`. Rope lift is preferred for rises when ready.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Upward: `up_flash` (Up + jump mid-air), `up_side_flash`, `rope_lift`.

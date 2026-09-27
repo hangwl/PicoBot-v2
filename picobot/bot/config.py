@@ -20,8 +20,6 @@ class BotConfig:
     """Tuning knobs for :class:`~picobot.bot.smart_bot.SmartBot`."""
 
     # -- Behavior toggles ------------------------------------------------------
-    stationary_mode: bool = True          # attack in place between wanders
-    enable_random_wander: bool = True     # periodically walk around the map
     stop_when_players_appear: bool = True # pause if other players show on minimap
     stop_when_rune_appears: bool = True   # pause if a rune marker appears
 
@@ -41,13 +39,10 @@ class BotConfig:
 
     # -- Timing ----------------------------------------------------------------
     skill_gap_seconds: Tuple[float, float] = (0.5, 1.0)  # base gap between attacks
-    stationary_seconds: float = 20.0      # grind in place before wandering
-    wander_seconds: float = 15.0          # how long a wander phase lasts
 
     # -- Navigation ------------------------------------------------------------
     nav_threshold_px: int = 5             # minimap px tolerance for "arrived"
     nav_stuck_limit: int = 40             # identical polls before rope-escape
-    wander_edge_margin_px: int = 20       # turn around this close to map edge
     # Starting move reach (minimap px) — conservative; learned upward
     # from observed moves into nav_reach_file.
     nav_up_flash_px: float = 14.0         # rise of an upward flash jump
@@ -65,6 +60,7 @@ class BotConfig:
     weave_range_px: int = 24              # fallback half-width around the anchor
     weave_edge_margin_px: int = 4         # stay this far inside platform bounds
     wall_zone_px: int = 16                # force inward dir inside this edge zone
+    wall_pad_px: float = 6.0              # buffer beyond each drawn wall/floor zone
 
     # -- Vision ----------------------------------------------------------------
     minimap_colors: MinimapColors = field(default_factory=MinimapColors)
@@ -81,8 +77,8 @@ class BotConfig:
 
     # -- Rotation ---------------------------------------------------------------
     rotation: Rotation = field(default_factory=Rotation)
-    """Anchor/leg route graph. When empty the bot falls back to the legacy
-    stationary-grind/wander behaviour. Map files can override this."""
+    """Anchor/leg route graph. When empty the bot weave-hops around where
+    grinding started. Map files can override this."""
 
     # -- Movement ---------------------------------------------------------------
     flash_jump_enabled: bool = True
@@ -119,7 +115,6 @@ class BotConfig:
             return cls()
         cfg = cls()
         bools = (
-            "stationary_mode", "enable_random_wander",
             "stop_when_players_appear", "stop_when_rune_appears",
             "pause_on_lie_detector", "dwell_weave", "name_ocr",
         )
@@ -127,15 +122,15 @@ class BotConfig:
             if name in data:
                 setattr(cfg, name, bool(data[name]))
         floats = (
-            "buff_interval_seconds", "stationary_seconds", "wander_seconds",
+            "buff_interval_seconds",
             "up_jump_skill_cooldown", "nav_up_flash_px", "nav_rope_lift_px",
             "nav_up_side_dx_px", "nav_jump_px", "nav_gap_px", "nav_double_gap_px",
-            "weave_double_chance",
+            "weave_double_chance", "wall_pad_px",
         )
         for name in floats:
             if name in data:
                 setattr(cfg, name, float(data[name]))
-        ints = ("nav_threshold_px", "nav_stuck_limit", "wander_edge_margin_px",
+        ints = ("nav_threshold_px", "nav_stuck_limit",
                 "marker_inset_px", "weave_range_px", "weave_edge_margin_px",
                 "wall_zone_px", "name_scan_px", "debug_capture_max_events")
         for name in ints:

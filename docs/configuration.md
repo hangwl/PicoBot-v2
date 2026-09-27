@@ -12,8 +12,6 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "jump_key": "alt",
     "up_jump_skill_key": null,
     "up_jump_skill_cooldown": 3.0,
-    "stationary_seconds": 20,
-    "wander_seconds": 15,
     "skill_gap_seconds": [0.5, 1.0],
     "nav_threshold_px": 5,
     "nav_up_flash_px": 14,
@@ -28,8 +26,7 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "weave_double_chance": 0.4,
     "weave_range_px": 24,
     "wall_zone_px": 16,
-    "stationary_mode": true,
-    "enable_random_wander": true,
+    "wall_pad_px": 6,
     "stop_when_players_appear": true,
     "stop_when_rune_appears": true,
     "pause_on_lie_detector": false,
@@ -83,6 +80,12 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   the bot learns real values from observed moves and stores them in
   `nav_reach_file` (gitignored, per character). Delete that file to
   relearn. See [bot-behavior.md](bot-behavior.md#moves--learned-reach-navgraphpy-reachpy-navigatorpy).
+- `wall_pad_px` — buffer added to every wall/floor zone (left zone
+  rightward, right zone leftward, floor upward); nothing is planned or
+  weaved inside it.
+- Removed keys (`stationary_mode`, `enable_random_wander`,
+  `stationary_seconds`, `wander_seconds`, `wander_edge_margin_px`,
+  rotation `wander_chance`/`rest_chance`) are ignored.
 - `linger_hops` — weave hops at each anchor before moving on, random in
   `[lo, hi]`.
 - `pause_on_lie_detector` is a stub seam — keep it off.

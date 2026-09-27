@@ -7,7 +7,8 @@ from picobot.bot.timing import human_delay, human_hold, jittered
 class BotConfigTests(unittest.TestCase):
     def test_defaults(self):
         cfg = BotConfig()
-        self.assertTrue(cfg.stationary_mode)
+        self.assertEqual(cfg.wall_pad_px, 6.0)
+        self.assertFalse(hasattr(cfg, "enable_random_wander"))
         self.assertTrue(cfg.stop_when_rune_appears)
         self.assertFalse(cfg.pause_on_lie_detector)
         self.assertEqual(cfg.attack_keys, ["a"])
@@ -15,13 +16,13 @@ class BotConfigTests(unittest.TestCase):
 
     def test_from_dict_overrides(self):
         cfg = BotConfig.from_dict({
-            "stationary_seconds": 5,
+            "wall_pad_px": 3,
             "attack_keys": ["a", "s"],
             "stop_when_players_appear": False,
             "minimap_region": [10, 20, 100, 80],
             "skill_gap_seconds": [0.2, 0.4],
         })
-        self.assertEqual(cfg.stationary_seconds, 5.0)
+        self.assertEqual(cfg.wall_pad_px, 3.0)
         self.assertEqual(cfg.attack_keys, ["a", "s"])
         self.assertFalse(cfg.stop_when_players_appear)
         self.assertEqual(cfg.minimap_region, (10, 20, 100, 80))

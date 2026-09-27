@@ -30,7 +30,7 @@ class SimBot:
 
     def __init__(self, plats, pos, *, flash=25, double=40, up=20, side=25,
                  rope=30, rope_cd=0.0, fizzle=0):
-        self.g = NavGraph(plats, reach())
+        self.g = NavGraph(plats, reach(rope_lift=Reach(3, rope if rope else 0)))
         self.pos = pos
         self.flash, self.double, self.up, self.side, self.rope = flash, double, up, side, rope
         self.rope_cd = rope_cd
@@ -74,7 +74,7 @@ class SimBot:
         return True
 
     def rope_lift_remaining(self):
-        return self.rope_cd
+        return self.rope_cd if self.rope else float("inf")
 
     def rope_lift(self):
         if self.rope_cd > 0:
@@ -137,10 +137,15 @@ class NavigatorTests(unittest.TestCase):
         return Navigator(bot, bot.g, rng=random.Random(0))
 
     def test_climbs_with_up_flashes(self):
-        bot = SimBot([FLOOR, MID, TOP], (10, 100))
+        bot = SimBot([FLOOR, MID, TOP], (10, 100), rope=0)
         self.assertTrue(self._nav(bot).go((80, 66)))
         self.assertEqual(bot.pos, (80, 66))
         self.assertEqual(bot.moves, ["up_flash", "up_flash"])
+
+    def test_rope_lift_preferred_when_ready(self):
+        bot = SimBot([FLOOR, MID], (60, 100))
+        self.assertTrue(self._nav(bot).go((80, 84)))
+        self.assertEqual(bot.moves, ["rope_lift"])
 
     def test_descends(self):
         bot = SimBot([FLOOR, MID, TOP], (80, 66))
@@ -160,11 +165,10 @@ class NavigatorTests(unittest.TestCase):
         self.assertTrue(self._nav(bot).go((140, 86)))
         self.assertEqual(bot.moves, ["up_side_flash"])
 
-    def test_rope_lift_waits_out_short_cooldown(self):
-        bot = SimBot([FLOOR, (60, 70, 100, 70)], (80, 100), rope_cd=1.0)
-        self.assertTrue(self._nav(bot).go((80, 70)))
-        self.assertEqual(bot.moves, ["rope_lift"])
-        self.assertGreaterEqual(bot.slept, 1.0)
+    def test_cooling_rope_lift_is_not_waited_for(self):
+        bot = SimBot([FLOOR, MID], (80, 100), rope_cd=0.5)
+        self.assertTrue(self._nav(bot).go((80, 84)))
+        self.assertEqual(bot.moves, ["up_flash"])
 
     def test_long_rope_cooldown_excludes_rope_lift(self):
         bot = SimBot([FLOOR, (60, 70, 100, 70)], (80, 100), rope_cd=10.0)
@@ -172,7 +176,7 @@ class NavigatorTests(unittest.TestCase):
         self.assertEqual(bot.moves, [])
 
     def test_step_is_one_move_and_replans_after_a_miss(self):
-        bot = SimBot([FLOOR, MID, TOP], (80, 100), fizzle=1)
+        bot = SimBot([FLOOR, MID, TOP], (80, 100), fizzle=1, rope=0)
         nav = self._nav(bot)
         self.assertEqual(nav.step((80, 66)), "failed")     # fizzled up-flash
         self.assertEqual(bot.pos[1], 100)
@@ -183,7 +187,7 @@ class NavigatorTests(unittest.TestCase):
         # Standing 2px from the up-flash takeoff (MID overlap midpoint 80):
         # the route's first leg is a walk already within tolerance. Each
         # step must still make progress, not re-plan the same no-op.
-        bot = SimBot([FLOOR, MID], (78, 100))
+        bot = SimBot([FLOOR, MID], (78, 100), rope=0)
         nav = self._nav(bot)
         statuses = [nav.step((80, 84)) for _ in range(3)]
         self.assertIn("arrived", statuses)
@@ -197,13 +201,13 @@ class NavigatorTests(unittest.TestCase):
         self.assertGreater(bot.g.reach.get("flash").dx, 25)
 
     def test_short_real_reach_shrinks_model_and_gives_up(self):
-        bot = SimBot([FLOOR, MID], (60, 100), up=5)
+        bot = SimBot([FLOOR, MID], (60, 100), up=5, rope=0)
         self.assertFalse(self._nav(bot).go((80, 84), max_failures=2))
         self.assertLess(bot.g.reach.get("up_flash").rise, 20)
         self.assertTrue(any("giving up" in l for l in bot.log_lines))
 
     def test_route_published_for_dashboard(self):
-        bot = SimBot([FLOOR, MID], (10, 100))
+        bot = SimBot([FLOOR, MID], (10, 100), rope=0)
         self._nav(bot).step((80, 84))
         self.assertTrue(any(k == "up_flash" for k, *_ in bot.viz["route"]))
 

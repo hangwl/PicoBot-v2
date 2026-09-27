@@ -3,7 +3,7 @@
 Replaces blind macro playback with a perceive -> decide -> act loop.
 The bot runs a *rotation*: a graph of anchors (farming spots) connected
 by legs (walk / flash-jump / climb steps) read from config or a map file.
-An FSM composes the behaviour (GRIND dwell / TRAVEL leg / WANDER detour /
+An FSM composes the behaviour (GRIND patrol / TRAVEL leg /
 PAUSE), movement is goal-directed, and skills fire off per-skill
 cooldowns — the way a player actually works a map.
 """
@@ -98,7 +98,6 @@ class SmartBot(BotBase):
         self._anchor_idx = 0
         self._travel_target: Optional[int] = None
         self._dwell_end = 0.0
-        self._rest_until = 0.0
         self._arrive_pending: List[Tuple[Skill, float]] = []
         self._minimap_warned = False
         self._last_up_skill = 0.0
@@ -348,22 +347,12 @@ class SmartBot(BotBase):
 
     # -- Movement ----------------------------------------------------------------
     def up_jump(self) -> bool:
-        """Vertical boost: configured skill key if set, else jump+up+jump.
-
-        Returns False when the skill key was suppressed by its cooldown
-        (rope lift & co. are on a real timer — pressing early does nothing
-        in-game) or the window isn't focused; True when it pressed.
-        """
+        """Vertical boost: rope lift when it's ready, else jump + Up + jump
+        — never waits on the rope-lift cooldown. False only when the
+        window isn't focused."""
         if not self.is_window_focused():
             return False
-        if self.config.up_jump_skill_key:
-            now = time.time()
-            last = getattr(self, "_last_up_skill", 0.0)
-            if now - last < self.config.up_jump_skill_cooldown:
-                return False
-            self._last_up_skill = now
-            self.hid.press(self.config.up_jump_skill_key)
-            self.sleep(human_between(0.3, 0.22, 0.45))
+        if self.rope_lift():
             return True
         jk = self.config.jump_key
         self.hid.press(jk)
@@ -403,8 +392,8 @@ class SmartBot(BotBase):
             self.sleep(human_between(0.12, 0.08, 0.18))
             self.hid.key_down("up")
             self.hid.press(jk)
-            self.sleep(human_between(0.45, 0.35, 0.6))
             self.hid.key_up("up")
+            self._after_flash(0.36)
         finally:
             if direction:
                 self.hid.key_up(direction)
@@ -422,7 +411,7 @@ class SmartBot(BotBase):
             self.sleep(human_between(0.16, 0.11, 0.22))
             self.hid.key_up("up")
             self.hid.press(jk)
-            self.sleep(human_between(0.42, 0.3, 0.6))
+            self._after_flash(0.33)
         finally:
             self.hid.key_up(direction)
 
@@ -434,7 +423,7 @@ class SmartBot(BotBase):
         self.hid.press(jk)
         self.sleep(human_between(0.2, 0.14, 0.28))
         self.hid.press(jk)
-        self.sleep(human_between(0.42, 0.3, 0.6))
+        self._after_flash(0.33)
 
     def _current_map_entry(self) -> Optional[MapEntry]:
         """The resolved map, refreshed against the store.
@@ -463,7 +452,8 @@ class SmartBot(BotBase):
     def _nav_graph(self) -> Optional[NavGraph]:
         """Movement graph of the current map's drawn platforms, or None."""
         return self._nav_cache.get(
-            self._current_map_entry(), self.minimap.region, self.reach
+            self._current_map_entry(), self.minimap.region, self.reach,
+            self.config.wall_pad_px,
         )
 
     def _map_walls(self) -> Optional[dict]:
@@ -471,11 +461,25 @@ class SmartBot(BotBase):
         return entry.walls if entry is not None else None
 
     def _floor_px(self) -> Optional[int]:
-        """Resolved per-map floor y, or None when no floor is set."""
+        """Floor-zone top in px, padded upward by ``wall_pad_px`` — the bot
+        treats it as the bottom of the map. None when no floor is set."""
         walls = self._map_walls()
         if walls and walls.get("floor") is not None:
-            return self._ry(walls["floor"])
+            return int(round(self._ry(walls["floor"]) - self.config.wall_pad_px))
         return None
+
+    def _wall_limits(self) -> Tuple[float, float]:
+        """(left, right) x the bot must stay between: per-map walls (else
+        ``wall_zone_px`` edge margins), each padded ``wall_pad_px`` inward."""
+        cfg = self.config
+        walls = self._map_walls() or {}
+        map_w = self._region_wh()[0]
+        left = self._rx(walls["left"]) if walls.get("left") is not None else cfg.wall_zone_px
+        right = (
+            self._rx(walls["right"]) if walls.get("right") is not None
+            else map_w - cfg.wall_zone_px
+        )
+        return left + cfg.wall_pad_px, right - cfg.wall_pad_px
 
     def down_jump(self, img=None) -> None:
         if not self.is_window_focused():
@@ -495,12 +499,20 @@ class SmartBot(BotBase):
         return self.config.flash_jump_key or self.config.jump_key
 
     def _flash_hop(self) -> None:
-        """One attack-free flash jump (gap crossings)."""
+        """One flash jump (caller holds the direction), attacks woven in."""
         jk = self._flash_key()
         self.hid.press(jk)
         self.sleep(human_between(0.17, 0.11, 0.26))
         self.hid.press(jk)
-        self.sleep(human_between(0.42, 0.30, 0.65))
+        self._after_flash(0.34)
+
+    def _after_flash(self, airtime: float) -> None:
+        """The movement rule's tail: once a flash has triggered, weave 1–2
+        attacks, then ride out the rest of the airtime."""
+        self.sleep(human_between(0.09, 0.05, 0.15))
+        n = self._weave_attacks()
+        rest = airtime if n < 2 else airtime * 0.65
+        self.sleep(human_between(rest, rest * 0.6, rest * 1.6))
 
     def _flash_weave(self, direction: str) -> None:
         """The movement rule: hold ``direction`` through jump → flash-jump
@@ -516,9 +528,7 @@ class SmartBot(BotBase):
                 self.hid.press(jk)
                 self.sleep(human_between(0.17, 0.11, 0.26))
                 self.hid.press(jk)
-                self.sleep(human_between(0.09, 0.05, 0.15))
-                n = self._weave_attacks()
-                self.sleep(human_between(0.34 if n < 2 else 0.22, 0.14, 0.55))
+                self._after_flash(0.34)
             else:
                 self._weave_attacks()
                 self.sleep(human_between(0.4, 0.28, 0.6))
@@ -904,15 +914,9 @@ class SmartBot(BotBase):
             self._dwell_end = (
                 float("inf") if len(rot.anchors) >= 2 else now + dwell
             )
-            if len(rot.anchors) < 2 and random.random() < rot.rest_chance:
-                self._rest_until = now + min(dwell * 0.6, human_between(12, 5, 25, 0.4))
-                self.log("Taking a breather")
-            else:
-                self._rest_until = 0.0
         else:
             self._arrive_pending = []
-            self._rest_until = 0.0
-            self._dwell_end = now + self.config.stationary_seconds
+            self._dwell_end = float("inf")
 
     def _arrival_skills(self, anchor, now: float) -> list:
         """(skill, deadline) pairs to fire at ``anchor``: its ``on_arrive``
@@ -932,9 +936,6 @@ class SmartBot(BotBase):
 
     def dwell_tick(self) -> None:
         """One farming tick: arrival skills, buffs, then patrol/weave."""
-        if time.time() < self._rest_until:
-            self.sleep(0.5)
-            return
         now = time.time()
         for skill, deadline in list(self._arrive_pending):
             if self.skills.ready(skill.name, now):
@@ -963,7 +964,7 @@ class SmartBot(BotBase):
         direction held."""
         rot = self.effective_rotation()
         if not rot.anchors or self._anchor_idx >= len(rot.anchors):
-            self._attack_once()
+            self.grind_once()
             return
         anchor = rot.anchors[self._anchor_idx]
         self._weave_around(self._rx(anchor.x), self._ry(anchor.y))
@@ -992,18 +993,7 @@ class SmartBot(BotBase):
             # facing is inward — overrides platform bounds and prevents
             # wall-banging. Per-map walls (absolute x) replace the global
             # edge margins; absent sides fall back to wall_zone_px.
-            walls = self._map_walls()
-            map_w = self._region_wh()[0]
-            left_wall = (
-                self._rx(walls["left"])
-                if walls and walls.get("left") is not None
-                else cfg.wall_zone_px
-            )
-            right_wall = (
-                self._rx(walls["right"])
-                if walls and walls.get("right") is not None
-                else map_w - cfg.wall_zone_px
-            )
+            left_wall, right_wall = self._wall_limits()
             if pos[0] <= left_wall:
                 direction = "right"
             elif pos[0] >= right_wall:
@@ -1014,6 +1004,16 @@ class SmartBot(BotBase):
                 direction = "left"
             elif random.random() < 0.06:
                 direction = "left" if direction == "right" else "right"
+            # Never start a hop that would land past the bounce range or
+            # inside a (padded) wall zone.
+            room_l = pos[0] - max(lo, left_wall)
+            room_r = min(hi, right_wall) - pos[0]
+            if direction == "left" and room_l < self._hop_px <= room_r:
+                direction = "right"
+            elif direction == "right" and room_r < self._hop_px <= room_l:
+                direction = "left"
+            elif room_l < self._hop_px and room_r < self._hop_px:
+                direction = "left" if room_l > room_r else "right"
         self._weave_dir = direction
         self._weave_hop(direction)
 
@@ -1080,8 +1080,7 @@ class SmartBot(BotBase):
         pos = self.minimap.player_pos(img) if img is not None else None
         self.viz["player"] = pos
         if pos is None:
-            # Blind tick — attacks don't need vision, movement does.
-            self._attack_once()
+            self._blind_wait()
             return
         now = time.time()
         level_band = max(8, cfg.nav_threshold_px * 2)
@@ -1127,23 +1126,11 @@ class SmartBot(BotBase):
             self._route.pop(0)
             self._ckpt_ban[idx] = now + 30.0
             self._ckpt_idx = None
-            self._attack_once()
             return
         # Head toward the checkpoint; walls still override the heading.
         dx = tx - pos[0]
         direction = self._weave_dir or ("right" if dx >= 0 else "left")
-        walls = self._map_walls()
-        map_w = self._region_wh()[0]
-        left_wall = (
-            self._rx(walls["left"])
-            if walls and walls.get("left") is not None
-            else cfg.wall_zone_px
-        )
-        right_wall = (
-            self._rx(walls["right"])
-            if walls and walls.get("right") is not None
-            else map_w - cfg.wall_zone_px
-        )
+        left_wall, right_wall = self._wall_limits()
         if pos[0] <= left_wall:
             direction = "right"
         elif pos[0] >= right_wall:
@@ -1230,57 +1217,18 @@ class SmartBot(BotBase):
         if self._roam_origin is None:
             self._roam_origin = self.player_pos()
         if self._roam_origin is None:
-            self._attack_once()
+            self._blind_wait()
             return
         self._weave_around(*self._roam_origin)
 
-    def random_wander(self) -> None:
-        """Bounded random walk for ``wander_seconds``, then return home."""
-        origin = self.player_pos()
-        if origin is None:
-            self.log("No player position — skipping wander")
-            return
-        end = time.time() + self.config.wander_seconds
-        margin = self.config.wander_edge_margin_px
-        current_dir = random.choice(["left", "right"])
-        held_dir = None
-
-        region = self.minimap.region
-        map_w = region[2] if region else 200
-
-        def sync_dir(new_dir):
-            nonlocal held_dir
-            if new_dir == held_dir:
-                return
-            if held_dir:
-                self.hid.key_up(held_dir)
-            if new_dir:
-                self.hid.key_down(new_dir)
-            held_dir = new_dir
-
-        try:
-            while (
-                self.should_continue()
-                and time.time() < end
-                and self.is_window_focused()
-            ):
-                pos = self.player_pos()
-                if pos is None:
-                    self.sleep(0.3)
-                    continue
-                if pos[0] <= margin:
-                    current_dir = "right"
-                elif pos[0] >= map_w - margin:
-                    current_dir = "left"
-                sync_dir(current_dir)
-                if random.random() < 0.08:
-                    (self.up_jump if random.random() < 0.5 else self.down_jump)()
-                self.sleep(0.1)
-        finally:
-            sync_dir(None)
-            self.hid.release_all()
-            if origin:
-                self.move_to_point(*origin)
+    def _blind_wait(self) -> None:
+        """No player dot: wait briefly — attacks only happen inside flash
+        moves, and moving blind could walk into a wall zone."""
+        now = time.time()
+        if now - getattr(self, "_blind_logged", 0.0) > 5.0:
+            self._blind_logged = now
+            self.log("Player dot not visible — waiting")
+        self.sleep(0.15)
 
     # -- Entry ---------------------------------------------------------------------
     def start(self) -> None:

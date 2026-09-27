@@ -6,10 +6,8 @@ from .base import States, safety_transition
 
 
 class Grind(States):
-    """Patrol the anchor route (attacks/buffs/arrival skills), taking a
-    recorded leg via TRAVEL whenever the next checkpoint is on another
-    level. Without a configured rotation this degrades to the legacy
-    stationary-grind -> WANDER behaviour."""
+    """Patrol the anchors (continuous plan), or — without a rotation —
+    keep weave-hopping around where grinding started."""
 
     def enter(self) -> None:
         self.bot.begin_dwell()
@@ -19,15 +17,8 @@ class Grind(States):
         transition = safety_transition(self.bot)
         if transition is not None:
             return transition
-        if self.bot.rotation_active():
-            return "TRAVEL" if self.bot.dwell_done() else None
-        cfg = self.bot.config
-        if not cfg.stationary_mode:
-            return "WANDER"
-        if not cfg.enable_random_wander:
-            return None
-        if self.bot.dwell_done():
-            return "WANDER"
+        if self.bot.rotation_active() and self.bot.dwell_done():
+            return "TRAVEL"
         return None
 
     def execute(self) -> None:

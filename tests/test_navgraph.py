@@ -2,7 +2,7 @@ import random
 import unittest
 
 from picobot.bot.maps import MapEntry
-from picobot.bot.navgraph import NavGraph, graph_for
+from picobot.bot.navgraph import Bounds, NavGraph, graph_for, wall_bounds
 from picobot.bot.reach import Reach, ReachModel
 
 FLOOR = (0, 100, 200, 100)
@@ -27,9 +27,18 @@ def kinds(legs):
 
 class NavGraphTests(unittest.TestCase):
     def test_climbs_tier_by_tier_with_up_flash(self):
-        legs = NavGraph([FLOOR, MID, TOP], reach()).route((10, 100), (80, 66))
+        no_rope = reach(rope_lift=Reach(0, 0))
+        legs = NavGraph([FLOOR, MID, TOP], no_rope).route((10, 100), (80, 66))
         self.assertEqual(kinds(legs), ["up_flash", "up_flash"])
         self.assertEqual((legs[-1].x1, legs[-1].y1), (80, 66))
+
+    def test_rope_lift_preferred_whenever_available(self):
+        g = NavGraph([FLOOR, MID, TOP], reach())
+        self.assertEqual(kinds(g.route((10, 100), (80, 66))), ["rope_lift", "rope_lift"])
+        self.assertEqual(
+            kinds(g.route((10, 100), (80, 66), exclude=("rope_lift",))),
+            ["up_flash", "up_flash"],
+        )
 
     def test_tall_rise_needs_rope_lift(self):
         high = (60, 70, 100, 70)                      # 30 above the floor
@@ -85,13 +94,44 @@ class NavGraphTests(unittest.TestCase):
 
     def test_jitter_varies_between_equal_routes(self):
         g = NavGraph([FLOOR, (20, 84, 60, 84), (140, 84, 180, 84),
-                      (40, 68, 160, 68)], reach())
+                      (40, 68, 160, 68)], reach(rope_lift=Reach(0, 0)))
         via = set()
         for seed in range(40):
             legs = g.route((100, 100), (100, 68), jitter=0.3, rng=random.Random(seed))
             first_up = next(l for l in legs if l.kind == "up_flash")
             via.add(first_up.x0 < 100)
         self.assertEqual(via, {True, False})
+
+    def test_wall_bounds_are_padded_outward_from_zones(self):
+        b = wall_bounds({"left": 0.1, "right": 0.9, "floor": 0.8}, 200, 150, 6)
+        self.assertEqual((b.left, b.right, b.floor), (26.0, 174.0, 114.0))
+        self.assertIsNone(wall_bounds(None, 200, 150, 6))
+
+    def test_walls_clip_platforms_and_block_routes_into_zones(self):
+        g = NavGraph([FLOOR], reach(), bounds=Bounds(left=30, right=170))
+        self.assertEqual((g.platforms[0].x0, g.platforms[0].x1), (30, 170))
+        self.assertIsNone(g.route((100, 100), (10, 100)))       # goal in zone
+        self.assertIsNotNone(g.route((100, 100), (40, 100)))
+
+    def test_clipped_end_is_closed(self):
+        # MID's right end is clipped by the right wall at 100: no drop or
+        # flash may leave through it toward the wall zone.
+        g = NavGraph([FLOOR, MID, SIDE], reach(), bounds=Bounds(right=100))
+        for leg in g.transfer_legs():
+            if leg.kind in ("drop", "flash", "double_flash", "jump"):
+                self.assertLess(max(leg.x0, leg.x1), 100.5)
+
+    def test_floor_band_removes_platforms(self):
+        # Floor zone top at y=104 padded 6 up → band starts at 98: the
+        # y=100 floor platform is excluded; MID (84) stays.
+        g = NavGraph([FLOOR, MID], reach(), bounds=Bounds(floor=98))
+        self.assertEqual([p.y0 for p in g.platforms], [84])
+
+    def test_graph_for_applies_map_walls(self):
+        entry = MapEntry(name="m", platforms=[[0.0, 0.5, 1.0, 0.5]],
+                         walls={"left": 0.1})
+        g = graph_for(entry, (0, 0, 200, 100), reach(), pad=6)
+        self.assertEqual(g.platforms[0].x0, 26)
 
     def test_graph_for_scales_normalized_platforms(self):
         entry = MapEntry(name="m", platforms=[[0.0, 0.5, 1.0, 0.5]])

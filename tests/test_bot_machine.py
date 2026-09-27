@@ -7,7 +7,6 @@ from picobot.bot.machine import Machine
 from picobot.bot.states.base import POP
 from picobot.bot.states.grind import Grind
 from picobot.bot.states.pause import Pause
-from picobot.bot.states.wander import Wander
 
 
 class FakeHid:
@@ -22,7 +21,7 @@ class FakeBot:
     """Minimal bot double satisfying what states/machine touch."""
 
     def __init__(self):
-        self.config = BotConfig(stationary_seconds=0.0)
+        self.config = BotConfig()
         self.hid = FakeHid()
         self._continue = True
         self._focused = True
@@ -30,7 +29,6 @@ class FakeBot:
         self._players = False
         self._dwell_end = 0.0
         self.grind_calls = 0
-        self.wander_calls = 0
         self.dwell_ticks = 0
         self.notifications = []
 
@@ -76,7 +74,7 @@ class FakeBot:
         return self.config.rotation
 
     def begin_dwell(self):
-        self._dwell_end = time.time() + self.config.stationary_seconds
+        self._dwell_end = float("inf")
 
     def dwell_done(self):
         return time.time() >= self._dwell_end
@@ -95,15 +93,10 @@ class FakeBot:
         self.grind_calls += 1
         self._continue = False  # one shot
 
-    def random_wander(self):
-        self.wander_calls += 1
-        self._continue = False
-
 
 class MachineTests(unittest.TestCase):
     def test_runs_grind_then_stops_cleanly(self):
         bot = FakeBot()
-        bot.config.enable_random_wander = False  # stay in GRIND
         machine = Machine(bot)
         machine.run()
         self.assertEqual(bot.grind_calls, 1)
@@ -111,7 +104,6 @@ class MachineTests(unittest.TestCase):
 
     def test_unfocused_window_pauses_and_resumes(self):
         bot = FakeBot()
-        bot.config.stationary_seconds = 999  # stay in GRIND when focused
         bot.grind_once = lambda: None  # don't end the run early
         machine = Machine(bot)
         machine.current_state = Grind(bot)
@@ -132,7 +124,6 @@ class MachineTests(unittest.TestCase):
 
     def test_rune_pauses_when_enabled(self):
         bot = FakeBot()
-        bot.config.stationary_seconds = 999
         bot._rune = True
         machine = Machine(bot)
         machine.current_state = Grind(bot)
@@ -143,7 +134,6 @@ class MachineTests(unittest.TestCase):
 
     def test_rune_ignored_when_toggle_off(self):
         bot = FakeBot()
-        bot.config.stationary_seconds = 999
         bot.config.stop_when_rune_appears = False
         bot._rune = True
         machine = Machine(bot)
@@ -152,28 +142,17 @@ class MachineTests(unittest.TestCase):
         self.assertFalse(machine.switch())
         self.assertIsInstance(machine.current_state, Grind)
 
-    def test_grind_transitions_to_wander_after_timer(self):
+    def test_grind_without_rotation_never_leaves_grind(self):
+        # No WANDER state any more: without a rotation GRIND keeps going.
         bot = FakeBot()
-        bot.config.stationary_seconds = 0.0
+        bot._dwell_end = 0.0
         machine = Machine(bot)
         machine.current_state = Grind(bot)
-        machine.current_state.enter()
-        # stationary_seconds=0 -> dwell_done() is immediately True
-        self.assertTrue(machine.switch())
-        self.assertIsInstance(machine.current_state, Wander)
-
-    def test_grind_stays_when_wander_disabled(self):
-        bot = FakeBot()
-        bot.config.stationary_seconds = 0.0
-        bot.config.enable_random_wander = False
-        machine = Machine(bot)
-        machine.current_state = Grind(bot)
-        machine.current_state.enter()
         self.assertFalse(machine.switch())
+        self.assertNotIn("WANDER", Machine.state_mapping)
 
     def test_lie_detector_seam_pauses(self):
         bot = FakeBot()
-        bot.config.stationary_seconds = 999
         bot.config.pause_on_lie_detector = True
         bot.check_lie_detector = lambda: True
         machine = Machine(bot)

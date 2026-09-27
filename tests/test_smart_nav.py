@@ -225,7 +225,8 @@ class FloorZoneTests(unittest.TestCase):
 
 
 class RopeLiftCooldownTests(unittest.TestCase):
-    """up_jump with a skill key must respect the 3s skill cooldown."""
+    """up_jump uses rope lift when ready and never waits on its cooldown —
+    it up-flashes instead."""
 
     def _bot(self):
         bot = SmartBot.__new__(SmartBot)
@@ -239,13 +240,14 @@ class RopeLiftCooldownTests(unittest.TestCase):
         bot._last_up_skill = 0.0
         return bot
 
-    def test_suppresses_presses_during_cooldown(self):
+    def test_up_flashes_instead_of_waiting_on_cooldown(self):
         bot = self._bot()
-        with patch("time.time", side_effect=iter([10.0, 11.0, 13.5])):
-            self.assertTrue(bot.up_jump())     # t=10 — fires
-            self.assertFalse(bot.up_jump())    # t=11 — on cooldown
-            self.assertTrue(bot.up_jump())     # t=13.5 — cooldown elapsed
-        self.assertEqual(bot.hid.presses, ["alt", "alt"])
+        bot.config.jump_key = "space"
+        for t in (10.0, 11.0, 13.5):   # rope lift, cooling → combo, rope lift
+            with patch("time.time", return_value=t):
+                self.assertTrue(bot.up_jump())
+        self.assertEqual(bot.hid.presses, ["alt", "space", "alt"])
+        self.assertEqual(bot.hid.downs, ["up", "space"])      # the combo's Up + jump
 
     def test_combo_path_unaffected(self):
         bot = self._bot()
@@ -370,6 +372,46 @@ class MovementRuleTests(unittest.TestCase):
         self.assertTrue(any("walking instead" in c.args[0] for c in bot.log.call_args_list))
 
 
+class FlashAttackTests(unittest.TestCase):
+    """Every flash-based move weaves attacks after the flash triggers."""
+
+    def _presses(self, fn, *args):
+        bot = _weave_bot((50, 50))
+        bot.config.weave_double_chance = 0.0
+        getattr(bot, fn)(*args)
+        return bot.hid.presses
+
+    def test_all_flash_moves_attack_after_last_jump_press(self):
+        for fn, args, jumps in (
+            ("_flash_hop", (), 2),
+            ("_double_flash", (), 3),
+            ("_up_flash", (None,), 2),
+            ("_up_side_flash", ("right",), 3),
+        ):
+            presses = self._presses(fn, *args)
+            self.assertEqual(presses, ["space"] * jumps + ["a"], fn)
+
+    def test_weave_refuses_hop_into_padded_wall(self):
+        from picobot.bot.maps import MapEntry
+
+        # Left wall at x=40 (+6 pad = 46); standing at 55 facing left, a
+        # 14px hop would land at 41 — inside the padded zone.
+        bot = _weave_bot((55, 50), bounds=(0, 150))
+        bot._map = MapEntry(name="m", walls={"left": 0.2}, platforms=_plats(0, 150))
+        bot.maps = Mock(**{"get.return_value": bot._map})
+        bot._weave_dir = "left"
+        with patch("random.random", return_value=0.5):
+            bot._weave_attack()
+        self.assertEqual(bot._weave_dir, "right")
+
+    def test_floor_px_is_padded_upward(self):
+        from picobot.bot.maps import MapEntry
+
+        bot = _weave_bot((50, 50))
+        bot._map = MapEntry(name="m", walls={"floor": 0.8})
+        self.assertEqual(bot._floor_px(), 114)          # 0.8*150 - 6
+
+
 class RoamFallbackTests(unittest.TestCase):
     """No anchors: keep moving around where grinding started instead of
     standing still spamming attacks."""
@@ -441,10 +483,11 @@ class WeaveTests(unittest.TestCase):
         self.assertEqual(bot._weave_dir, "left")
 
     def test_wall_zone_disabled_at_zero(self):
-        # x=12 would be inside the default 16px zone — with it disabled,
-        # direction stays on the platform-bounds/random logic only.
-        bot = _weave_bot((12, 50), bounds=(0, 100))
+        # x=20 is inside the default 16px zone + 6px padding — with both
+        # disabled, direction stays on the platform-bounds/random logic.
+        bot = _weave_bot((20, 50), bounds=(0, 100))
         bot.config.wall_zone_px = 0
+        bot.config.wall_pad_px = 0
         bot._weave_dir = "left"
         with patch("random.random", return_value=0.5):
             bot._weave_attack()
@@ -613,7 +656,7 @@ class PatrolTests(unittest.TestCase):
         bot._patrol_tick()
         self.assertEqual(bot._route, [0])
         self.assertIn(1, bot._ckpt_ban)      # held out of replans
-        self.assertIn("a", bot.hid.presses)  # still attacked
+        self.assertEqual(bot.hid.presses, [])  # no attack outside a flash
 
     def test_failed_leg_bans_checkpoint_from_routes(self):
         # A leg that can't complete (e.g. a rope climb with no recorded
@@ -635,10 +678,11 @@ class PatrolTests(unittest.TestCase):
         bot._plan_route((60, 50))
         self.assertEqual(bot._route, [0, 1])  # a1 back in rotation
 
-    def test_blind_tick_still_attacks(self):
+    def test_blind_tick_waits_without_attacking(self):
         bot = self._bot(None, self._rot())  # player_pos -> None
         bot._patrol_tick()
-        self.assertEqual(bot.hid.presses, ["a"])  # _attack_once
+        self.assertEqual(bot.hid.presses, [])
+        bot.sleep.assert_called()
 
     def test_wall_overrides_checkpoint_heading(self):
         # Heading left toward a0, but inside the left wall → face right.

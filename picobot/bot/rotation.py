@@ -15,8 +15,6 @@ Config shape (inside ``"rotation"`` in config.json or a map file)::
       "style": "loop",              // legacy — traversal order is planned
                                     // as a checkpoint route, not by style
       "position_jitter_px": 4,      // aim near the anchor, never exactly on it
-      "rest_chance": 0.02,          // occasional idle stretch per dwell
-      "wander_chance": 0.05,        // occasional detour after a leg
       "travel_style": "mixed",      // walk | flash | mixed (default leg style)
       "anchors": [
         {"name": "west", "pos": [0.31, 0.55], "dwell": [8, 14],
@@ -117,7 +115,6 @@ class Anchor:
     x: float
     y: float
     dwell: Tuple[float, float] = (8.0, 14.0)  # stay bound (1-anchor maps)
-                                            # + rest-breather window
     on_arrive: Tuple[str, ...] = ()           # skill names to fire on arrival
     face: Optional[str] = None                # left | right tap after arriving
 
@@ -165,8 +162,6 @@ class Rotation:
     legs: Dict[Tuple[int, int], List[Step]] = field(default_factory=dict)
     style: str = "loop"
     position_jitter_px: int = 4
-    rest_chance: float = 0.02
-    wander_chance: float = 0.05
     travel_style: str = "mixed"
 
     # -- Traversal -----------------------------------------------------------
@@ -267,8 +262,6 @@ class Rotation:
             legs=legs,
             style=style,
             position_jitter_px=int(data.get("position_jitter_px", 4)),
-            rest_chance=float(data.get("rest_chance", 0.02)),
-            wander_chance=float(data.get("wander_chance", 0.05)),
             travel_style=travel_style,
         )
 
@@ -276,8 +269,6 @@ class Rotation:
         return {
             "style": self.style,
             "position_jitter_px": self.position_jitter_px,
-            "rest_chance": self.rest_chance,
-            "wander_chance": self.wander_chance,
             "travel_style": self.travel_style,
             "anchors": [a.to_dict() for a in self.anchors],
             "legs": [

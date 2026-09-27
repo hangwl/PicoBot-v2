@@ -437,12 +437,13 @@ class BotHost:
             "no_rotation": not bool(rot.anchors),
             "walls": walls,
             "floor": floor,
+            "wall_pad": self.bot_config.wall_pad_px if (walls or floor is not None) else None,
             "anchors": anchors,
             "platforms": platforms,
         }
 
     def _nav_graph(self, entry, region):
-        return self._nav_cache.get(entry, region, self.reach)
+        return self._nav_cache.get(entry, region, self.reach, self.bot_config.wall_pad_px)
 
     def _nav_command(self, msg: str) -> None:
         """nav|show|on|off, nav|preview|x,y (minimap px) — route preview

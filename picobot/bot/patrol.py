@@ -40,7 +40,7 @@ class Patrol:
         pos = bot.minimap.player_pos(img) if img is not None else None
         bot.viz["player"] = pos
         if pos is None:
-            bot._attack_once()
+            bot._blind_wait()
             return
         graph = bot._nav_graph()
         if graph is None or graph.locate(*pos) is None:

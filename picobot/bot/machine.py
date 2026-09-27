@@ -14,7 +14,6 @@ from .states.base import POP
 from .states.grind import Grind
 from .states.pause import Pause
 from .states.travel import Travel
-from .states.wander import Wander
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,6 @@ class Machine:
     state_mapping = {
         "GRIND": Grind,
         "TRAVEL": Travel,
-        "WANDER": Wander,
         "PAUSE": Pause,
     }
 

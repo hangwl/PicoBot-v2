@@ -50,7 +50,8 @@ class Navigator:
         # Same jitter draws for the whole segment — re-planning each step
         # must not flip between near-equal alternatives.
         rng = random.Random(hash((round(goal[0]), round(goal[1]), self._seed)))
-        exclude = () if bot.rope_lift_remaining() <= 1.0 else ("rope_lift",)
+        # Rope lift only when ready right now — never wait on its cooldown.
+        exclude = () if bot.rope_lift_remaining() <= 0 else ("rope_lift",)
         legs = self.graph.route(pos, goal, jitter=self.jitter, rng=rng, exclude=exclude)
         if legs is None:
             return "noroute"
@@ -148,14 +149,7 @@ class Navigator:
         ))
 
     def _rope_lift(self) -> bool:
-        """Rope lift, waiting out a short remaining cooldown."""
-        bot = self.bot
-        wait = bot.rope_lift_remaining()
-        if wait > 1.5:
-            return False
-        if wait > 0 and bot.sleep(wait + 0.05):
-            return False
-        return bool(bot.rope_lift())
+        return bool(self.bot.rope_lift())
 
     def _hold_until(self, direction: str, done, timeout: float, action=None) -> None:
         bot = self.bot

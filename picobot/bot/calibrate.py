@@ -393,7 +393,7 @@ class CalibrationRunner:
             self._emit(
                 "error",
                 f"map '{name}' has no anchors — the rotation is inactive "
-                "and the bot will wander. Re-record and press F9 / "
+                "and the bot will only weave in place. Re-record and press F9 / "
                 "Mark anchor at each farming spot.",
             )
         return entry

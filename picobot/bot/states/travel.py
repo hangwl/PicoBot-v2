@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import random
-
 from .base import States, safety_transition
 
 
 class Travel(States):
     """Executes ``bot.run_travel()`` — the leg's walk/flash/climb steps —
-    then hands back to GRIND. On arrival there is a small chance of a
-    WANDER detour so the route isn't a perfect metronome. A leg that
-    aborts still returns to GRIND (safety transitions win next switch)."""
+    then hands back to GRIND. A leg that aborts still returns to GRIND
+    (safety transitions win next switch)."""
 
     def __init__(self, bot) -> None:
         super().__init__(bot)
@@ -29,9 +26,6 @@ class Travel(States):
         if transition is not None:
             return transition
         if self._finished:
-            rot = self.bot.effective_rotation()
-            if self._has_target and random.random() < rot.wander_chance:
-                return "WANDER"
             return "GRIND"
         return None
 

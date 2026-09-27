@@ -51,7 +51,7 @@ class PatrolBot(SimBot):
 class PatrolTests(unittest.TestCase):
     def test_plans_full_loop_and_publishes_traversal(self):
         bot = PatrolBot([FLOOR, MID, TOP], (10, 100),
-                        [(20, 100), (80, 66), (180, 100)])
+                        [(20, 100), (80, 66), (180, 100)], rope=0)
         p = Patrol(bot, rng=random.Random(1))
         p.tick()
         plan = next(l for l in bot.log_lines if l.startswith("Patrol plan:"))
@@ -106,7 +106,7 @@ class PatrolTests(unittest.TestCase):
     def test_continues_after_first_arrival_near_takeoff(self):
         # Regression: arriving 2px from the next up-flash takeoff stalled
         # the bot (no-op walk leg re-planned forever).
-        bot = PatrolBot([FLOOR, MID], (10, 100), [(78, 100), (80, 84)])
+        bot = PatrolBot([FLOOR, MID], (10, 100), [(78, 100), (80, 84)], rope=0)
         p = Patrol(bot, rng=random.Random(0))
         for _ in range(6):
             p.tick()
@@ -114,12 +114,20 @@ class PatrolTests(unittest.TestCase):
         self.assertGreaterEqual(sum(l.startswith("Checkpoint:") for l in bot.log_lines), 2)
 
     def test_repeated_misses_ban_the_anchor(self):
-        bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5)
+        bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)
         p = Patrol(bot, rng=random.Random(0))
         p.order = [1]
         for _ in range(4):
             p.tick()
         self.assertIn(1, bot._ckpt_ban)
+
+    def test_blind_tick_neither_attacks_nor_moves(self):
+        bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (180, 100)])
+        bot.pos = None
+        bot._blind_wait = Mock()
+        Patrol(bot).tick()
+        bot._blind_wait.assert_called_once()
+        self.assertEqual((bot.attacks, bot.moves), (0, []))
 
     def test_off_graph_falls_back_to_straight_line_patrol(self):
         bot = PatrolBot([FLOOR], (10, 40), [(20, 100), (180, 100)])   # mid-air

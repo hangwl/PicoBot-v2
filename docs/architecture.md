@@ -54,12 +54,10 @@ moves and title reads into the shared `MapIdentity` (`identity.py`); the
 bot's `minimap_frame()` captures and applies identity changes;
 a small FSM (`machine.py`, `states/`) owns behavior:
 
-- **Grind** — the farming state. ≥2 anchors → planned checkpoint patrol
-  (nearest-neighbour routing, per-tick attack weaving, stall guards);
-  1 anchor → weave-in-place dwells.
-- **Travel** — `walk_to`/`climb`/jump legs between anchors on different
-  levels. Attacks weave in during travel too — no blind legs.
-- **Wander** — anti-patternization detours.
+- **Grind** — the farming state. ≥2 anchors → continuous patrol
+  (`patrol.py`: full traversal plan, one move per tick); 1 anchor →
+  weave on its platform; none → weave around the start point.
+- **Travel** — hand-authored legs (e.g. ropes) via the older patrol path.
 - **Pause** — safety stop (rune, other players, focus loss, map change
   mid-leg).
 
@@ -109,7 +107,7 @@ snap = viz/map meta + overlays ──► assemble_panel (title+map composite,
 ```
 picobot/
 ├── bot/                # smart bot
-│   ├── states/         # FSM states: Grind, Travel, Wander, Pause
+│   ├── states/         # FSM states: Grind, Travel, Pause
 │   ├── __main__.py     # headless bot entry
 │   ├── base.py         # lifecycle + event sink
 │   ├── calibrate.py    # anchor recorder (+ CLI)

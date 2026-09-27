@@ -653,6 +653,12 @@ class HostCommandTests(unittest.TestCase):
         msgs = [e["msg"] for e in self.host.bus.history() if e["kind"] == "map"]
         self.assertTrue(any("no drawn platform under it" in m for m in msgs))
 
+    def test_padded_wall_limits_drawn(self):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        out = annotate(img, {"walls": {"left": 50}, "floor": 120, "wall_pad": 6})
+        self.assertTrue((out[60, 56] == (140, 140, 255)).all())   # left + pad
+        self.assertTrue((out[114, 100] == (140, 140, 255)).all())  # floor - pad
+
     def test_layout_save_backfills_title(self):
         feed = self._region_feed()
         feed.minimap.region = (8, 40, 200, 150)
