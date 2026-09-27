@@ -383,14 +383,8 @@ class BotHost:
             return int(round(v * span)) if 0.0 <= v <= 1.0 else int(round(v))
 
         walls = floor = anchors = platforms = None
-        if entry is not None and entry.platforms and w and h:
-            platforms = [
-                (
-                    int(round(s[0] * w)), int(round(s[1] * h)),
-                    int(round(s[2] * w)), int(round(s[3] * h)),
-                )
-                for s in entry.platforms
-            ]
+        if entry is not None and entry.rotation.anchors and w and h:
+            anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
         if entry is not None and entry.walls and w:
             walls = {
                 side: px(v, w)
@@ -403,13 +397,19 @@ class BotHost:
             fy = entry.walls.get("floor")
             if h and isinstance(fy, (int, float)):
                 floor = px(fy, h)
-        if entry is not None and entry.rotation.anchors and w and h:
-            anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
         conf = (
             res.score
             if entry is not None and res.title_map == entry.name else None
         )
         nav_edges = nav_route = None
+        graph = self._nav_graph(entry, region)
+        if graph is not None:
+            # Show the graph's clipped platforms — wall/floor zones eat
+            # platform ends, and the overlay should reflect what the bot
+            # actually walks.
+            platforms = [
+                (p.x0, p.y0, p.x1, p.y1) for p in graph.platforms
+            ]
         if self._nav_show:
             graph = self._nav_graph(entry, region)
             if graph is not None:
@@ -428,6 +428,7 @@ class BotHost:
             "nav_edges": nav_edges,
             "nav_plan": nav_plan,
             "nav_route": nav_route,
+            "platforms": platforms,
             "map": entry.name if entry else None,
             "map_via": res.via,
             "map_conf": conf,
@@ -437,7 +438,6 @@ class BotHost:
             "floor": floor,
             "wall_pad": self.bot_config.wall_pad_px if (walls or floor is not None) else None,
             "anchors": anchors,
-            "platforms": platforms,
         }
 
     def _nav_graph(self, entry, region):

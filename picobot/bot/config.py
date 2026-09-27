@@ -41,6 +41,7 @@ class BotConfig:
     skill_gap_seconds: Tuple[float, float] = (0.5, 1.0)  # base gap between attacks
 
     # -- Navigation ------------------------------------------------------------
+    walk_band_px: int = 8                 # walk only this close to the target
     nav_threshold_px: int = 5             # minimap px tolerance for "arrived"
     nav_stuck_limit: int = 40             # identical polls before rope-escape
     vert_jump_interval: float = 0.9       # min gap between vertical jump tries
@@ -130,6 +131,7 @@ class BotConfig:
             "nav_up_side_dx_px", "nav_jump_px", "nav_gap_px", "nav_double_gap_px",
             "vert_jump_interval",
             "weave_double_chance", "wall_pad_px", "anchor_float_px",
+            "walk_band_px",
             "flash_repress_seconds", "combo_repress_seconds",
         )
         for name in floats:

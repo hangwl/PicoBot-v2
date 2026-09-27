@@ -501,9 +501,12 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|plat|50,50,51,51|m1")
             self.assertIsNone(MapStore(tmp).get("m1").platforms)
 
-    def test_map_meta_reports_drawn_platforms(self):
+    def test_map_meta_reports_graph_platforms(self):
+        # The overlay shows the graph's clipped platforms — wall/floor
+        # zones eat platform ends and the user must see it.
         entry = MapEntry(
-            name="m1", platforms=[[0.05, 0.25, 0.5, 0.25]]
+            name="m1", platforms=[[0.05, 0.25, 0.5, 0.25]],
+            walls={"left": 0.1},
         )
         feed = Mock()
         feed.minimap.region = (0, 0, 200, 150)
@@ -513,7 +516,7 @@ class HostCommandTests(unittest.TestCase):
             self._use_store(tmp)
             self.host.maps.save(entry)
             meta = self.host._map_meta()
-        self.assertEqual(meta["platforms"], [(10, 38, 100, 38)])
+        self.assertEqual(meta["platforms"], [(26.0, 37.5, 100.0, 37.5)])
 
     def _region_feed(self):
         feed = Mock()
@@ -688,7 +691,7 @@ class HostCommandTests(unittest.TestCase):
             ))
             self.host.identity.refresh()
             snap = self.host._provide_frame("minimap")
-        self.assertEqual(snap["platforms"], [(10, 60, 100, 60)])
+        self.assertEqual(snap["platforms"], [(10.0, 60.0, 100.0, 60.0)])
         out = annotate(img, snap)
         self.assertTrue((out[60, 50] != img[60, 50]).any())   # line drawn
         self.assertTrue((out[70, 50] == img[70, 50]).all())   # rest clean

@@ -31,6 +31,9 @@ class PatrolBot(SimBot):
     def _nav_graph(self):
         return self.g if self.g.platforms else None
 
+    def _current_map_entry(self):
+        return None
+
     def _rx(self, v):
         return round(v * 200)
 

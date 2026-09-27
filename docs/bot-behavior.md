@@ -84,11 +84,12 @@ Bot-controlled movement looks like a player farming, not a macro:
   flash has triggered (`weave_double_chance`, default 0.4 for two). An
   attack before the re-press eats its input window and the flash never
   fires.
-- `move_to_point` flash-weaves while the target is farther than one hop
-  **and the platform leaves a hop of room ahead**; otherwise it walks.
-  Hop distance is learned from observed hops (starts at 14 minimap px).
-  Hops that don't move fall back to walking; with
-  `flash_jump_enabled: false` attacks weave into walks.
+- `move_to_point` **travels by flash weaves** whenever the target is
+  farther than `walk_band_px` (default 8) **and the platform leaves a hop
+  of room ahead**; walking is only the final precise approach (and future
+  precise destinations like rune solving). Hop distance is learned from
+  observed hops (starts at 14 minimap px). Hops that don't move fall back
+  to walking; with `flash_jump_enabled: false` attacks weave into walks.
 - Walk legs are horizontal (`flat`): a few px between the drawn row and
   the real standing line never triggers vertical jumps.
 - A gap flash that never triggers releases the direction as soon as the

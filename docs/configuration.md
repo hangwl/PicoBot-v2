@@ -13,6 +13,7 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "up_jump_skill_key": null,
     "up_jump_skill_cooldown": 3.0,
     "skill_gap_seconds": [0.5, 1.0],
+    "walk_band_px": 8,
     "nav_threshold_px": 5,
     "nav_up_flash_px": 26,
     "nav_rope_lift_px": 90,
@@ -79,6 +80,8 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 - Vertical jumps that produce no progress twice in a row end the leg
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.
+- `walk_band_px` — walking distance: the bot flash-travels until inside
+  this band, then walks the last stretch for a precise stop.
 - `nav_*_px` are **starting** move reaches in minimap px (conservative);
   the bot learns real values from observed moves and stores them in
   `nav_reach_file` (gitignored, per character). Delete that file to

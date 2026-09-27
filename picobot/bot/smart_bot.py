@@ -566,11 +566,11 @@ class SmartBot(BotBase):
         ``flat`` treats the leg as horizontal: no vertical jumps, arrival
         on x alone — walk legs never stall on a few px of drawing error.
 
-        ``walk`` holds the direction key. ``flash``/``mixed``: while the
-        target is farther than one flash hop, travel by flash weaves
-        (jump → flash → 1–2 attacks); inside that, walk for a precise
-        stop. Hop distance is learned from observed hops. Aborts (False)
-        on hazards, focus loss, or stop.
+        ``walk`` holds the direction key. ``flash``/``mixed``: travel by
+        flash weaves (jump → flash → 1–2 attacks) until inside
+        ``walk_band_px`` of the target, then walk the last stretch for a
+        precise stop. Hop distance is learned from observed hops. Aborts
+        (False) on hazards, focus loss, or stop.
         """
         threshold = threshold or self.config.nav_threshold_px
         # Hysteresis band: release the direction inside `stop_band`, only
@@ -660,10 +660,10 @@ class SmartBot(BotBase):
                 )
                 room = (
                     span is None
-                    or (cx - span[0] > self._hop_px
-                        and span[1] - cx > self._hop_px)
+                    or (span[1] - cx > self._hop_px if dx > 0
+                        else cx - span[0] > self._hop_px)
                 )
-                if flash_ok and room and abs(dx) > max(self._hop_px, start_band):
+                if flash_ok and room and abs(dx) > self.config.walk_band_px:
                     sync_dir(None)
                     hop_from = cx
                     self._flash_weave("right" if dx > 0 else "left")
@@ -681,9 +681,9 @@ class SmartBot(BotBase):
                 elif held_dir == "left" and dx >= -stop_band:
                     sync_dir(None)
                 if held_dir is None:
-                    if dx > start_band:
+                    if dx > threshold:
                         sync_dir("right")
-                    elif dx < -start_band:
+                    elif dx < -threshold:
                         sync_dir("left")
                 if abs(dx) <= threshold * 3:
                     # Rate-limit vertical jumps — spamming them never helps.
