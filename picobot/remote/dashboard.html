@@ -266,7 +266,8 @@
 </main>
 <script>
 const WS_PORT = "REPLACE_WS_PORT";
-const ws = new WebSocket(`ws://${location.hostname}:${WS_PORT}`);
+const WS_SCHEME = "REPLACE_WS_SCHEME";
+let ws = null, wsRetry = 500;
 const $ = id => document.getElementById(id);
 const logEl = $("log");
 const SEV = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -317,34 +318,57 @@ function chip(id, text, cls) {
   el.className = "chip" + (cls ? " " + cls : "");
 }
 
-ws.onopen = () => {
-  chip("ws", "ws: connected", "on");
-  ws.send("events|history");
-  ws.send("bot|query");
-  ws.send("config|get");
-  ws.send("skills|list");
-  ws.send("host|state");
-  ws.send("map|list");
-};
-ws.onclose = () => chip("ws", "ws: closed", "bad");
-ws.onerror = () => chip("ws", "ws: error", "warn");
+function connect() {
+  ws = new WebSocket(`${WS_SCHEME}://${location.hostname}:${WS_PORT}`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => {
+    wsRetry = 500;
+    chip("ws", "ws: connected", "on");
+    ["dash|subscribe|frames", "events|history", "bot|query", "config|get",
+     "skills|list", "host|state", "map|list"].forEach(m => ws.send(m));
+  };
+  ws.onclose = () => {
+    chip("ws", `ws: reconnecting in ${Math.round(wsRetry / 1000)}s`, "bad");
+    setTimeout(connect, wsRetry);
+    wsRetry = Math.min(wsRetry * 2, 10000);
+  };
+  ws.onerror = () => chip("ws", "ws: error", "warn");
+  ws.onmessage = onMessage;
+}
 
-ws.onmessage = e => {
+// Binary frame: "PBF1" | uint32 BE json length | json meta | JPEG bytes.
+function onFrame(buf) {
+  const dv = new DataView(buf);
+  const n = dv.getUint32(4);
+  const p = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, n)));
+  const url = URL.createObjectURL(
+    new Blob([new Uint8Array(buf, 8 + n)], { type: "image/jpeg" }));
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const c = $("view");
+    if (c.width !== img.width || c.height !== img.height) {
+      c.width = img.width; c.height = img.height;
+    }
+    c.getContext("2d").drawImage(img, 0, 0);
+    lastImg = img;
+  };
+  img.src = url;
+  return p;
+}
+
+function onMessage(e) {
+  if (e.data instanceof ArrayBuffer) { showFrame(onFrame(e.data)); return; }
   const m = e.data;
   if (m === "bot|running") { chip("bot", "bot: running", "on"); return; }
   if (m === "bot|stopped") { chip("bot", "bot: stopped"); return; }
   if (!m.startsWith("dash|")) return;
   let p;
   try { p = JSON.parse(m.slice(5)); } catch { return; }
-  if (p.event === "frame") {
-    const img = new Image();
-    img.onload = () => {
-      const c = $("view");
-      c.width = img.width; c.height = img.height;
-      c.getContext("2d").drawImage(img, 0, 0);
-    };
-    img.src = "data:image/jpeg;base64," + p.jpeg;
-    lastImg = img;
+  handleDash(p);
+}
+
+function showFrame(p) {
     viewOX = p.ox || 0; viewOY = p.oy || 0;  // minimap offset in panel view
     if (p.state) chip("state", "state: " + p.state,
       p.state === "PAUSE" ? "warn" : "");
@@ -368,7 +392,10 @@ ws.onmessage = e => {
       (p.hazard ? " ⚠ " + p.hazard : "");
     now.style.color = p.hazard ? "var(--bad)"
       : p.state === "PAUSE" ? "var(--warn)" : "var(--fg)";
-  } else if (p.event === "evt") {
+}
+
+function handleDash(p) {
+  if (p.event === "evt") {
     if (p.kind === "calstat") {
       const d = p.data || {};
       $("calStat").textContent =
@@ -428,7 +455,7 @@ ws.onmessage = e => {
     if (c.view_fps != null && document.activeElement !== $("fpsSel"))
       $("fpsSel").value = String(Math.round(c.view_fps));
   }
-};
+}
 
 // --- Movement keys -------------------------------------------------------
 function sendMoveKeys() {
@@ -680,6 +707,7 @@ document.querySelectorAll("[data-k]").forEach(b =>
 $("keyPress").onclick = () => {
   press($("keyIn").value.trim()); $("keyIn").select();
 };
+connect();
 </script>
 </body>
 </html>

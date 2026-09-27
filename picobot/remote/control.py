@@ -243,6 +243,10 @@ class RemoteControlServer:
         self.bridge: Optional[AsyncWebsocketBridge] = None
         self.clients: set = set()
         self.clients_lock = threading.Lock()
+        self.frame_clients: set = set()
+        self._frame_inflight: dict = {}
+        self._jobs: "queue.Queue[Optional[Callable[[], None]]]" = queue.Queue()
+        self._job_thread: Optional[threading.Thread] = None
         self.selected_playlist: Optional[str] = None
 
     # -- Lifecycle ---------------------------------------------------------
@@ -266,6 +270,11 @@ class RemoteControlServer:
         self.cmd_queue = queue.Queue()
         self.writer_thread = threading.Thread(target=self._writer_loop, daemon=True)
         self.writer_thread.start()
+        self._jobs = queue.Queue()
+        self._job_thread = threading.Thread(
+            target=self._job_loop, name="DashboardCommands", daemon=True
+        )
+        self._job_thread.start()
         self.bridge = AsyncWebsocketBridge(
             host="0.0.0.0",
             port=self.ws_port,
@@ -286,10 +295,16 @@ class RemoteControlServer:
         if self.writer_thread and self.writer_thread.is_alive():
             self.writer_thread.join(timeout=1.5)
         self.writer_thread = None
+        if self._job_thread and self._job_thread.is_alive():
+            self._jobs.put(None)
+            self._job_thread.join(timeout=5.0)
+        self._job_thread = None
         self.serial_manager.unregister_line_callback(self._on_serial_line)
         self.serial_manager.close()
         with self.clients_lock:
             self.clients.clear()
+            self.frame_clients.clear()
+            self._frame_inflight.clear()
 
     # -- Serial bridge -----------------------------------------------------
     def connect_serial(self, port: str) -> bool:
@@ -477,19 +492,68 @@ class RemoteControlServer:
         self.callbacks.on_remote_playlist_selected(playlist or "")
 
     def broadcast(self, message: str) -> None:
-        """Send a message to all connected WebSocket clients."""
+        """Send a text message to all connected WebSocket clients."""
         msg = (message or "").strip()
-        if not msg:
+        loop = self.bridge._loop if self.bridge else None
+        if not msg or loop is None:
             return
         with self.clients_lock:
-            for client in list(self.clients):
+            clients = list(self.clients)
+        for client in clients:
+            try:
+                asyncio.run_coroutine_threadsafe(client.send(msg), loop)
+            except Exception:
+                pass
+
+    def broadcast_frame(self, data: bytes) -> None:
+        """Send a binary frame to clients subscribed via
+        ``dash|subscribe|frames``. A client whose previous frame is still
+        in flight skips this one — slow links drop frames instead of
+        queueing them ahead of control messages."""
+        loop = self.bridge._loop if self.bridge else None
+        if loop is None:
+            return
+        with self.clients_lock:
+            for client in list(self.frame_clients):
+                prev = self._frame_inflight.get(client)
+                if prev is not None and not prev.done():
+                    continue
                 try:
-                    asyncio.run_coroutine_threadsafe(
-                        client.send(msg), self.bridge._loop
+                    self._frame_inflight[client] = asyncio.run_coroutine_threadsafe(
+                        client.send(data), loop
                     )
                 except Exception:
-                    # Client may have disconnected, will be cleaned up later
                     pass
+
+    # -- Dashboard command worker ------------------------------------------
+    def _submit(self, job: Callable[[], None]) -> None:
+        """Run ``job`` on the command worker (in order), or inline when
+        the server isn't started (tests)."""
+        if self._job_thread is not None and self._job_thread.is_alive():
+            self._jobs.put(job)
+        else:
+            job()
+
+    def _job_loop(self) -> None:
+        while True:
+            job = self._jobs.get()
+            if job is None:
+                return
+            try:
+                job()
+            except Exception as exc:
+                self._log(f"dashboard command error: {exc}")
+
+    def _run_command(self, msg: str) -> None:
+        cb = self.callbacks
+        if msg == "bot|start" and cb.start_bot:
+            self._log("WS: bot|start received")
+            cb.start_bot()
+        elif msg == "bot|stop" and cb.stop_bot:
+            self._log("WS: bot|stop received")
+            cb.stop_bot()
+        elif not (cb.handle_command and cb.handle_command(msg)):
+            self._log(f"WS: unhandled dashboard command '{msg}'")
 
     # -- WebSocket callbacks -----------------------------------------------
     async def _handle_ws_message(self, websocket, message: str) -> None:
@@ -507,16 +571,11 @@ class RemoteControlServer:
             return
         # Dashboard commands: bot lifecycle, maps, calibration, stream mode.
         if msg.startswith(DASHBOARD_PREFIXES):
-            handled = False
-            if msg == "bot|start" and self.callbacks.start_bot:
-                self._log("WS: bot|start received")
-                self._schedule(self.callbacks.start_bot)
-                handled = True
-            elif msg == "bot|stop" and self.callbacks.stop_bot:
-                self._log("WS: bot|stop received")
-                self._schedule(self.callbacks.stop_bot)
-                handled = True
-            elif msg == "bot|query" and self.callbacks.is_bot_running:
+            if msg == "dash|subscribe|frames":
+                with self.clients_lock:
+                    self.frame_clients.add(websocket)
+                return
+            if msg == "bot|query" and self.callbacks.is_bot_running:
                 try:
                     running = bool(self.callbacks.is_bot_running())
                 except Exception:
@@ -527,14 +586,10 @@ class RemoteControlServer:
                     )
                 except Exception:
                     pass
-                handled = True
-            elif self.callbacks.handle_command:
-                try:
-                    handled = bool(self.callbacks.handle_command(msg))
-                except Exception as exc:
-                    self._log(f"dashboard command error: {exc}")
-            if not handled:
-                self._log(f"WS: unhandled dashboard command '{msg}'")
+                return
+            # Off the event loop: commands can OCR, save files, or join
+            # the bot thread — the loop must keep relaying hid|… input.
+            self._submit(lambda: self._run_command(msg))
             return
 
         if msg.startswith("macro|"):
@@ -588,6 +643,8 @@ class RemoteControlServer:
     def _on_ws_client_disconnected(self, websocket) -> None:
         with self.clients_lock:
             self.clients.discard(websocket)
+            self.frame_clients.discard(websocket)
+            self._frame_inflight.pop(websocket, None)
         self._log("WS: client disconnected")
         scheme = "wss" if (self.bridge and getattr(self.bridge, "ssl_context", None)) else "ws"
         self._set_status(f"Remote: Listening ({scheme}://0.0.0.0:{self.ws_port})")

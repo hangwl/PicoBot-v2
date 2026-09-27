@@ -84,9 +84,17 @@ class AnnotateTests(unittest.TestCase):
     def test_encode_jpeg_roundtrip(self):
         img = np.full((40, 60, 3), (10, 200, 90), dtype=np.uint8)
         data = encode_jpeg(img, quality=60)
-        import base64
-        raw = base64.b64decode(data)
-        self.assertTrue(raw.startswith(b"\xff\xd8"))  # JPEG SOI
+        self.assertTrue(data.startswith(b"\xff\xd8"))  # JPEG SOI
+
+    def test_frame_pack_roundtrip(self):
+        from picobot.remote.streamer import pack_frame, unpack_frame
+
+        meta = {"event": "frame", "map": "WLOH", "ox": 3}
+        data = pack_frame(meta, b"\xff\xd8jpeg")
+        self.assertTrue(data.startswith(b"PBF1"))
+        self.assertEqual(unpack_frame(data), (meta, b"\xff\xd8jpeg"))
+        with self.assertRaises(ValueError):
+            unpack_frame(b"nope")
 
 
 class PanelAssemblyTests(unittest.TestCase):

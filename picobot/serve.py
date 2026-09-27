@@ -181,7 +181,7 @@ class BotHost:
         )
         self.streamer = FrameStreamer(
             self._provide_frame,
-            self.remote.broadcast,
+            self.remote.broadcast_frame,
             interval=1.0 / max(1.0, float(self.config.view_fps)),
         )
         self.bus.subscribe(self._forward_event)
@@ -222,6 +222,7 @@ class BotHost:
                 Path(__file__).resolve().parent / "remote" / "dashboard.html",
                 Path(__file__).resolve().parent.parent / "index.html",
             ],
+            ws_scheme="wss" if self.remote.ssl_context else "ws",
         )
         self.http.start()
         self.streamer.start()

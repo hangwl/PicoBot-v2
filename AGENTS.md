@@ -49,6 +49,9 @@ what was tried and what was learned in `docs/learnings.md` instead.
   Panel-view frames carry `ox`/`oy` offsets — shift overlay meta and
   subtract it on canvas drags.
 - Event bus has levels; `hid`/serial chatter stays `debug`.
+- **Dashboard commands** run on the `DashboardCommands` worker, never the
+  WS event loop. View frames are binary and opt-in
+  (`dash|subscribe|frames`).
 
 ## Map
 

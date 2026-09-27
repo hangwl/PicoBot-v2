@@ -6,36 +6,65 @@ imported lazily so the minimap path stays pure-NumPy.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+import threading
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 
 from .minimap import Region
 
 
+def _new_mss():
+    import mss  # deferred: only needed when actually capturing
+
+    return mss.mss()
+
+
 class ScreenGrabber:
-    """Captures BGR screenshots of a region of the virtual desktop."""
+    """Captures BGR screenshots of a region of the virtual desktop.
 
-    def __init__(self) -> None:
-        import mss  # deferred: only needed when actually capturing
+    Safe to share across threads: mss handles are thread-bound on
+    Windows, so each calling thread lazily gets its own instance.
+    """
 
-        self._sct = mss.mss()
+    def __init__(self, factory: Callable[[], object] = _new_mss) -> None:
+        self._factory = factory
+        self._local = threading.local()
+        self._all: list = []
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def _sct(self):
+        if self._closed:
+            return None
+        sct = getattr(self._local, "sct", None)
+        if sct is None:
+            sct = self._factory()
+            self._local.sct = sct
+            with self._lock:
+                self._all.append(sct)
+        return sct
 
     def close(self) -> None:
-        sct = getattr(self, "_sct", None)
-        if sct is not None:
-            sct.close()
-            self._sct = None
+        with self._lock:
+            self._closed = True
+            all_, self._all = self._all, []
+        for sct in all_:
+            try:
+                sct.close()
+            except Exception:
+                pass
 
     def capture(self, region: Region) -> Optional[np.ndarray]:
         """Capture ``(left, top, width, height)`` and return a BGR ndarray."""
-        if self._sct is None:
-            return None
         left, top, width, height = (int(v) for v in region)
         if width <= 0 or height <= 0:
             return None
+        sct = self._sct()
+        if sct is None:
+            return None
         try:
-            shot = self._sct.grab(
+            shot = sct.grab(
                 {"left": left, "top": top, "width": width, "height": height}
             )
         except Exception:

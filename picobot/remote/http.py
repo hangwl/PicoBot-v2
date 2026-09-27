@@ -20,8 +20,10 @@ class EmbeddedHTTPServer:
         http_port: int,
         *,
         search_paths: Iterable[Path] | None = None,
+        ws_scheme: str = "ws",
     ) -> None:
         self._ws_port_provider = ws_port_provider
+        self.ws_scheme = ws_scheme
         self.http_port = http_port
         self.httpd: HTTPServer | None = None
         self.thread: threading.Thread | None = None
@@ -108,7 +110,9 @@ class EmbeddedHTTPServer:
             try:
                 if path.exists():
                     content = path.read_text(encoding="utf-8")
-                    return content.replace("REPLACE_WS_PORT", str(ws_port))
+                    return content.replace(
+                        "REPLACE_WS_PORT", str(ws_port)
+                    ).replace("REPLACE_WS_SCHEME", self.ws_scheme)
             except Exception:
                 continue
         return fallback

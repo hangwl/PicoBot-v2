@@ -32,6 +32,9 @@ installed the repo's own venv interpreter works:
 - `test_serve.py` — host commands, frame payloads, panel assembly
   (`assemble_panel`/`_offset_meta`), layout drags.
 - `test_framelog.py` — debug capture episodes, snapshots, pruning.
+- `test_remote.py` — command worker (ordering, loop never blocked),
+  binary frame subscription/drop-if-busy, HTTP template.
+- `test_screen.py` — per-thread mss instances.
 - `test_calibrate.py`, `test_rotation.py`, `test_bot_skills.py`,
   `test_bot_machine.py`, `test_bot_travel.py`, `test_bot_inputs.py`,
   `test_serial_manager.py`, `test_config.py`.

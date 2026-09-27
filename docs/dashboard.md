@@ -1,8 +1,10 @@
 # Dashboard
 
 Served at `http://localhost:8000` (Tailscale `http://<host>.ts.net:8000`
-for remote). Single-page WebSocket UI — all commands are `|`-delimited
-strings; all pushes are `dash|{json}` frames or `evt` events.
+for remote). Single-page WebSocket UI — commands are `|`-delimited
+strings; pushes are `dash|{json}` text messages plus binary view frames.
+The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
+`ws_tls` is on.
 
 ## Panels
 
@@ -51,7 +53,8 @@ client → host:  map|set|<name> | map|list | cal|start|mark|finish|<name>
                 layout|plat|x0,y0,x1,y1[|<name>] | layout|wall|… | layout|floor|…
                 dash|view|<minimap|window|title> | dash|fps|<n>
                 skills|set|{json} | hid|… | host|window|<title> | host|serial|…
-host → client:  dash|{"event":"frame","jpeg":…,"ox":…,"oy":…,"map":…}
+                dash|subscribe|frames            (opt in to view frames)
+host → client:  binary frame: b"PBF1" | u32 BE json len | {"event":"frame","ox":…,"oy":…,"map":…} | JPEG
                 dash|{"event":"evt","kind":…,"level":…,"msg":…}
                 dash|{"event":"maps"|"skills"|"history"|…}
 ```

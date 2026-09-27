@@ -1,17 +1,20 @@
 """Frame streaming for the web dashboard.
 
-Grabs the latest bot snapshot on a timer, annotates it (anchors, player
-dot, nav target, markers), JPEG-encodes, and pushes it to a broadcast
-callable as ``dash|{json}`` messages. The provider callable supplies the
-image + metadata, so the same streamer serves the live bot view, a raw
-window feed, or the calibration recorder.
+Grabs the latest snapshot on a timer, annotates it (anchors, player dot,
+nav target, markers), JPEG-encodes, and hands a binary frame to a send
+callable. Frame wire format (:func:`pack_frame`)::
+
+    b"PBF1" | uint32 BE json length | json metadata (utf-8) | JPEG bytes
+
+The provider supplies image + metadata, so the same streamer serves the
+live bot view, a raw window feed, or the calibration recorder.
 """
 
 from __future__ import annotations
 
-import base64
 import io
 import json
+import struct
 import logging
 import threading
 import time
@@ -222,23 +225,38 @@ def annotate_title(band: np.ndarray) -> np.ndarray:
     return out
 
 
-def encode_jpeg(img: np.ndarray, quality: int = 70) -> str:
-    """BGR ndarray -> base64 JPEG. PIL imported lazily."""
+FRAME_MAGIC = b"PBF1"
+
+
+def encode_jpeg(img: np.ndarray, quality: int = 70) -> bytes:
+    """BGR ndarray -> JPEG bytes. PIL imported lazily."""
     from PIL import Image
 
-    rgb = img[:, :, ::-1]
+    rgb = np.ascontiguousarray(img[:, :, ::-1])
     buf = io.BytesIO()
     Image.fromarray(rgb).save(buf, format="JPEG", quality=quality)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+    return buf.getvalue()
+
+
+def pack_frame(meta: dict, jpeg: bytes) -> bytes:
+    head = json.dumps(meta).encode("utf-8")
+    return FRAME_MAGIC + struct.pack(">I", len(head)) + head + jpeg
+
+
+def unpack_frame(data: bytes) -> Tuple[dict, bytes]:
+    if data[:4] != FRAME_MAGIC:
+        raise ValueError("not a PicoBot frame")
+    (n,) = struct.unpack(">I", data[4:8])
+    return json.loads(data[8 : 8 + n].decode("utf-8")), data[8 + n :]
 
 
 class FrameStreamer:
-    """Periodic snapshot -> annotated JPEG -> broadcast."""
+    """Periodic snapshot -> annotated JPEG -> binary frame to ``send``."""
 
     def __init__(
         self,
         provider: Provider,
-        send: Callable[[str], None],
+        send: Callable[[bytes], None],
         *,
         interval: float = 0.35,
         quality: int = 70,
@@ -283,7 +301,6 @@ class FrameStreamer:
                         "mode": self.mode,
                         "w": int(frame.shape[1]),
                         "h": int(frame.shape[0]),
-                        "jpeg": encode_jpeg(frame, self.quality),
                     }
                     for key in (
                         "state", "map", "map_via", "map_conf", "map_title",
@@ -292,11 +309,19 @@ class FrameStreamer:
                     ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]
-                    self.send("dash|" + json.dumps(payload))
+                    self.send(pack_frame(payload, encode_jpeg(frame, self.quality)))
             except Exception:
                 logger.debug("frame stream failed", exc_info=True)
             elapsed = time.time() - started
             self._stop.wait(max(0.05, self.interval - elapsed))
 
 
-__all__ = ["FrameStreamer", "Provider", "annotate", "annotate_title", "encode_jpeg"]
+__all__ = [
+    "FrameStreamer",
+    "Provider",
+    "annotate",
+    "annotate_title",
+    "encode_jpeg",
+    "pack_frame",
+    "unpack_frame",
+]

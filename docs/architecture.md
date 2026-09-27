@@ -80,7 +80,12 @@ calibration runner, and the dashboard command surface (`map|set`,
 `remote/control.py` relays `hid|…` payloads (dashboard input pad, the
 Flutter app) to serial. `remote/streamer.py` captures frames at
 `view_fps`, annotates overlays (`annotate`, `assemble_panel`,
-`annotate_title`), JPEG-encodes, and broadcasts `dash|{json}` messages.
+`annotate_title`), JPEG-encodes, and sends binary frames to clients that
+subscribed (`dash|subscribe|frames`); a client still receiving the
+previous frame skips the next one. Dashboard commands run in order on a
+`DashboardCommands` worker thread, never on the WS event loop, so slow
+commands can't stall `hid|…` relay. `ScreenGrabber` keeps one mss
+instance per thread.
 `remote/http.py` serves `dashboard.html`.
 
 Threads: the WS server, the HTTP server, the frame streamer, and the bot
@@ -96,7 +101,7 @@ MapMonitor (20 Hz) → note_frame() (blackout → arrival, panel moves)
 feed/bot capture → minimap_img() ──► overlays, player position
 snap = viz/map meta + overlays ──► assemble_panel (title+map composite,
                                    ox/oy offset) ──► annotate ──► JPEG
-                                                          └─► WS frame
+                                                          └─► binary WS frame
 ```
 
 ## Directory map
