@@ -16,8 +16,9 @@ With ≥2 anchors and drawn platforms the bot is always on the move:
   `linger_hops` (default 0–2, random) weave hops and moves on. No dwell
   timers, no breathers.
 - Loop finished → re-plan from wherever the player is.
-- **Bans**: no route → skipped at once; 3 missed landings → skipped.
-  Banned anchors sit out 30s.
+- **Bans**: no route, unreachable-at-plan-time (including anchors not
+  on any drawn platform — "re-place it"), or 3 missed landings → skipped
+  for 30s, so one bad anchor can't shrink or stall the patrol.
 - Hand-authored `legs` for a pair still win (ropes aren't in the graph).
 - Fallbacks: no drawn platforms (or standing off them) → the older
   straight-line patrol; one anchor → weave on its platform; no anchors →
@@ -47,7 +48,9 @@ covers the gap:
   the conservative start. Learned values persist in `nav_reach_file`.
 - Rope lift is **preferred over up-flash whenever it's ready** (cheapest
   rise). While it's cooling down it's left out of the plan and the bot
-  up-flashes instead — it never waits on the cooldown.
+  up-flashes instead — it never waits on the cooldown. A lift that
+  starts cooling during the approach re-routes without counting a
+  failure.
 - The dashboard's **Route** button shows every edge (colours per move)
   and previews routes on click.
 
@@ -61,9 +64,22 @@ Bot-controlled movement looks like a player farming, not a macro:
   attack before the re-press eats its input window and the flash never
   fires.
 - `move_to_point` flash-weaves while the target is farther than one hop
-  and walks only the final approach. Hop distance is learned from
-  observed hops (starts at 14 minimap px). Hops that don't move fall back
-  to walking; with `flash_jump_enabled: false` attacks weave into walks.
+  **and the platform leaves a hop of room ahead**; otherwise it walks.
+  Hop distance is learned from observed hops (starts at 14 minimap px).
+  Hops that don't move fall back to walking; with
+  `flash_jump_enabled: false` attacks weave into walks.
+- Walk legs are horizontal (`flat`): a few px between the drawn row and
+  the real standing line never triggers vertical jumps.
+- A gap flash that never triggers releases the direction as soon as the
+  character drops below the takeoff row (or shows no progress for 0.5s)
+  instead of walking into the gap.
+- Landings are scored tolerantly (platform x-span + row slack): a move
+  that succeeded never shrinks the reach model — only a real miss does.
+- After each move the bot waits for the player dot to be stable within
+  ~1.5px (≤0.7s), not for exact-equal readings — detection jitter no
+  longer adds a fixed stall to every move.
+- Re-press gaps are tunable: `flash_repress_seconds` (jump → flash) and
+  `combo_repress_seconds` (between chained flashes).
 - **Every flash move attacks**: gap flashes, double flashes, up flashes
   and up-then-side flashes all weave 1–2 attacks once the flash has
   triggered (`_after_flash`). Attacks never fire outside a flash move in

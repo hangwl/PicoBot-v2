@@ -93,7 +93,8 @@ class PatrolTests(unittest.TestCase):
         for _ in range(12):
             p.tick()
         self.assertNotIn(1, p.order)
-        self.assertTrue(any("unreachable" in l for l in bot.log_lines))
+        self.assertTrue(any("no route from here" in l for l in bot.log_lines))
+        self.assertIn(1, bot._ckpt_ban)                # banned, not retried
 
     def test_nothing_reachable_weaves_without_replanning_every_tick(self):
         bot = PatrolBot([FLOOR, (60, 40, 100, 40)], (10, 100), [(80, 40), (90, 40)])
@@ -101,7 +102,9 @@ class PatrolTests(unittest.TestCase):
         for _ in range(10):
             p.tick()
         self.assertEqual(bot.weaves, 10)
-        self.assertEqual(sum("unreachable" in l for l in bot.log_lines), 1)
+        skips = sum("skipping" in l for l in bot.log_lines)
+        self.assertGreaterEqual(skips, 2)          # both anchors banned once
+        self.assertLessEqual(skips, 3)             # not re-logged every replan
 
     def test_continues_after_first_arrival_near_takeoff(self):
         # Regression: arriving 2px from the next up-flash takeoff stalled
@@ -133,6 +136,23 @@ class PatrolTests(unittest.TestCase):
         bot = PatrolBot([FLOOR], (10, 40), [(20, 100), (180, 100)])   # mid-air
         Patrol(bot).tick()
         bot._patrol_tick.assert_called_once()
+
+    def test_anchor_off_platform_is_banned_with_message(self):
+        bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (95, 20)])
+        p = Patrol(bot, rng=random.Random(0))
+        p.tick()
+        self.assertIn(1, bot._ckpt_ban)
+        self.assertTrue(any("not on a drawn platform" in l for l in bot.log_lines))
+
+    def test_reachable_anchors_still_patrolled_past_a_bad_one(self):
+        bot = PatrolBot([FLOOR, (60, 40, 100, 40)], (10, 100),
+                        [(20, 100), (80, 40), (180, 100)])
+        p = Patrol(bot, rng=random.Random(0))
+        for _ in range(14):
+            p.tick()
+        names = {l.split(": ")[1] for l in bot.log_lines
+                 if l.startswith("Checkpoint:")}
+        self.assertEqual(names, {"a0", "a2"})           # a1 banned, rest flow
 
     def test_recorded_leg_wins(self):
         bot = PatrolBot([FLOOR, MID], (20, 100), [(20, 100), (80, 84)])

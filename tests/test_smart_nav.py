@@ -3,6 +3,7 @@ GameWindow/ScreenGrabber (Windows-only) is needed."""
 
 import random
 import tempfile
+import itertools
 import threading
 import time
 import unittest
@@ -370,6 +371,58 @@ class MovementRuleTests(unittest.TestCase):
         self.assertTrue(bot.move_to_point(80, 50, style="mixed"))
         self.assertEqual(bot._flash_weave.call_count, 5)
         self.assertTrue(any("walking instead" in c.args[0] for c in bot.log.call_args_list))
+
+
+class FlatWalkTests(unittest.TestCase):
+    """Walk legs are horizontal: a few px between the drawn row and the
+    real standing line must never trigger vertical jumps."""
+
+    def _bot_on_row(self, row_y, stand_y):
+        bot = _bot([(20, stand_y), (35, stand_y), (50, stand_y)], target=(50, stand_y))
+        from picobot.bot.maps import MapEntry
+
+        bot._map = MapEntry(name="m", platforms=_plats(0, 200, y=row_y / 150))
+        bot.maps = Mock(**{"get.return_value": bot._map})
+        return bot
+
+    def test_flat_walk_never_jumps(self):
+        bot = self._bot_on_row(50, 55)                 # drawn 5px above
+        self.assertTrue(bot.move_to_point(50, 55, flat=True))
+        bot.up_jump.assert_not_called()
+        bot.down_jump.assert_not_called()
+
+    def test_non_flat_walk_still_seeks_the_drawn_row(self):
+        bot = self._bot_on_row(50, 55)
+        bot.config.vert_jump_interval = 0.05
+        ticks = itertools.count()
+        with patch("time.time", side_effect=lambda: next(ticks) * 0.5):
+            self.assertTrue(bot.move_to_point(50, 55))
+        bot.up_jump.assert_called()                    # seeks the drawn row…
+
+
+class TravelFlashRoomTests(unittest.TestCase):
+    """Travel flashes need a full hop of room ahead on the platform."""
+
+    def _bot_on(self, x1, stuck_limit=8):
+        bot = _bot([(50, 50)], target=(150, 50), stuck_limit=stuck_limit)
+        from picobot.bot.maps import MapEntry
+
+        bot.config.flash_jump_enabled = True
+        bot._flash_weave = Mock()
+        bot._map = MapEntry(name="m", platforms=_plats(0, x1, y=50 / 150))
+        bot.maps = Mock(**{"get.return_value": bot._map})
+        return bot
+
+    def test_no_flash_without_hop_room(self):
+        # 10px of platform ahead < one hop: walk, never flash.
+        bot = self._bot_on(60)
+        self.assertFalse(bot.move_to_point(150, 50, style="mixed"))
+        bot._flash_weave.assert_not_called()
+
+    def test_flash_when_room_allows(self):
+        bot = self._bot_on(200)
+        self.assertFalse(bot.move_to_point(150, 50, style="mixed"))
+        bot._flash_weave.assert_called()
 
 
 class FlashAttackTests(unittest.TestCase):

@@ -5,7 +5,8 @@ movement graph, jittered so loops vary), and the complete traversal is
 published for the dashboard. Each tick performs one move toward the
 current anchor — re-planned from the player's actual position — so the
 bot always has a next position to move to. Anchors are pass-through
-waypoints with a short randomized linger (``linger_hops`` weave hops).
+waypoints with a brief randomized linger (``linger_hops``, default 0-1
+weave hops).
 """
 
 from __future__ import annotations
@@ -71,6 +72,8 @@ class Patrol:
             status = self._nav.step(goal)
         if status == "arrived":
             self._arrive(idx, rot.anchors[idx])
+        elif status == "cooldown":
+            pass                    # rope lift cooling — next step re-routes
         elif status == "noroute":
             self._ban(idx, "no route")
         elif status == "failed":
@@ -99,9 +102,21 @@ class Patrol:
             }
             nxt = min(remaining, key=costs.get)
             if costs[nxt] == float("inf"):
-                names = ", ".join(bot.effective_rotation().anchors[i].name for i in remaining)
-                bot.log(f"Patrol: unreachable from here — {names}")
-                break
+                # Ban it like a failed leg so one bad anchor can't
+                # truncate the rest of the plan.
+                goal = anchors[nxt]
+                why = (
+                    "not on a drawn platform — re-place it"
+                    if graph.locate(*goal) is None
+                    else "no route from here"
+                )
+                bot.log(
+                    f"Patrol: skipping {bot.effective_rotation().anchors[nxt].name}"
+                    f" for a while ({why})"
+                )
+                bot._ckpt_ban[nxt] = now + 30.0
+                remaining.remove(nxt)
+                continue
             legs += graph.route(cur, anchors[nxt]) or []
             order.append(nxt)
             remaining.remove(nxt)

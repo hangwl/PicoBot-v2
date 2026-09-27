@@ -57,7 +57,9 @@ what was tried and what was learned in `docs/learnings.md` instead.
   padded by `wall_pad_px`. Rope lift is preferred for rises when ready.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
-  Upward: `up_flash` (Up + jump mid-air), `up_side_flash`, `rope_lift`.
+  Landings are scored tolerantly (platform span + row slack) — a
+  successful move must never shrink the envelope. Upward: `up_flash`
+  (Up + jump mid-air), `up_side_flash`, `rope_lift`.
 - **Calibration save preserves** walls/platforms/`map_name`/skills —
   `merge_recording` exists because a fresh `MapEntry` wiped layouts.
 - Region/coords: client-area px for rects; 0–1 normalized in map files.

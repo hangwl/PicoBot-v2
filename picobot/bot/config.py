@@ -43,6 +43,7 @@ class BotConfig:
     # -- Navigation ------------------------------------------------------------
     nav_threshold_px: int = 5             # minimap px tolerance for "arrived"
     nav_stuck_limit: int = 40             # identical polls before rope-escape
+    vert_jump_interval: float = 0.9       # min gap between vertical jump tries
     # Starting move reach (minimap px) — conservative; learned upward
     # from observed moves into nav_reach_file.
     nav_up_flash_px: float = 14.0         # rise of an upward flash jump
@@ -52,7 +53,9 @@ class BotConfig:
     nav_gap_px: float = 20.0              # widest gap a flash jump clears
     nav_double_gap_px: float = 32.0       # widest gap a double flash clears
     nav_reach_file: str = "nav_reach.json"
-    linger_hops: Tuple[int, int] = (0, 2)  # weave hops at each anchor
+    linger_hops: Tuple[int, int] = (0, 1)  # weave hops at each anchor
+    flash_repress_seconds: float = 0.15    # jump -> flash re-press gap
+    combo_repress_seconds: float = 0.16    # gap between chained flashes
 
     # -- Dwell weave -------------------------------------------------------------
     dwell_weave: bool = True              # move + weave attacks at anchors
@@ -125,7 +128,9 @@ class BotConfig:
             "buff_interval_seconds",
             "up_jump_skill_cooldown", "nav_up_flash_px", "nav_rope_lift_px",
             "nav_up_side_dx_px", "nav_jump_px", "nav_gap_px", "nav_double_gap_px",
+            "vert_jump_interval",
             "weave_double_chance", "wall_pad_px",
+            "flash_repress_seconds", "combo_repress_seconds",
         )
         for name in floats:
             if name in data:

@@ -66,8 +66,9 @@ class Navigator:
         )
         if leg is None:
             return "moved"
-        if not self._leg(leg):
-            return "failed"
+        res = self._leg(leg)
+        if res != "ok":
+            return res
         pos = self._pos()
         return "arrived" if pos is not None and self._arrived(pos, goal, goal_plat) else "moved"
 
@@ -85,6 +86,8 @@ class Navigator:
             if status in ("noroute", "lost"):
                 bot.log(f"Nav: {status} toward {goal}")
                 return False
+            if status == "cooldown":
+                continue          # rope lift started cooling — re-route
             if status == "failed":
                 failures += 1
                 bot.log(f"Nav: missed a landing — replanning ({failures})")
@@ -101,21 +104,25 @@ class Navigator:
         )
 
     # -- Legs -------------------------------------------------------------------------
-    def _leg(self, leg: Leg) -> bool:
+    def _leg(self, leg: Leg) -> str:
+        """``ok`` | ``failed`` | ``cooldown`` (rope lift started cooling
+        during the approach — re-route, don't count a failure)."""
         bot = self.bot
         if not bot.should_continue() or not bot.is_window_focused():
-            return False
+            return "failed"
         if leg.kind == "walk":
-            return self._walk_to(leg.x1)
+            return "ok" if self._walk_to(leg.x1) else "failed"
         if not self._walk_to(leg.x0, exact=True):
-            return False
+            return "failed"
+        if leg.kind == "rope_lift" and bot.rope_lift_remaining() > 0:
+            return "cooldown"
         want = self.graph.locate(leg.x1, leg.y1)
         start = self._settle(quick=True)
         direction = "right" if leg.x1 > leg.x0 else "left"
         kind = leg.kind
         if kind == "rope_lift":
-            if not self._rope_lift():
-                return False
+            if not bot.rope_lift():
+                return "failed"
         elif kind == "up_flash":
             self.bot._up_flash(direction if abs(leg.x1 - leg.x0) > 2 else None)
         elif kind == "up_side_flash":
@@ -123,11 +130,14 @@ class Navigator:
         elif kind == "down_jump":
             bot.down_jump()
         elif kind == "drop":
-            self._hold_until(direction, lambda p: p[1] > leg.y0 + self.graph.snap_px, 1.5)
+            self._hold_until(
+                direction, lambda p: p[1] > leg.y0 + self.graph.snap_px, 1.5,
+                min_progress=4.0,
+            )
         elif kind in ("jump", "flash", "double_flash"):
             self._gap_jump(leg, direction)
         pos = self._settle()
-        ok = pos is not None and self.graph.locate(*pos) == want
+        ok = pos is not None and self._on_platform(pos, want)
         if kind in MOVES and start is not None and pos is not None:
             self.graph.reach.observe(
                 kind,
@@ -135,7 +145,21 @@ class Navigator:
                 observed=(abs(pos[0] - start[0]), start[1] - pos[1]),
                 ok=ok,
             )
-        return ok
+        return "ok" if ok else "failed"
+
+    def _on_platform(self, pos: Point, want) -> bool:
+        """Tolerant landing check: the drawn row may sit a few px off the
+        real platform, so accept the platform's x-span with row slack —
+        a successful move must not shrink the reach model."""
+        if want is None:
+            return False
+        if self.graph.locate(*pos) == want:
+            return True
+        p = self.graph.platforms[want]
+        return (
+            p.spans(pos[0], slack=2.0)
+            and abs(p.y_at(pos[0]) - pos[1]) <= self.graph.snap_px + 2
+        )
 
     def _walk_to(self, x: float, exact: bool = False) -> bool:
         pos = self._pos()
@@ -145,23 +169,35 @@ class Navigator:
         if abs(pos[0] - x) <= tol:
             return True
         return bool(self.bot.move_to_point(
-            int(round(x)), pos[1], threshold=int(tol), style="mixed",
+            int(round(x)), pos[1], threshold=int(tol), style="mixed", flat=True,
         ))
 
-    def _rope_lift(self) -> bool:
-        return bool(self.bot.rope_lift())
-
-    def _hold_until(self, direction: str, done, timeout: float, action=None) -> None:
+    def _hold_until(
+        self, direction: str, done, timeout: float, action=None,
+        *, min_progress: float = 0.0,
+    ) -> None:
+        """Hold ``direction`` until ``done``. With ``min_progress``, give
+        up early when the character hasn't moved that far within 0.5s —
+        a flash that never triggered must not walk the player off the
+        takeoff edge."""
         bot = self.bot
         bot.hid.key_down(direction)
         try:
             if action is not None:
                 action()
-            end = time.time() + timeout
+            t0 = time.time()
+            end = t0 + timeout
+            start_x = None
             while time.time() < end and bot.should_continue():
                 pos = self._pos()
-                if pos is not None and done(pos):
-                    return
+                if pos is not None:
+                    if done(pos):
+                        return
+                    if start_x is None:
+                        start_x = pos[0]
+                    elif (min_progress and time.time() - t0 > 0.5
+                          and abs(pos[0] - start_x) < min_progress):
+                        return
                 if bot.sleep(0.05):
                     return
         finally:
@@ -176,7 +212,10 @@ class Navigator:
             "double_flash": bot._double_flash,
         }[leg.kind]
         self._hold_until(
-            direction, lambda p: (p[0] - leg.x1) * sign >= 0, 1.5, action=action
+            direction,
+            lambda p: (p[0] - leg.x1) * sign >= 0
+            or p[1] > leg.y0 + self.graph.snap_px,   # walked off the edge
+            1.5, action=action, min_progress=4.0,
         )
 
     # -- Perception ------------------------------------------------------------------
@@ -184,20 +223,27 @@ class Navigator:
         img = self.bot.minimap_frame()
         return self.bot.minimap.player_pos(img) if img is not None else None
 
-    def _settle(self, quick: bool = False, timeout: float = 1.5) -> Optional[Point]:
-        """Position once the player stops moving (landed), or the last
-        seen position at timeout."""
+    def _settle(self, quick: bool = False, timeout: float = 0.7) -> Optional[Point]:
+        """Position once the player dot is stable (within ~1.5px for two
+        polls) — exact equality never settles when detection jitters."""
         last = self._pos()
-        if quick:
+        if quick or last is None:
             return last
         end = time.time() + timeout
+        stable = 0
         while time.time() < end:
-            if self.bot.sleep(0.12):
+            if self.bot.sleep(0.1):
                 return last
             pos = self._pos()
-            if pos is not None and pos == last:
-                return pos
-            last = pos if pos is not None else last
+            if pos is None:
+                continue
+            if abs(pos[0] - last[0]) <= 1 and abs(pos[1] - last[1]) <= 1:
+                stable += 1
+                if stable >= 2:
+                    return pos
+            else:
+                stable = 0
+            last = pos
         return last
 
 

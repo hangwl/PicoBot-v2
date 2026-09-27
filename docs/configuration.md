@@ -21,7 +21,10 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "nav_gap_px": 20,
     "nav_double_gap_px": 32,
     "nav_reach_file": "nav_reach.json",
-    "linger_hops": [0, 2],
+    "linger_hops": [0, 1],
+    "flash_repress_seconds": 0.15,
+    "combo_repress_seconds": 0.16,
+    "vert_jump_interval": 0.9,
     "dwell_weave": true,
     "weave_double_chance": 0.4,
     "weave_range_px": 24,
@@ -88,6 +91,11 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   rotation `wander_chance`/`rest_chance`) are ignored.
 - `linger_hops` — weave hops at each anchor before moving on, random in
   `[lo, hi]`.
+- `flash_repress_seconds` / `combo_repress_seconds` — mid-air re-press
+  gaps (jump → flash; between chained flashes). Raise them if an
+  up-side or double flash rarely chains on your server.
+- `vert_jump_interval` — minimum gap between vertical jump attempts in
+  non-graph movement.
 - `pause_on_lie_detector` is a stub seam — keep it off.
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest

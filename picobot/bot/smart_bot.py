@@ -389,7 +389,7 @@ class SmartBot(BotBase):
             self.hid.key_down(direction)
         try:
             self.hid.press(jk)
-            self.sleep(human_between(0.12, 0.08, 0.18))
+            self.sleep(self._repress(self.config.flash_repress_seconds * 0.8))
             self.hid.key_down("up")
             self.hid.press(jk)
             self.hid.key_up("up")
@@ -405,10 +405,10 @@ class SmartBot(BotBase):
         self.hid.key_down(direction)
         try:
             self.hid.press(jk)
-            self.sleep(human_between(0.12, 0.08, 0.18))
+            self.sleep(self._repress(self.config.flash_repress_seconds * 0.8))
             self.hid.key_down("up")
             self.hid.press(jk)
-            self.sleep(human_between(0.16, 0.11, 0.22))
+            self.sleep(self._repress(self.config.combo_repress_seconds))
             self.hid.key_up("up")
             self.hid.press(jk)
             self._after_flash(0.33)
@@ -421,7 +421,7 @@ class SmartBot(BotBase):
         self.hid.press(jk)
         self.sleep(human_between(0.17, 0.11, 0.26))
         self.hid.press(jk)
-        self.sleep(human_between(0.2, 0.14, 0.28))
+        self.sleep(self._repress(self.config.combo_repress_seconds))
         self.hid.press(jk)
         self._after_flash(0.33)
 
@@ -502,9 +502,13 @@ class SmartBot(BotBase):
         """One flash jump (caller holds the direction), attacks woven in."""
         jk = self._flash_key()
         self.hid.press(jk)
-        self.sleep(human_between(0.17, 0.11, 0.26))
+        self.sleep(self._repress(self.config.flash_repress_seconds))
         self.hid.press(jk)
         self._after_flash(0.34)
+
+    def _repress(self, mean: float) -> float:
+        """Log-normal gap around ``mean`` for a mid-air re-press."""
+        return human_between(mean, mean * 0.65, mean * 1.5)
 
     def _after_flash(self, airtime: float) -> None:
         """The movement rule's tail: once a flash has triggered, weave 1–2
@@ -526,7 +530,7 @@ class SmartBot(BotBase):
             if cfg.flash_jump_enabled:
                 jk = self._flash_key()
                 self.hid.press(jk)
-                self.sleep(human_between(0.17, 0.11, 0.26))
+                self.sleep(self._repress(self.config.flash_repress_seconds))
                 self.hid.press(jk)
                 self._after_flash(0.34)
             else:
@@ -555,8 +559,12 @@ class SmartBot(BotBase):
         threshold: Optional[int] = None,
         *,
         style: str = "walk",
+        flat: bool = False,
     ) -> bool:
         """Navigate on the minimap toward (x, y); True if reached.
+
+        ``flat`` treats the leg as horizontal: no vertical jumps, arrival
+        on x alone — walk legs never stall on a few px of drawing error.
 
         ``walk`` holds the direction key. ``flash``/``mixed``: while the
         target is farther than one flash hop, travel by flash weaves
@@ -626,7 +634,7 @@ class SmartBot(BotBase):
                     if moved > 2:
                         self._hop_px = 0.7 * self._hop_px + 0.3 * moved
                     hop_from = None
-                if not snapped:
+                if not snapped and not flat:
                     # Project the target onto the map's drawn platform —
                     # a target recorded beneath the lowest platform is
                     # unreachable, so snap to the nearest real floor.
@@ -640,12 +648,22 @@ class SmartBot(BotBase):
                         )
                         target_y = py
                         self.viz["target"] = (target_x, target_y)
-                dx, dy = target_x - cx, target_y - cy
+                dx = target_x - cx
+                dy = 0 if flat else target_y - cy
                 if abs(dx) <= threshold and abs(dy) <= threshold:
                     self.log("Navigation target reached")
                     self.viz["target"] = None
                     return True
-                if flash_ok and abs(dx) > max(self._hop_px, start_band):
+                span = (
+                    platform_span_at(self._platform_segments_px(), cx, cy)
+                    if flash_ok else None
+                )
+                room = (
+                    span is None
+                    or (cx - span[0] > self._hop_px
+                        and span[1] - cx > self._hop_px)
+                )
+                if flash_ok and room and abs(dx) > max(self._hop_px, start_band):
                     sync_dir(None)
                     hop_from = cx
                     self._flash_weave("right" if dx > 0 else "left")
@@ -670,7 +688,7 @@ class SmartBot(BotBase):
                 if abs(dx) <= threshold * 3:
                     # Rate-limit vertical jumps — spamming them never helps.
                     now = time.time()
-                    if dy < -threshold and now - last_vert_jump >= 0.9:
+                    if dy < -threshold and now - last_vert_jump >= self.config.vert_jump_interval:
                         vert_fails = (
                             vert_fails + 1
                             if vert_ref is not None and cy >= vert_ref - 1
@@ -686,7 +704,7 @@ class SmartBot(BotBase):
                             continue
                         vert_ref = cy
                         last_vert_jump = now
-                    elif dy > threshold and now - last_vert_jump >= 0.9:
+                    elif dy > threshold and now - last_vert_jump >= self.config.vert_jump_interval:
                         floor = self._floor_px()
                         if floor is not None and cy >= floor - 2:
                             # Bottom of the map — the target is below the
@@ -947,7 +965,7 @@ class SmartBot(BotBase):
             if not self.should_continue():
                 break
             if self._use_skill(buff):
-                self.sleep(human_between(0.6, 0.4, 0.9))
+                self.sleep(human_between(0.3, 0.2, 0.45))
         if len(self.effective_rotation().anchors) >= 2:
             self.patrol.tick()
         elif self.config.dwell_weave:
@@ -1213,7 +1231,7 @@ class SmartBot(BotBase):
             return
         for buff in self.skills.due_buffs():
             if self._use_skill(buff):
-                self.sleep(human_between(0.6, 0.4, 0.9))
+                self.sleep(human_between(0.3, 0.2, 0.45))
         if self._roam_origin is None:
             self._roam_origin = self.player_pos()
         if self._roam_origin is None:

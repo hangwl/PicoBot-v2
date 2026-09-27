@@ -1,4 +1,5 @@
 import random
+import time
 import unittest
 from types import SimpleNamespace
 
@@ -42,7 +43,12 @@ class SimBot:
         self.config = SimpleNamespace(nav_threshold_px=4, jump_key="space")
         self.viz = {}
         self.minimap = SimpleNamespace(player_pos=lambda img: self.pos)
-        self.hid = SimpleNamespace(key_down=self._down, key_up=self._up, press=self._press)
+        self.downs, self.ups = [], []
+        self.hid = SimpleNamespace(
+            key_down=lambda k: (self.downs.append(k), self._down(k)) and None,
+            key_up=lambda k: (self.ups.append(k), self._up(k)) and None,
+            press=self._press,
+        )
 
     # lifecycle / perception
     def minimap_frame(self):
@@ -68,7 +74,7 @@ class SimBot:
         return False
 
     # moves
-    def move_to_point(self, x, y, threshold=4, style="walk"):
+    def move_to_point(self, x, y, threshold=4, style="walk", flat=False):
         p = self.g.platforms[self.g.locate(*self.pos)]
         self.pos = (min(p.x1, max(p.x0, x)), self.pos[1])
         return True
@@ -205,6 +211,40 @@ class NavigatorTests(unittest.TestCase):
         self.assertFalse(self._nav(bot).go((80, 84), max_failures=2))
         self.assertLess(bot.g.reach.get("up_flash").rise, 20)
         self.assertTrue(any("giving up" in l for l in bot.log_lines))
+
+    def test_settle_tolerates_dot_jitter(self):
+        bot = SimBot([FLOOR], (50, 100))
+        flip = [0]
+
+        def jittery(_img):
+            flip[0] ^= 1
+            return (50 + flip[0], 100)
+
+        bot.minimap.player_pos = jittery
+        t0 = time.monotonic()
+        self._nav(bot)._settle()
+        self.assertLess(time.monotonic() - t0, 0.5)   # not the 0.7s timeout
+
+    def test_landing_tolerance_off_drawn_row(self):
+        bot = SimBot([FLOOR, (60, 70, 100, 70)], (10, 100))
+        nav = self._nav(bot)
+        top = bot.g.locate(80, 70)
+        self.assertIsNone(bot.g.locate(80, 79))        # 9px off: snap fails
+        self.assertTrue(nav._on_platform((80, 79), top))
+        self.assertFalse(nav._on_platform((80, 100), top))
+
+    def test_gap_jump_releases_when_the_flash_fizzles(self):
+        bot = SimBot([MID, SIDE], (60, 84), flash=0)
+        t0 = time.monotonic()
+        self.assertFalse(self._nav(bot).go((170, 84), max_failures=1, max_steps=3))
+        self.assertLess(time.monotonic() - t0, 8)      # failed fast
+        self.assertIn("right", bot.ups)                # direction released
+
+    def test_rope_chain_replans_when_lift_cools(self):
+        bot = SimBot([FLOOR, MID, TOP], (10, 100))
+        self.assertTrue(self._nav(bot).go((80, 66)))
+        # Rise #2 is planned while the lift cools → up-flash instead.
+        self.assertEqual(bot.moves, ["rope_lift", "up_flash"])
 
     def test_route_published_for_dashboard(self):
         bot = SimBot([FLOOR, MID], (10, 100), rope=0)
