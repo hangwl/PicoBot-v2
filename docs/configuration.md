@@ -63,10 +63,10 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 - `active_map` is a pin: it stands unless the title matches a different
   stored map. `auto_select_map` defers to live detection.
 - Removed keys (`map_match_threshold`, `minimap_colors.ink`) are ignored.
-- `up_jump_skill_key` is a rope-lift style skill used instead of the
-  jump+up+jump combo; presses are gated by `up_jump_skill_cooldown` and
-  nav rides out the cooldown rather than misreading suppression as
-  "can't climb".
+- `up_jump_skill_key` is the rope-lift skill, preferred for rises when
+  ready; `up_jump_skill_cooldown` is its re-cast delay. While it's
+  cooling down the bot up-flashes (jump, then Up + jump) instead of
+  waiting.
 - Flash jump = jump-again-mid-air — always `jump_key` (`key` is a legacy
   override, leave null).
 - Legacy `attack_keys`/`buff_keys` synthesize into skills when no
