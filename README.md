@@ -112,13 +112,16 @@ you verified in the dashboard carries over to the bot at Start:
 ```
 
 - Coordinates are 0–1 fractions of the minimap region (values >1 are raw px).
-- `style`: `loop` | `pingpong` | `shuffle`.
+- `style` (`loop` | `pingpong` | `shuffle`) is **legacy** — anchor order is
+  planned dynamically as a checkpoint route, not walked by index.
 - Step kinds: `walk_to` (+ `style`: walk|flash|mixed), `climb`
   (`dir`, `until_y`, optional align `x`), `up_jump`, `down_jump`, `wait`.
 - Skill `kind`: `attack` (attack loop), `buff` (fires when ready anywhere),
   `summon` (fires at anchors listing it via `on_arrive`).
 - `wait_on_arrival`: seconds the bot waits at an anchor for a skill's cooldown
   before giving up — players wait a beat for their summon too.
+- `dwell` bounds the farming stay at single-anchor spots and the rest-breather
+  window — with ≥2 anchors the patrol route replaces dwell parking.
 - During dwells the bot **weaves**: it flash-hops (or walks) back and
   forth across the anchor's platform — bounds come from the map's
   hand-drawn platform segment, falling back to `weave_range_px` when
@@ -149,13 +152,18 @@ you verified in the dashboard carries over to the bot at Start:
   recorded anchors and the Floor boundary land on the platform line
   rather than floating at icon-center height. (Floor placement also
   snaps to the nearest drawn platform segment.)
-- **Patrol mode** (`"patrol": true` on a map's rotation, or the
-  **patrol anchors** checkbox): anchors become checkpoints — instead of
-  parking at one, the dwell weaves *toward the next anchor* and advances
-  on arrival. A 2-anchor map becomes a continuous back-and-forth patrol;
-  legs are only used when the next checkpoint sits on another level.
-  Anchor precision matters less in patrol mode — only the heading (x)
-  and same-level check (y) are used, not a pixel-exact servo target.
+- **Anchors are patrol checkpoints.** With ≥2 anchors the bot plans a
+  route over all of them (nearest-neighbour from the player's position,
+  sweeping the current level first) and weave-attacks toward each
+  checkpoint — it never stands still. Arriving pops the checkpoint,
+  fires its `on_arrive` skills, and the same tick keeps hopping toward
+  the next one. When the route is exhausted a new one is planned
+  starting from wherever the player ended up — including anchors on
+  other levels, which hand off to recorded legs (missing leg pairs are
+  composed by shortest path through recorded legs). A checkpoint that
+  can't be reached within ~20s is skipped so one bad anchor can't stall
+  the loop. Single-anchor maps still weave in place; `dwell_weave:
+  false` makes them stationary.
 
 ## Bot configuration
 

@@ -72,8 +72,6 @@ class SmartBot(BotBase):
         self.maps = MapStore(config.maps_dir)
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0
-        self._pingpong_dir = 1
-        self._rotation_started = False
         self._travel_target: Optional[int] = None
         self._leg_fp: Optional[str] = None
         self._dwell_end = 0.0
@@ -84,11 +82,16 @@ class SmartBot(BotBase):
         self._last_up_skill = 0.0
         self._weave_dir: Optional[str] = None
         self._weave_bounds: Optional[Tuple[int, int]] = None
-        self._patrol_target: Optional[int] = None
+        # Checkpoint route: anchor indices left to visit, nearest-
+        # neighbour ordered from the player's position; replanned when
+        # empty so the current location seeds the next loop.
+        self._route: List[int] = []
+        self._ckpt_idx: Optional[int] = None
+        self._ckpt_deadline: float = 0.0
         # Latest-observation snapshot consumed by the dashboard streamer.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
-            "target": None, "map": None, "anchor": None,
+            "target": None, "map": None,
         }
 
     def _viz_state(self, name: str) -> None:
@@ -332,9 +335,9 @@ class SmartBot(BotBase):
                 self.event("map", entry.name)
             self.skills = SkillBook(merged)
             self._anchor_idx = 0
-            self._rotation_started = False
             self._weave_dir = None
             self._weave_bounds = None
+            self._route = []
         self._apply_stored_layout(entry)
 
     def _apply_stored_layout(self, entry) -> None:
@@ -690,22 +693,23 @@ class SmartBot(BotBase):
 
     # -- Rotation ----------------------------------------------------------------
     def begin_travel(self) -> bool:
-        """Pick the next anchor and arm the leg + map-change baseline."""
+        """Arm the next leg + map-change baseline.
+
+        Targets come from the patrol route — a level-change handoff
+        presets ``_travel_target``; otherwise the route's head is the
+        next checkpoint (used by the degenerate <2-anchor path)."""
         self._resolve_map()
         rot = self.effective_rotation()
         if not rot.anchors:
             return False
         if self._anchor_idx >= len(rot.anchors):
             self._anchor_idx = 0
-            self._rotation_started = False
         self._leg_fp = self.minimap_fingerprint()
         if self._travel_target is not None:
-            # Preset by a patrol level-change handoff — the anchor
-            # sequence already advanced when the target was picked.
             target = self._travel_target
-            self._rotation_started = True
-        elif not self._rotation_started:
-            # First leg: head for the nearest anchor, not blindly #0.
+        elif self._route:
+            target = self._route[0]
+        else:
             pos = self.player_pos()
             if pos is not None:
                 target = min(
@@ -715,11 +719,6 @@ class SmartBot(BotBase):
                 )
             else:
                 target = self._anchor_idx
-            self._rotation_started = True
-        else:
-            target, self._pingpong_dir = rot.next_index(
-                self._anchor_idx, self._pingpong_dir
-            )
         self._travel_target = target
         self.log(f"TRAVEL: → {rot.anchors[target].name}")
         return True
@@ -767,12 +766,16 @@ class SmartBot(BotBase):
 
     # -- Dwell ---------------------------------------------------------------------
     def begin_dwell(self) -> None:
-        """Start a farming dwell at the current anchor (or legacy timer)."""
+        """Start a farming dwell at the current anchor (or legacy timer).
+
+        With ≥2 anchors the dwell is a checkpoint patrol — it runs until
+        the route hands off a cross-level checkpoint to TRAVEL, so
+        ``_dwell_end`` stays open-ended. Smaller rotations keep the
+        per-anchor dwell timer."""
         rot = self.effective_rotation()
         now = time.time()
         self._weave_dir = None
         self._weave_bounds = None
-        self._patrol_target = None
         if rot.anchors and self._anchor_idx < len(rot.anchors):
             anchor = rot.anchors[self._anchor_idx]
             if anchor.face:
@@ -783,7 +786,9 @@ class SmartBot(BotBase):
                 if (s := self.skills.get(name)) is not None
             ]
             dwell = anchor.dwell_seconds()
-            self._dwell_end = now + dwell
+            self._dwell_end = (
+                float("inf") if len(rot.anchors) >= 2 else now + dwell
+            )
             if random.random() < rot.rest_chance:
                 self._rest_until = now + min(dwell * 0.6, random.uniform(5, 25))
                 self.log("Taking a breather")
@@ -798,7 +803,7 @@ class SmartBot(BotBase):
         return time.time() >= self._dwell_end
 
     def dwell_tick(self) -> None:
-        """One farming tick at an anchor: arrival skills, buffs, attack."""
+        """One farming tick: arrival skills, buffs, then patrol/weave."""
         if time.time() < self._rest_until:
             self.sleep(0.5)
             return
@@ -814,7 +819,7 @@ class SmartBot(BotBase):
                 break
             if self._use_skill(buff):
                 self.sleep(jittered(0.6))
-        if self.effective_rotation().patrol:
+        if len(self.effective_rotation().anchors) >= 2:
             self._patrol_tick()
         elif self.config.dwell_weave:
             self._weave_attack()
@@ -908,41 +913,91 @@ class SmartBot(BotBase):
         finally:
             self.hid.key_up(direction)
 
+    def _plan_route(self, pos) -> None:
+        """Order the anchors into a checkpoint route from ``pos``.
+
+        Nearest-neighbour ordering seeded at the player's position — the
+        current location is the route's origin, so anchors already within
+        arrival reach are dropped (their arrival would be instant and
+        would double-fire on_arrive). The route sweeps the map instead of
+        walking the declared anchor order."""
+        rot = self.effective_rotation()
+        cfg = self.config
+        band = max(8, cfg.nav_threshold_px * 2)
+        px = [(self._rx(a.x), self._ry(a.y)) for a in rot.anchors]
+        remaining = [
+            i for i, (ax, ay) in enumerate(px)
+            if abs(ax - pos[0]) > cfg.nav_threshold_px
+            or abs(ay - pos[1]) > band
+        ]
+        route = []
+        cur = pos
+        while remaining:
+            nxt = min(
+                remaining,
+                key=lambda i: (px[i][0] - cur[0]) ** 2
+                + (px[i][1] - cur[1]) ** 2,
+            )
+            route.append(nxt)
+            remaining.remove(nxt)
+            cur = px[nxt]
+        self._route = route
+        self._ckpt_idx = None
+        self.log(
+            "Patrol route: "
+            + " → ".join(rot.anchors[i].name for i in route)
+        )
+
     def _patrol_tick(self) -> None:
-        """Checkpoint patrol: weave toward the *next* anchor instead of
-        parking — anchors are waypoints, not destinations. On arrival the
-        checkpoint's on_arrive fires and the heading advances; when the
-        next checkpoint sits on another level the dwell hands off to the
-        recorded leg for the vertical part."""
+        """Checkpoint patrol: weave-attack toward the route's head.
+
+        Every tick attacks — arrival bookkeeping and cross-level handoffs
+        no longer burn a hop. Checkpoints on another level set
+        ``_travel_target`` and end the dwell so TRAVEL runs the recorded
+        leg; a head that can't be reached in ~20s is skipped so a bad
+        checkpoint can't stall the loop forever."""
         rot = self.effective_rotation()
         if len(rot.anchors) < 2:
-            self._weave_attack()
+            if self.config.dwell_weave:
+                self._weave_attack()
+            else:
+                self._attack_once()
             return
         cfg = self.config
-        if self._patrol_target is None or self._patrol_target == self._anchor_idx:
-            self._patrol_target, self._pingpong_dir = rot.next_index(
-                self._anchor_idx, self._pingpong_dir
-            )
-        target = rot.anchors[self._patrol_target]
-        tx, ty = self._rx(target.x), self._ry(target.y)
         img = self.minimap_frame()
         pos = self.minimap.player_pos(img) if img is not None else None
         self.viz["player"] = pos
         if pos is None:
-            self.sleep(0.2)
+            # Blind tick — attacks don't need vision, movement does.
+            self._attack_once()
             return
+        now = time.time()
         level_band = max(8, cfg.nav_threshold_px * 2)
-        if abs(ty - pos[1]) > level_band:
-            # Different level — the leg (climb/drop) owns this transition.
-            self._travel_target = self._patrol_target
-            self._patrol_target = None
-            self._dwell_end = time.time()
-            return
-        if abs(tx - pos[0]) <= cfg.nav_threshold_px:
-            # Checkpoint reached — fire its arrival skills and head on.
-            self._anchor_idx = self._patrol_target
-            self._patrol_target = None
-            now = time.time()
+        # Resolve the route head: pop reached checkpoints, hand off
+        # cross-level ones to TRAVEL. Bounded by the anchor count.
+        idx = target = tx = ty = None
+        for _ in range(len(rot.anchors) + 1):
+            if not self._route:
+                self._plan_route(pos)
+                if not self._route:
+                    # Every anchor is already within reach — weave here.
+                    self._weave_attack()
+                    return
+            idx = self._route[0]
+            target = rot.anchors[idx]
+            tx, ty = self._rx(target.x), self._ry(target.y)
+            if abs(ty - pos[1]) > level_band:
+                # Different level — the recorded leg owns this transition.
+                self._route.pop(0)
+                self._ckpt_idx = None
+                self._travel_target = idx
+                self._dwell_end = now
+                return
+            if abs(tx - pos[0]) > cfg.nav_threshold_px:
+                break  # not there yet — head for it below
+            self._route.pop(0)
+            self._anchor_idx = idx
+            self._ckpt_idx = None
             self._arrive_pending = [
                 (s, now + s.wait_on_arrival)
                 for name in target.on_arrive
@@ -951,6 +1006,19 @@ class SmartBot(BotBase):
             if target.face:
                 self.hid.press(target.face)
             self.log(f"Checkpoint: {target.name}")
+        else:
+            self._weave_attack()
+            return
+        # Stall guard: a head that won't arrive in time is skipped so a
+        # bad checkpoint can't hold the route forever.
+        if self._ckpt_idx != idx:
+            self._ckpt_idx = idx
+            self._ckpt_deadline = now + 20.0
+        elif now > self._ckpt_deadline:
+            self.log(f"Checkpoint {target.name} unreachable — skipping")
+            self._route.pop(0)
+            self._ckpt_idx = None
+            self._attack_once()
             return
         # Head toward the checkpoint; walls still override the heading.
         dx = tx - pos[0]

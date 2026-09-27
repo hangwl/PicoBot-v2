@@ -3,6 +3,7 @@ GameWindow/ScreenGrabber (Windows-only) is needed."""
 
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -295,8 +296,9 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot._anchor_idx = 0
         bot._weave_dir = None
         bot._weave_bounds = None
-        bot._patrol_target = None
-        bot._pingpong_dir = 1
+        bot._route = []
+        bot._ckpt_idx = None
+        bot._ckpt_deadline = 0.0
         bot._travel_target = None
         bot._dwell_end = 0.0
         bot._arrive_pending = []
@@ -404,8 +406,8 @@ class WeaveTests(unittest.TestCase):
 
 
 class PatrolTests(unittest.TestCase):
-    """Patrol mode: anchors are checkpoints — weave toward the next one
-    and advance on arrival instead of standing at a dwell spot."""
+    """Anchors are route checkpoints: weave-attack toward the route head,
+    pop on arrival, replan from the player's position when exhausted."""
 
     def _bot(self, pos, rot):
         bot = _weave_bot(pos)
@@ -413,60 +415,87 @@ class PatrolTests(unittest.TestCase):
         bot.effective_rotation = Mock(return_value=rot)
         return bot
 
-    def _rot(self, patrol=True, y=0.33):
+    def _rot(self, y=0.33):
+        # a0=(50, ~50), a1=(150, ~50) in the 200x150 region
         a0 = Anchor("a0", 0.25, y)
         a1 = Anchor("a1", 0.75, y)
-        return Rotation(anchors=[a0, a1], patrol=patrol)
+        return Rotation(anchors=[a0, a1])
 
-    def test_heads_toward_next_anchor_weaving(self):
+    def test_heads_toward_nearest_checkpoint_weaving(self):
+        # Nearest to (60,50) is a0 (x=50), not the declared order — the
+        # route is planned by proximity from the current position.
         bot = self._bot((60, 50), self._rot())
         bot._patrol_tick()
-        # Jump → FJ re-press → attack, direction held toward anchor 1.
+        self.assertEqual(bot._route, [0, 1])
         self.assertEqual(bot.hid.presses, ["space", "space", "a"])
-        self.assertEqual(bot.hid.downs, ["right"])
+        self.assertEqual(bot.hid.downs, ["left"])
         self.assertEqual(bot._anchor_idx, 0)
-        self.assertEqual(bot._patrol_target, 1)
 
-    def test_checkpoint_arrival_advances_and_arms_on_arrive(self):
+    def test_checkpoint_arrival_advances_and_still_attacks(self):
+        # Standing on route head a1: arrival pops it, arms its on_arrive,
+        # and the SAME tick hops toward the next checkpoint — arrival
+        # ticks are not dead ticks.
         rot = self._rot()
         rot.anchors[1].on_arrive = ("main",)
-        bot = self._bot((148, 50), rot)   # within nav_threshold of x=150
+        bot = self._bot((148, 50), rot)
+        bot._route = [1, 0]
         bot._patrol_tick()
         self.assertEqual(bot._anchor_idx, 1)
-        self.assertIsNone(bot._patrol_target)
-        self.assertEqual(bot.hid.presses, [])   # arrival tick: no hop
+        self.assertEqual(bot._route, [0])
         self.assertEqual(len(bot._arrive_pending), 1)
+        self.assertEqual(bot.hid.presses, ["space", "space", "a"])
+        self.assertEqual(bot.hid.downs, ["left"])  # toward a0
+
+    def test_replan_excludes_current_location(self):
+        # Player standing on a1 — the new route's origin — so a1 is not
+        # re-visited as the first hop.
+        bot = self._bot((148, 50), self._rot())
+        bot._patrol_tick()
+        self.assertEqual(bot._route, [0])
 
     def test_level_change_hands_off_to_travel(self):
-        # Next checkpoint on another level → preset _travel_target and
-        # end the dwell so TRAVEL runs the recorded leg.
+        # Route head on another level → preset _travel_target and end
+        # the dwell so TRAVEL runs the recorded leg.
         rot = Rotation(
             anchors=[Anchor("a0", 0.25, 0.33), Anchor("a1", 0.75, 0.05)],
-            patrol=True,
         )
-        bot = self._bot((60, 50), rot)
+        bot = self._bot((50, 50), rot)  # standing on a0 → route = [1]
         bot._dwell_end = 9999.0
         bot._patrol_tick()
         self.assertEqual(bot._travel_target, 1)
-        self.assertIsNone(bot._patrol_target)
+        self.assertEqual(bot._route, [])
         self.assertTrue(bot.dwell_done())
+
+    def test_unreachable_checkpoint_is_skipped(self):
+        bot = self._bot((60, 50), self._rot())
+        bot._route = [1, 0]  # head = a1
+        bot._ckpt_idx = 1
+        bot._ckpt_deadline = time.time() - 1  # expired
+        bot._patrol_tick()
+        self.assertEqual(bot._route, [0])
+        self.assertIn("a", bot.hid.presses)  # still attacked
+
+    def test_blind_tick_still_attacks(self):
+        bot = self._bot(None, self._rot())  # player_pos -> None
+        bot._patrol_tick()
+        self.assertEqual(bot.hid.presses, ["a"])  # _attack_once
 
     def test_wall_overrides_checkpoint_heading(self):
         # Heading left toward a0, but inside the left wall → face right.
         from picobot.bot.maps import MapEntry
 
         bot = self._bot((70, 50), self._rot())
+        bot._route = [0, 1]
         bot._map = MapEntry(
             name="m", walls={"left": 0.4}, platforms=_plats(10, 90)
         )  # wall x=80
-        bot._anchor_idx = 1                  # next → a0 (x=50), dx=-20
         bot._patrol_tick()
         self.assertEqual(bot._weave_dir, "right")
         self.assertEqual(bot.hid.downs, ["right"])
 
     def test_single_anchor_falls_back_to_weave(self):
         bot = self._bot((50, 50), Rotation(
-            anchors=[Anchor("a0", 0.5, 0.33)], patrol=True
+            anchors=[Anchor("a0", 0.5, 0.33)]
         ))
         bot._patrol_tick()
         self.assertEqual(bot.hid.presses, ["space", "space", "a"])
@@ -477,10 +506,13 @@ class PatrolTests(unittest.TestCase):
         bot.dwell_tick()
         bot._patrol_tick.assert_called_once()
 
-    def test_patrol_roundtrip(self):
-        rot = self._rot()
-        self.assertTrue(Rotation.from_dict(rot.to_dict()).patrol)
-        self.assertFalse(Rotation.from_dict({}).patrol)
+    def test_dwell_is_open_ended_for_patrol(self):
+        # ≥2 anchors: dwell expires only via patrol handoff — mid-patrol
+        # dwell expiry would force attack-free walk legs.
+        bot = self._bot((60, 50), self._rot())
+        with patch("random.random", return_value=0.5):  # no breather
+            bot.begin_dwell()
+        self.assertFalse(bot.dwell_done())
 
 
 class TargetSnapTests(unittest.TestCase):

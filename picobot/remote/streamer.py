@@ -177,7 +177,7 @@ class FrameStreamer:
                     }
                     for key in (
                         "state", "map", "hazard", "player",
-                        "layout", "no_rotation", "patrol",
+                        "layout", "no_rotation",
                     ):
                         if snap.get(key) is not None:
                             payload[key] = snap[key]

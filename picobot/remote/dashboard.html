@@ -140,10 +140,6 @@
         <label>walls at player pos (uses map field)</label>
       </div>
       <div class="row" style="margin-top:8px">
-        <label><input type="checkbox" id="patrolChk"> patrol anchors</label>
-        <label>weave toward the next checkpoint instead of standing still</label>
-      </div>
-      <div class="row" style="margin-top:8px">
         <button id="drawPlats" title="arm, then drag along each platform on the Minimap view — click again to stop">Draw plats</button>
         <button id="platUndo" title="remove the last drawn platform segment">Undo</button>
         <button id="platClear" title="remove all platforms for this map">Clear</button>
@@ -302,8 +298,6 @@ ws.onmessage = e => {
     if (p.layout !== undefined)
       chip("layout", "layout: " + (p.layout || "–"),
         p.layout === "auto" ? "warn" : "");
-    if (p.patrol !== undefined)
-      $("patrolChk").checked = !!p.patrol;
 
     chip("hazard", "hazard: " + (p.hazard || "none"), p.hazard ? "bad" : "");
     const now = $("now");
@@ -487,8 +481,7 @@ $("wallL").onclick = () => send("layout|wall|left" + layTarget());
 $("wallR").onclick = () => send("layout|wall|right" + layTarget());
 $("wallF").onclick = () => send("layout|wall|floor" + layTarget());
 $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
-$("patrolChk").onchange = () =>
-  send("layout|patrol|" + ($("patrolChk").checked ? "on" : "off") + layTarget());
+
 // --- Drag-to-draw platforms on the Minimap view ------------------------
 let platMode = false, platStart = null;
 function armPlats() {

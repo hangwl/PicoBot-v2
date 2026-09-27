@@ -334,18 +334,11 @@ class HostCommandTests(unittest.TestCase):
             saved = MapStore(tmp).get("m1")
             self.assertEqual(saved.walls, {"floor": 0.8})
 
-    def test_patrol_toggle_writes_map_rotation(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.host.maps = MapStore(tmp)
-            self.host.maps.save(MapEntry(name="m1"))
-            self.assertTrue(
-                self.host._handle_command("layout|patrol|on|m1")
-            )
-            self.assertTrue(MapStore(tmp).get("m1").rotation.patrol)
-            self.assertTrue(
-                self.host._handle_command("layout|patrol|off|m1")
-            )
-            self.assertFalse(MapStore(tmp).get("m1").rotation.patrol)
+    def test_patrol_command_removed(self):
+        # Patrol is the only multi-anchor mode now — the toggle is gone.
+        self.assertFalse(
+            self.host._handle_command("layout|patrol|on|m1")
+        )
 
     def test_platform_draw_undo_clear(self):
         img = np.zeros((150, 200, 3), dtype=np.uint8)

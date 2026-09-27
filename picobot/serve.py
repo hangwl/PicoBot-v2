@@ -390,7 +390,6 @@ class BotHost:
             "floor": floor,
             "anchors": anchors,
             "platforms": platforms,
-            "patrol": bool(rot.patrol),
         }
 
     def _live_fingerprint(self, feed=None) -> Optional[str]:
@@ -695,27 +694,6 @@ class BotHost:
             (s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in entry.platforms
         ]
 
-    def _layout_set_patrol(self, msg: str) -> None:
-        """layout|patrol|on|off[|<name>] — checkpoint patrol for a map.
-
-        On, the dwell weaves toward the next anchor and advances on
-        arrival instead of standing in place; anchors become waypoints.
-        """
-        parts = msg.split("|", 3)
-        on = len(parts) > 2 and parts[2] == "on"
-        name = parts[3].strip() if len(parts) > 3 else ""
-        entry, err = self._layout_target(name)
-        if entry is None:
-            self.bus.emit("error", err)
-            return
-        entry.rotation.patrol = on
-        self.maps.save(entry)
-        self.maps.reload()
-        self._send_maps()
-        self.bus.emit(
-            "map", f"patrol {'on' if on else 'off'} for {entry.name}"
-        )
-
     def _provide_frame(self, mode: str):
         bot = self.bot
         if mode == "window":
@@ -793,8 +771,6 @@ class BotHost:
             self._layout_set_wall(msg)
         elif msg.startswith("layout|plat|"):
             self._layout_platform(msg)
-        elif msg.startswith("layout|patrol|"):
-            self._layout_set_patrol(msg)
         elif msg == "layout|reset":
             self._layout_reset()
         elif msg.startswith("layout|region|"):

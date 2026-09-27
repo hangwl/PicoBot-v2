@@ -1,4 +1,4 @@
-"""Grind state: farm at the current anchor until the dwell elapses."""
+"""Grind state: patrol the checkpoint route / farm until travel fires."""
 
 from __future__ import annotations
 
@@ -6,9 +6,10 @@ from .base import States, safety_transition
 
 
 class Grind(States):
-    """Dwell at the current anchor (attacks/buffs/arrival skills), then
-    move on via TRAVEL. Without a configured rotation this degrades to the
-    legacy stationary-grind -> WANDER behaviour."""
+    """Patrol the anchor route (attacks/buffs/arrival skills), taking a
+    recorded leg via TRAVEL whenever the next checkpoint is on another
+    level. Without a configured rotation this degrades to the legacy
+    stationary-grind -> WANDER behaviour."""
 
     def enter(self) -> None:
         self.bot.begin_dwell()

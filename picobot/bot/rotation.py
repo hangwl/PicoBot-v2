@@ -12,13 +12,12 @@ region) so a rotation survives resolution/window-size changes; values
 Config shape (inside ``"rotation"`` in config.json or a map file)::
 
     {
-      "style": "loop",              // loop | pingpong | shuffle
+      "style": "loop",              // legacy — traversal order is planned
+                                    // as a checkpoint route, not by style
       "position_jitter_px": 4,      // aim near the anchor, never exactly on it
       "rest_chance": 0.02,          // occasional idle stretch per dwell
       "wander_chance": 0.05,        // occasional detour after a leg
       "travel_style": "mixed",      // walk | flash | mixed (default leg style)
-      "patrol": false,              // anchors as checkpoints: weave toward
-                                    // the next one instead of parking
       "anchors": [
         {"name": "west", "pos": [0.31, 0.55], "dwell": [8, 14],
          "on_arrive": ["fountain"], "face": "left"}
@@ -117,7 +116,8 @@ class Anchor:
     name: str
     x: float
     y: float
-    dwell: Tuple[float, float] = (8.0, 14.0)  # seconds range to farm here
+    dwell: Tuple[float, float] = (8.0, 14.0)  # stay bound (1-anchor maps)
+                                            # + rest-breather window
     on_arrive: Tuple[str, ...] = ()           # skill names to fire on arrival
     face: Optional[str] = None                # left | right tap after arriving
 
@@ -166,10 +166,6 @@ class Rotation:
     rest_chance: float = 0.02
     wander_chance: float = 0.05
     travel_style: str = "mixed"
-    # Checkpoints instead of parking spots: the dwell weaves toward the
-    # next anchor and advances on arrival rather than waiting out a
-    # dwell timer — a 2-anchor map becomes a back-and-forth patrol.
-    patrol: bool = False
 
     # -- Traversal -----------------------------------------------------------
     def next_index(self, current: int, direction: int = 1) -> Tuple[int, int]:
@@ -189,12 +185,46 @@ class Rotation:
         return (current + 1) % n, direction
 
     def leg_steps(self, from_idx: int, to_idx: int) -> List[Step]:
-        """Steps for a leg; defaults to a direct walk to the anchor."""
+        """Steps for a leg; defaults to a direct walk to the anchor.
+
+        With no recorded ``(from, to)`` pair, a shortest path over the
+        recorded leg graph is composed instead — checkpoint routes are
+        planned dynamically, so they can pick pairs calibration never
+        walked directly."""
         steps = self.legs.get((from_idx, to_idx))
         if steps is not None:
             return steps
+        path = self._leg_path(from_idx, to_idx)
+        if path is not None:
+            return [s for leg in path for s in leg]
         target = self.anchors[to_idx]
         return [Step("walk_to", x=target.x, y=target.y)]
+
+    def _leg_path(
+        self, from_idx: int, to_idx: int
+    ) -> Optional[List[List[Step]]]:
+        """BFS over the recorded leg graph; list of step-lists or None."""
+        if from_idx == to_idx:
+            return []
+        from collections import deque
+
+        prev = {from_idx: None}
+        queue = deque([from_idx])
+        while queue:
+            node = queue.popleft()
+            for (a, b), steps in self.legs.items():
+                if a != node or b in prev:
+                    continue
+                prev[b] = node
+                if b == to_idx:
+                    pairs = []
+                    while prev[b] is not None:
+                        pairs.append((prev[b], b))
+                        b = prev[b]
+                    pairs.reverse()
+                    return [self.legs[p] for p in pairs]
+                queue.append(b)
+        return None
 
     # -- (De)serialisation ----------------------------------------------------
     @classmethod
@@ -224,7 +254,6 @@ class Rotation:
             rest_chance=float(data.get("rest_chance", 0.02)),
             wander_chance=float(data.get("wander_chance", 0.05)),
             travel_style=travel_style,
-            patrol=bool(data.get("patrol", False)),
         )
 
     def to_dict(self) -> dict:
@@ -234,7 +263,6 @@ class Rotation:
             "rest_chance": self.rest_chance,
             "wander_chance": self.wander_chance,
             "travel_style": self.travel_style,
-            "patrol": self.patrol,
             "anchors": [a.to_dict() for a in self.anchors],
             "legs": [
                 {"from": f, "to": t, "steps": [s.to_dict() for s in steps]}
