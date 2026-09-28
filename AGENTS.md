@@ -86,6 +86,12 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Dashboard commands** run on the `DashboardCommands` worker, never the
   WS event loop. View frames are binary and opt-in
   (`dash|subscribe|frames`).
+- **Profile skills**: a profile with a `skills` entry (even `{}`) owns its
+  kit; without one it inherits the global book. Anything that changes the
+  kit re-broadcasts `skills`/`config`; reads never seed a profile.
+- **Remote keys mirror the finger**: `key|down` on touch, `key|up` on
+  lift — never synthesized taps. `web/src/keys.ts` `PICO_KEYS` must match
+  the firmware `KEY_MAP` (a test checks it).
 
 ## Map
 
@@ -100,7 +106,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Move measurement | `bot/measure.py` |
 | Host + dashboard cmds | `serve.py`, `remote/control.py` |
 | Frame pipeline | `remote/streamer.py` (`assemble_panel`, `annotate`) |
-| Dashboard UI | `web/` (Preact app — build with `npm run build` in `web/`, served from `web/dist`; protocol in `docs/protocol.md`) |
+| Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup pages), `keys.ts` (held keys); protocol in `docs/protocol.md` |
 | Debug frame capture | `vision/framelog.py` → `debug/frames/` |
 
 See `docs/` for the full picture: `architecture.md`, `map-detection.md`,

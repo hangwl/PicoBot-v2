@@ -119,8 +119,7 @@ picobot/
 │   └── timing.py       # humanized delays
 ├── remote/
 │   ├── control.py      # WS server + hid|… relay + dashboard commands
-│   └── http.py         # serves web/dist
-│   ├── http.py         # embedded HTTP server
+│   ├── http.py         # embedded HTTP server (serves web/dist)
 │   └── streamer.py     # annotated frame feed (assemble_panel, annotate)
 ├── transport/
 │   └── serial_manager.py

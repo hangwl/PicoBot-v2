@@ -28,18 +28,18 @@ and follows the same view.
 | `dash|fps|<n>` | stream rate (1–30) |
 | `dash|subscribe|frames` | opt in to binary view frames |
 | `class|list` | re-send the class/policy state |
-| `class|use|<name>` | apply a profile live (stops the bot first) |
+| `class|use|<name>` | apply a profile live (stops the bot and any move measurement first); re-sends `class`, `skills` and `config` |
 | `class|add|<name>\|{spec}` | create a profile (travel, air_attacks, teleport_key, teleport_cooldown, skills) and apply it |
 | `patrol|policy|<weighted\|greedy>` | set the loop-ordering policy |
 | `patrol|temp|<v>` | set the weighted-roulette temperature |
-| `skills|set\|{json}` / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active) |
+| `skills|set\|{json}` / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
 | `movekeys|set|{json}` | movement keybinds (jump/rope-lift/flash) + nav radius |
 | `layout|save\|clear\|reset[|<name>]` | layout lifecycle |
 | `layout|plat\|anchor\|…[|<name>]` | drawn geometry (see below) |
 | `nav|show|on\|off` / `nav|preview|x,y` | graph overlay + route preview (minimap px) |
-| `measure|start` / `measure|stop` | move measurement |
+| `measure|start` / `measure|stop` | move measurement (the moves the active class can use) |
 | `host|serial\|<port\|auto>` / `host|window|<title>` | connection |
-| `key|down\|<k>` / `key|up\|<k>` | remote input pad (Pico HID); keys a client still holds when it disconnects are released |
+| `key|down\|<k>` / `key|up\|<k>` | remote input pad (Pico HID): a real press and release — the dashboard sends them on touch and lift. `<k>` is a Pico `KEY_MAP` name. Keys a client still holds when it disconnects are released |
 | `config|get` | full config snapshot |
 
 Commands with a trailing `[|<name>]` target the named map; blank
@@ -63,15 +63,15 @@ Text, `dash|` + JSON:
 | `evt` | `{kind, level, msg, t}` — log lines |
 | `history` | `{items: [evt…]}` — replay on connect |
 | `maps` | `{maps, active, detected, via, title, score, reading, platforms_n, anchors_n}` |
-| `class` | `{active, profiles: {name: {travel, air_attacks, teleport_key}}, policy, temp, measured}` |
-| `skills` | `{source, skills}` — the book the Skills panel edits |
+| `class` | `{active, profiles: {name: {travel, air_attacks, teleport_key}}, policy, temp, measured}` — also re-sent when a measurement finishes or the bot stops (`measured` changes) |
+| `skills` | `{source, inherited, skills}` — the book the bot uses: `source` is the active profile or `global`; `inherited` = the profile has no kit of its own and uses the global book |
 | `config` | full `BotConfig` snapshot |
 | `host` | `{ports, windows, serial, window, serial_open}` |
 | `bot` | `{running}` — on `bot|query`, and whenever the bot starts or stops |
 
 Binary frame: `PBF1` magic + u32 BE JSON length + JSON meta + JPEG.
 Meta carries `mode`, `w`, `h`, `ox`/`oy` (panel offset), `state` (bot
-FSM state), `hazard`, `player`, and map identity (`map`, `map_via`,
+FSM state) and `hazard` (in every view), `player`, and map identity (`map`, `map_via`,
 `map_conf`, `map_title`, `layout`, `no_rotation`). Overlays (platforms,
 ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
 view shifted by `ox`/`oy`, in the Window view shifted to where the

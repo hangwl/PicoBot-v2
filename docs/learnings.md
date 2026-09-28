@@ -111,3 +111,25 @@ fixed that — all 15 captured reads exact afterwards.
   with none drawn) now queues TRAVEL home directly, so GRIND leaves only
   on a plan handoff. Rotation `style` (loop/pingpong/shuffle) was dead
   too — order comes from the patrol planner.
+
+## Dashboard and profiles
+
+- **Synthesized key taps** (2026-09-29): the remote pad fired on `click`
+  and sent `key|down` plus a timed `key|up` 90–150ms later. The game
+  saw presses a whole touch late, nothing could be held or chorded, and
+  a backgrounded tab throttled the timer into a stuck key. Keys now
+  mirror the pointer (down on touch, up on lift/cancel) and release when
+  the page hides or blurs.
+- **Hazard lost in Window view** (2026-09-29): only Panel frames carried
+  the bot's `state`/`hazard`, so switching to Window view to solve a rune
+  cleared the alert. Every view carries them now.
+- **Profile skill fallbacks** (2026-09-29): three paths disagreed on a
+  profile's kit — an empty kit fell back to the global book, displaying
+  skills seeded the profile, and the legacy `attack_keys` synthesis ran
+  after the class was applied (wiping the kit at startup when there was
+  no top-level `skills`). One rule now: a `skills` entry (even `{}`) is
+  the kit; no entry inherits. Class switches also never re-sent
+  `skills`/`config`, so the dashboard showed the previous profile.
+- **Measuring the wrong moves** (2026-09-29): the measurer ran a fixed
+  flash plan, so teleport classes measured flashes they never use and
+  never measured teleport. The plan now follows the class kit.
