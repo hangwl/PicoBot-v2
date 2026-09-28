@@ -10,8 +10,9 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
 
 The left column walks the end-to-end setup as a checklist: **identify**
 the map (title OCR) → **draw platforms** → **place anchors** →
-**measure moves** → pick the **class profile** and **patrol policy** →
-**Start**. Each row shows its state (green = done) with a one-click
+**measure moves** → pick the **class profile** (or create one with
+**+ new class…**: name, travel style, air attacks, teleport key —
+created, persisted and applied live) and **patrol policy** → **Start**. Each row shows its state (green = done) with a one-click
 jump to the tool. The status strip under the header shows the detected
 map, the active class kit, and the patrol policy at a glance. Switching
 the class profile applies **live** — the bot is stopped first (the kit
@@ -69,6 +70,7 @@ lose history; backlog entries render at their real timestamps.
 
 ```
 client → host:  map|set|<name> | map|list | class|list | class|use|<name>
+                class|add|<name>|{travel,air_attacks,teleport_key,…}
                 patrol|policy|<weighted|greedy> | patrol|temp|<v>
                 layout|region|<minimap|title>|x,y,w,h
                 layout|plat|… | layout|anchor|… [ |<name>]

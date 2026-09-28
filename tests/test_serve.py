@@ -418,6 +418,35 @@ class HostCommandTests(unittest.TestCase):
                     if e["kind"] == "bot"]
             self.assertTrue(any("class: mage" in m for m in msgs))
 
+    def test_class_add_creates_persists_and_applies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host._handle_command(
+                'class|add|mage|{"travel":"teleport","air_attacks":false,'
+                '"teleport_key":"shift"}')
+            cfg = self.host.bot_config
+            self.assertEqual(cfg.class_profiles["mage"],
+                             {"travel": "teleport", "air_attacks": False,
+                              "teleport_key": "shift"})
+            self.assertEqual(cfg.class_active, "mage")
+            self.assertEqual(cfg.teleport_key, "shift")
+            self.assertEqual(
+                (self.host.config.bot or {}).get("class", {})
+                .get("profiles", {}).get("mage", {}).get("travel"),
+                "teleport",
+            )
+
+    def test_class_add_rejects_duplicates_and_bad_json(self):
+        self.host.bot_config.class_profiles = {"mage": {}}
+        self.host._handle_command("class|add|mage|{}")
+        self.host._handle_command("class|add|other|not-json")
+        self.assertNotIn("other", self.host.bot_config.class_profiles)
+        msgs = [
+            e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
+        ]
+        self.assertTrue(any("already exists" in m for m in msgs))
+        self.assertTrue(any("bad class spec" in m for m in msgs))
+
     def test_class_use_unknown_profile_errors(self):
         self.host._class_use("nope")
         msgs = [

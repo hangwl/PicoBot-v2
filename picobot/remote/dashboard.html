@@ -186,6 +186,18 @@
         </select>
         <label id="kitLbl" style="min-width:0">–</label>
       </div>
+      <div class="row" id="classNewRow" style="margin-top:6px; display:none">
+        <input id="classNewName" placeholder="profile name" size="10">
+        <select id="classNewTravel" title="movement kit">
+          <option value="flash">flash</option>
+          <option value="teleport">teleport</option>
+          <option value="walk">walk</option>
+        </select>
+        <label><input type="checkbox" id="classNewAir" checked> air attacks</label>
+        <input id="classNewKey" placeholder="tp key" size="6" style="display:none"
+          title="teleport skill key (teleport travel only)">
+        <button id="classAdd" class="primary">Add</button>
+      </div>
       <div class="row" style="margin-top:6px">
         <select id="policySel" title="loop ordering policy">
           <option value="weighted">weighted</option>
@@ -450,8 +462,10 @@ function handleDash(p) {
   } else if (p.event === "class") {
     const sel = $("classSel"), cur = sel.value;
     sel.innerHTML = Object.keys(p.profiles || {}).sort()
-      .map(n => `<option>${esc(n)}</option>`).join("");
+      .map(n => `<option>${esc(n)}</option>`).join("") +
+      `<option value="__new">+ new class…</option>`;
     sel.value = (p.profiles || {})[cur] ? cur : (p.active || "");
+    classActive = sel.value;
     const kit = (p.profiles || {})[sel.value] || {};
     $("kitLbl").textContent = kitText(sel.value, kit);
     $("stClass").textContent = "class: " + kitText(sel.value, kit);
@@ -773,9 +787,34 @@ $("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target
 $("portAuto").onclick = () => send("host|serial|auto");
 $("connRefresh").onclick = () => send("host|state");
 $("measureStart").onclick = () => send("measure|start");
+let classActive = "";
 $("classSel").onchange = () => {
   const v = $("classSel").value;
+  if (v === "__new") {
+    $("classSel").value = classActive;      // revert until created
+    $("classNewRow").style.display = "";
+    $("classNewName").focus();
+    return;
+  }
+  $("classNewRow").style.display = "none";
   if (v) send("class|use|" + v);
+};
+$("classNewTravel").onchange = () => {
+  $("classNewKey").style.display =
+    $("classNewTravel").value === "teleport" ? "" : "none";
+};
+$("classAdd").onclick = () => {
+  const name = $("classNewName").value.trim();
+  if (!name) { $("classNewName").focus(); return; }
+  const travel = $("classNewTravel").value;
+  const spec = {
+    travel,
+    air_attacks: $("classNewAir").checked,
+  };
+  if (travel === "teleport") spec.teleport_key = $("classNewKey").value.trim();
+  send(`class|add|${name}|` + JSON.stringify(spec));
+  $("classNewRow").style.display = "none";
+  $("classNewName").value = "";
 };
 $("policySel").onchange = () => send("patrol|policy|" + $("policySel").value);
 $("policyTemp").onchange = () => {

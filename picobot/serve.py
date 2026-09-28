@@ -870,6 +870,9 @@ class BotHost:
             self._send_class()
         elif msg.startswith("class|use|"):
             self._class_use(msg.split("|", 2)[2].strip())
+        elif msg.startswith("class|add|"):
+            parts = msg.split("|", 3)
+            self._class_add(parts[2], parts[3] if len(parts) > 3 else "")
         elif msg.startswith("patrol|policy|"):
             self._patrol_policy_set(msg.split("|", 2)[2])
         elif msg.startswith("patrol|temp|"):
@@ -962,6 +965,38 @@ class BotHost:
                 or e.rise > self.reach.base[m].rise * 1.05
             ),
         }))
+
+    def _class_add(self, name: str, spec_json: str) -> None:
+        """class|add|<name>|{travel,air_attacks,teleport_key,…} — create a
+        profile from the dashboard and apply it live."""
+        name = name.strip()
+        cfg = self.bot_config
+        if not name:
+            self.bus.emit("error", "class profile needs a name")
+            return
+        if name in (cfg.class_profiles or {}):
+            self.bus.emit("error", f"class profile {name!r} already exists")
+            return
+        try:
+            raw = json.loads(spec_json) if spec_json else {}
+        except ValueError:
+            self.bus.emit("error", "bad class spec")
+            return
+        spec = {
+            k: v for k, v in (raw or {}).items()
+            if k in ("travel", "air_attacks", "teleport_key",
+                     "teleport_cooldown")
+        }
+        cfg.class_profiles = dict(cfg.class_profiles or {})
+        cfg.class_profiles[name] = spec
+        bot_cfg = getattr(self.config, "bot", None) or {}
+        cls = dict(bot_cfg.get("class") or {})
+        cls["profiles"] = cfg.class_profiles
+        bot_cfg["class"] = cls
+        self.config.bot = bot_cfg
+        save_config(self.config)
+        self.bus.emit("bot", f"class profile {name} created")
+        self._class_use(name)
 
     def _class_use(self, name: str) -> None:
         """class|use|<name> — apply a class profile live (stops the bot
