@@ -1,21 +1,27 @@
 # Dashboard protocol (v1)
 
-The host speaks one WebSocket protocol for every client — the legacy
-single-file dashboard and the Preact app (`web/`) are both clients.
+The host speaks one WebSocket protocol for every client — the Preact
+dashboard (`web/`) and the Flutter controller are both clients.
 Versioned by the `hello` handshake: the host sends
 `dash|{"event":"hello","protocol":1}` immediately after a client
 connects. A client that doesn't understand the version should warn and
 reconnect.
 
 Transport: one WebSocket (`/`), text frames for JSON, binary frames for
-the view stream. No compression.
+the view stream. No compression. The WS port is normally 8765 but moves
+to the next free port if that one is taken; the host writes the live
+port into the served `index.html` (`<meta name="pb-ws-port">`).
+
+Replies to requests (`map|list`, `config|get`, `events|history`, …) and
+the stream view/fps are **shared**: every connected client receives them
+and follows the same view.
 
 ## Client → host (text, `|`-separated)
 
 | Message | Meaning |
 |---|---|
 | `ping|<nonce>` | heartbeat — the host echoes `pong|<nonce>` |
-| `bot|start` / `bot|stop` / `bot|query` | bot lifecycle; `bot|running`/`bot|stopped` replies |
+| `bot|start` / `bot|stop` / `bot|query` | bot lifecycle; `query` replies with a `bot` event |
 | `map|list` | re-send the maps payload |
 | `map|set|<name>` | pin a map ("" = auto-detect) |
 | `dash|view|<minimap\|window\|title>` | switch the streamed view |
@@ -34,7 +40,7 @@ the view stream. No compression.
 | `nav|show|on\|off` / `nav|preview|x,y` | graph overlay + route preview (minimap px) |
 | `measure|start` / `measure|stop` | move measurement |
 | `host|serial\|<port\|auto>` / `host|window|<title>` | connection |
-| `key|down\|<k>` / `key|up\|<k>` | remote input pad (Pico HID) |
+| `key|down\|<k>` / `key|up\|<k>` | remote input pad (Pico HID); keys a client still holds when it disconnects are released |
 | `config|get` | full config snapshot |
 
 Commands with a trailing `[|<name>]` target the named map; blank
@@ -62,9 +68,13 @@ Text, `dash|` + JSON:
 | `skills` | `{source, skills}` — the book the Skills panel edits |
 | `config` | full `BotConfig` snapshot |
 | `host` | `{ports, windows, serial, window, serial_open}` |
-| `bot` | chip state via `evt` (kind `bot`) |
+| `bot` | `{running}` — on `bot|query`, and whenever the bot starts or stops |
 
 Binary frame: `PBF1` magic + u32 BE JSON length + JSON meta + JPEG.
-Meta carries `mode`, `w`, `h`, `ox`/`oy` (panel offset), and the
-overlay geometry (platforms, ropes, anchors, player, nav edges) in
-region space shifted by `ox`/`oy`.
+Meta carries `mode`, `w`, `h`, `ox`/`oy` (panel offset), `state` (bot
+FSM state), `hazard`, `player`, and map identity (`map`, `map_via`,
+`map_conf`, `map_title`, `layout`, `no_rotation`). Overlays (platforms,
+ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
+view shifted by `ox`/`oy`, in the Window view shifted to where the
+minimap sits in the client area, and left out of the Title view.
+Frames are only captured while at least one client is subscribed.

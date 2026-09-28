@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Iterable, List
 
@@ -26,7 +26,7 @@ class EmbeddedHTTPServer:
         self._ws_port_provider = ws_port_provider
         self.ws_scheme = ws_scheme
         self.http_port = http_port
-        self.httpd: HTTPServer | None = None
+        self.httpd: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         base_dir = Path(__file__).resolve().parent
         picobot_dir = base_dir.parent
@@ -37,8 +37,8 @@ class EmbeddedHTTPServer:
             base_dir / "index.html",
         ]
         self._search_paths = list(search_paths) if search_paths else default_paths
-        # Built dashboard app (web/dist) — served when present, else the
-        # legacy single-file dashboard.
+        # Built dashboard app (web/dist); without a build, a page saying
+        # how to make one.
         self.static_dir = Path(static_dir).resolve() if static_dir else None
 
     def start(self) -> None:
@@ -47,7 +47,7 @@ class EmbeddedHTTPServer:
         ws_port = self._resolve_ws_port()
         handler = self._build_handler(ws_port)
         try:
-            self.httpd = HTTPServer(("0.0.0.0", self.http_port), handler)
+            self.httpd = ThreadingHTTPServer(("0.0.0.0", self.http_port), handler)
             self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
             self.thread.start()
         except Exception as exc:
@@ -85,6 +85,7 @@ class EmbeddedHTTPServer:
         ".png": "image/png",
         ".ico": "image/x-icon",
         ".woff2": "font/woff2",
+        ".webmanifest": "application/manifest+json",
     }
 
     def _build_handler(self, ws_port: int):
@@ -100,6 +101,9 @@ class EmbeddedHTTPServer:
                             ctype, data = served
                             self.send_response(200)
                             self.send_header("Content-Type", ctype)
+                            if ctype.startswith("text/html"):
+                                # Re-fetch after a rebuild; assets are hashed.
+                                self.send_header("Cache-Control", "no-cache")
                             self.end_headers()
                             self.wfile.write(data)
                             return
@@ -123,23 +127,28 @@ class EmbeddedHTTPServer:
         return Handler
 
     def _serve_static(self, path: str):
-        """Serve the built app from web/dist: '/' → index.html (SPA),
-        '/assets/<file>' → the hashed bundle. None when dist is absent
-        (the legacy single-file dashboard is served instead)."""
+        """Serve the built app from web/dist: files that exist under it
+        (hashed bundle, favicon), else index.html with the live WS port
+        filled in. None when dist is absent."""
         if self.static_dir is None:
             return None
         index = self.static_dir / "index.html"
         if not index.exists():
             return None
-        if path in ("/", "/index.html"):
-            file = index
-        elif path.startswith("/assets/") and ".." not in path:
-            file = (self.static_dir / path.lstrip("/")).resolve()
-            if not str(file).startswith(str(self.static_dir)) or not file.is_file():
+        rel = path.lstrip("/")
+        file = (self.static_dir / rel).resolve() if rel else index
+        if file == index or not (
+            file.is_relative_to(self.static_dir) and file.is_file()
+        ):
+            # '/', '/index.html' and unknown routes (SPA fallback).
+            try:
+                html = index.read_text(encoding="utf-8")
+            except OSError:
                 return None
-        else:
-            return ("text/html; charset=utf-8",
-                    index.read_bytes())              # SPA fallback
+            html = html.replace(
+                "REPLACE_WS_PORT", str(self._resolve_ws_port())
+            ).replace("REPLACE_WS_SCHEME", self.ws_scheme)
+            return ("text/html; charset=utf-8", html.encode("utf-8"))
         try:
             data = file.read_bytes()
         except OSError:
@@ -149,10 +158,10 @@ class EmbeddedHTTPServer:
     def _read_index(self, ws_port: int) -> str:
         fallback = (
             "<html><body style='background:#121212;color:#eee;font-family:sans-serif'>"
-            "<h3 style='margin:16px'>index.html not found</h3>"
-            "<p style='margin:16px'>Create <code>index.html</code> in the PicoBot folder. "
-            "You can use the token <code>REPLACE_WS_PORT</code> and it will be replaced "
-            "with the active WebSocket port.</p>"
+            "<h3 style='margin:16px'>Dashboard not built</h3>"
+            "<p style='margin:16px'>Run <code>npm install</code> then "
+            "<code>npm run build</code> in the <code>web</code> folder, "
+            "then reload this page.</p>"
             "</body></html>"
         )
         for path in self._search_paths:

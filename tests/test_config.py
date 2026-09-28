@@ -7,6 +7,17 @@ from picobot.config import AppConfig, load_config, save_config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_save_is_atomic_and_leaves_no_temp_files(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            save_config(AppConfig(ws_port=9001), path)
+            with patch("picobot.fileio.os.replace", side_effect=OSError("x")):
+                save_config(AppConfig(ws_port=9002), path)   # logged, not raised
+            self.assertEqual(load_config(path).ws_port, 9001)  # old file intact
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["config.json"])
+
     def test_load_returns_defaults_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.json"

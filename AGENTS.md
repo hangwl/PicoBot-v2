@@ -7,17 +7,22 @@ minimap and works a perception-driven farming rotation. Docs live in
 
 ## Commands
 
-```bash
-.venv/bin/python -m pytest tests/ -x -q   # test suite (~300 tests)
-.venv/bin/python -m picobot               # run host (WS :8765, HTTP :8000)
-.venv/bin/python -m picobot --debug-frames   # + save debug captures to debug/frames/
+Development happens on Windows (the game and the Pico live there):
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/ -x -q   # test suite (~400 tests)
+.venv\Scripts\python.exe -m picobot               # run host (WS :8765, HTTP :8000)
+.venv\Scripts\python.exe -m picobot --debug-frames   # + save debug captures to debug/frames/
+cd web; npm install; npm run build                 # build the dashboard (web/dist)
 ```
 
-- The `.python-version` shim (`3.14`) may not be installed — use
-  `.venv/bin/python`, not bare `python`/`pytest`.
+- Use the venv interpreter, not bare `python`/`pytest`.
+- Line endings: files are CRLF on disk, LF in git (`core.autocrlf=true`).
+- The host `chdir`s to the project folder on start, so `config.json`,
+  `maps/` and `nav_reach*.json` resolve there wherever it's launched from.
 - Deps are already installed in `.venv` (numpy, Pillow, RapidOCR, mss,
   pyserial, pygetwindow, keyboard, websockets).
-- Git: branch `feat/smart-bot`; only push when asked.
+- Git: work on feature branches off `feat/smart-bot`; only push when asked.
 
 ## Comments
 

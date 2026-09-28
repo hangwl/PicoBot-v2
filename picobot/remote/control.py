@@ -253,6 +253,8 @@ class RemoteControlServer:
         self.clients_lock = threading.Lock()
         self.frame_clients: set = set()
         self._frame_inflight: dict = {}
+        # Keys each client holds down via key|down, released if it drops.
+        self._held: dict = {}
         self._jobs: "queue.Queue[Optional[Callable[[], None]]]" = queue.Queue()
         self._job_thread: Optional[threading.Thread] = None
         self.selected_playlist: Optional[str] = None
@@ -313,6 +315,7 @@ class RemoteControlServer:
             self.clients.clear()
             self.frame_clients.clear()
             self._frame_inflight.clear()
+            self._held.clear()
 
     # -- Serial bridge -----------------------------------------------------
     def connect_serial(self, port: str) -> bool:
@@ -590,7 +593,7 @@ class RemoteControlServer:
                     running = False
                 try:
                     await websocket.send(
-                        "bot|running" if running else "bot|stopped"
+                        "dash|" + json.dumps({"event": "bot", "running": running})
                     )
                 except Exception:
                     pass
@@ -634,7 +637,25 @@ class RemoteControlServer:
             else:
                 self._log(f"WS: unknown macro action '{action}'")
             return
+        self._track_held(websocket, msg)
         self.enqueue_hid_payload(msg)
+
+    def _track_held(self, websocket, msg: str) -> None:
+        parts = msg.split("|")
+        if parts and parts[0] == "hid":
+            parts = parts[1:]
+        if len(parts) < 3 or parts[0] != "key":
+            return
+        with self.clients_lock:
+            held = self._held.setdefault(websocket, set())
+            if parts[1] == "down":
+                held.add(parts[2])
+            elif parts[1] == "up":
+                held.discard(parts[2])
+
+    def has_frame_clients(self) -> bool:
+        with self.clients_lock:
+            return bool(self.frame_clients)
 
     def _on_ws_port_bound(self, port: int) -> None:
         self.ws_port = port
@@ -653,6 +674,11 @@ class RemoteControlServer:
             self.clients.discard(websocket)
             self.frame_clients.discard(websocket)
             self._frame_inflight.pop(websocket, None)
+            held = self._held.pop(websocket, set())
+        for key in sorted(held):
+            self.enqueue_hid_payload(f"key|up|{key}")
+        if held:
+            self._log(f"WS: released held keys {sorted(held)}")
         self._log("WS: client disconnected")
         scheme = "wss" if (self.bridge and getattr(self.bridge, "ssl_context", None)) else "ws"
         self._set_status(f"Remote: Listening ({scheme}://0.0.0.0:{self.ws_port})")

@@ -8,8 +8,8 @@ export default defineConfig({
   ignore: {
     overrides: [
       {
-        // The temp input is guarded (parseFloat + NaN check + min bound).
-        files: ["src/App.tsx"],
+        // NumberField is guarded (parseFloat + isFinite + min/max clamp).
+        files: ["src/panels.tsx"],
         rules: ["react-doctor/no-unguarded-numeric-input-parse"],
       },
     ],

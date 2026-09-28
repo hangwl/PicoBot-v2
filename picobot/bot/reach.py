@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from ..fileio import write_text_atomic
+
 logger = logging.getLogger(__name__)
 
 HORIZONTAL = ("jump", "flash", "double_flash")
@@ -196,7 +198,7 @@ class ReachModel:
             for k, v in doc["ceiling"].items()
         }
         try:
-            self.path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+            write_text_atomic(self.path, json.dumps(doc, indent=2))
             self._dirty = False
             self._saved_at = now
         except OSError:

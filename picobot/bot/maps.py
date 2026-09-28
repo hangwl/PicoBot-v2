@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from ..fileio import write_text_atomic
 from ..vision.mapname import title_score
 from .rotation import Rotation
 from .skills import Skill
@@ -200,7 +201,7 @@ class MapStore:
         self.directory.mkdir(parents=True, exist_ok=True)
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in entry.name)
         path = self.directory / f"{safe}.json"
-        path.write_text(json.dumps(entry.to_dict(), indent=2), encoding="utf-8")
+        write_text_atomic(path, json.dumps(entry.to_dict(), indent=2))
         entry.path = path
         if self._entries is not None and entry not in self._entries:
             self._entries.append(entry)

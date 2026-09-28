@@ -32,17 +32,19 @@ export interface FrameMeta {
   ox?: number;
   oy?: number;
   player?: [number, number];
-  platforms?: number[][];
-  ropes?: number[][];
-  anchors?: [number, number][];
-  nav_edges?: [string, number, number, number, number][];
-  nav_route?: [number, number][];
   hazard?: string;
   state?: string;
   [k: string]: unknown;
 }
 
+export interface Frame {
+  meta: FrameMeta;
+  bitmap: ImageBitmap;
+}
+
 export type CanvasMode = "none" | "plats" | "anchors" | "route";
+export type ViewMode = "minimap" | "window" | "title";
+export type LogFilter = "info" | "warn" | "error" | "all";
 
 export interface HostPort {
   device: string;
@@ -78,12 +80,14 @@ export interface AppState {
   flashKey: string;
   flashOn: boolean;
   navR: number;
+  fps: number;
   measureStat: string;
+  botRunning: boolean;
   botState: string;
   hazard: string;
   logs: EvtItem[];
-  frame: { meta: FrameMeta; bitmap: ImageBitmap } | null;
-  viewMode: "minimap" | "window" | "title";
+  logFilter: LogFilter;
+  viewMode: ViewMode;
   canvasMode: CanvasMode;
   tab: "run" | "view" | "skills" | "log" | "pad";
 }
@@ -117,11 +121,13 @@ const initial: AppState = {
   flashKey: "",
   flashOn: true,
   navR: 5,
+  fps: 3,
   measureStat: "",
+  botRunning: false,
   botState: "–",
   hazard: "none",
   logs: [],
-  frame: null,
+  logFilter: "info",
   viewMode: "minimap",
   canvasMode: "none",
   tab: "run",
@@ -130,7 +136,16 @@ const initial: AppState = {
 let state: AppState = initial;
 const listeners = new Set<() => void>();
 
+/** Merge `patch` into the store; listeners run only if something changed. */
 export function set(patch: Partial<AppState>) {
+  let changed = false;
+  for (const k of Object.keys(patch) as (keyof AppState)[]) {
+    if (!Object.is(state[k], patch[k])) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) return;
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
 }
@@ -148,18 +163,60 @@ export function useApp(): AppState {
   return state;
 }
 
+// Frames live outside the app store: at up to 30 fps they would otherwise
+// re-render every panel (and clobber inputs being typed into).
+let frame: Frame | null = null;
+const frameListeners = new Set<() => void>();
+
+export function useFrame(): Frame | null {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const l = () => force((n) => n + 1);
+    frameListeners.add(l);
+    return () => {
+      frameListeners.delete(l);
+    };
+  }, []);
+  return frame;
+}
+
+function setFrame(next: Frame) {
+  const prev = frame;
+  frame = next;
+  frameListeners.forEach((l) => l());
+  prev?.bitmap.close();
+}
+
 // -- WebSocket --------------------------------------------------------------
 let ws: WebSocket | null = null;
 let retry = 500;
 
-export function send(msg: string) {
-  if (ws && ws.readyState === 1) ws.send(msg);
+/** The WS port: filled into index.html by the host (it may have moved off
+ *  8765 if that was taken); the Vite dev server leaves the token as-is. */
+function wsPort(): string {
+  const v = document
+    .querySelector('meta[name="pb-ws-port"]')
+    ?.getAttribute("content");
+  return v && /^\d+$/.test(v) ? v : "8765";
+}
+
+export function send(msg: string): boolean {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(msg);
+    return true;
+  }
+  return false;
+}
+
+export function setView(mode: ViewMode) {
+  send(`dash|view|${mode}`);
+  set({ viewMode: mode, canvasMode: mode === "minimap" ? state.canvasMode : "none" });
 }
 
 export function connect() {
   if (ws) return;
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${scheme}://${location.hostname}:8765`);
+  ws = new WebSocket(`${scheme}://${location.hostname}:${wsPort()}`);
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     retry = 500;
@@ -177,7 +234,7 @@ export function connect() {
       send(m);
   };
   ws.onclose = () => {
-    set({ ws: "off" });
+    set({ ws: "off", botState: "–" });
     ws = null;
     setTimeout(connect, retry);
     retry = Math.min(retry * 2, 10000);
@@ -192,12 +249,36 @@ export function connect() {
       }
       return;
     }
-    decodeFrame(e.data as ArrayBuffer, (meta, jpeg) => {
-      createImageBitmap(
-        new Blob([jpeg.buffer as ArrayBuffer], { type: "image/jpeg" }),
-      ).then((bitmap) => set({ frame: { meta, bitmap } }));
-    });
+    onFrame(e.data as ArrayBuffer);
   };
+}
+
+let frameSeq = 0;
+let frameShown = 0;
+
+function onFrame(buf: ArrayBuffer) {
+  const decoded = decodeFrame(buf);
+  if (!decoded) return;
+  const { meta, jpeg } = decoded;
+  set({
+    hazard: meta.hazard ? String(meta.hazard) : "none",
+    botState: meta.state ? String(meta.state) : "–",
+    viewMode: (meta.mode as ViewMode) ?? state.viewMode,
+  });
+  const seq = ++frameSeq;
+  createImageBitmap(new Blob([jpeg as BlobPart], { type: "image/jpeg" }))
+    .then((bitmap) => {
+      // Decodes can resolve out of order; never show an older frame.
+      if (seq < frameShown) {
+        bitmap.close();
+        return;
+      }
+      frameShown = seq;
+      setFrame({ meta, bitmap });
+    })
+    .catch(() => {
+      /* undecodable frame — skip it */
+    });
 }
 
 function onEvent(p: Record<string, any> & { event: string }) {
@@ -205,14 +286,21 @@ function onEvent(p: Record<string, any> & { event: string }) {
     case "hello":
       set({ protocol: p.protocol ?? null });
       return;
+    case "bot":
+      set({ botRunning: Boolean(p.running) });
+      return;
     case "evt":
       pushLog(p as unknown as EvtItem);
-      if (p.kind === "bot") set({ botState: String(p.msg) });
       if (p.kind === "measure" && !String(p.msg).startsWith("measurement"))
         set({ measureStat: String(p.msg) });
       return;
     case "history":
-      set({ logs: (p.items as EvtItem[]) ?? [] });
+      set({
+        logs: ((p.items as EvtItem[]) ?? []).map((it) => ({
+          ...it,
+          id: ++logSeq,
+        })),
+      });
       return;
     case "maps":
       set({
@@ -250,6 +338,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         flashKey: (c.flash_jump_key as string) ?? "",
         flashOn: c.flash_jump_enabled !== false,
         navR: (c.nav_threshold_px as number) ?? 5,
+        fps: (c.view_fps as number) ?? state.fps,
       });
       return;
     }
@@ -277,19 +366,25 @@ function pushLog(item: EvtItem) {
 // -- Frame decoding ---------------------------------------------------------
 export function decodeFrame(
   buf: ArrayBuffer,
-  cb: (meta: FrameMeta, jpeg: Uint8Array) => void,
-) {
-  const dv = new DataView(buf);
-  const magic = String.fromCharCode(
-    dv.getUint8(0),
-    dv.getUint8(1),
-    dv.getUint8(2),
-    dv.getUint8(3),
-  );
-  if (magic !== "PBF1") return;
-  const len = dv.getUint32(4);
-  const meta = JSON.parse(
-    new TextDecoder().decode(new Uint8Array(buf, 8, len)),
-  ) as FrameMeta;
-  cb(meta, new Uint8Array(buf, 8 + len));
+): { meta: FrameMeta; jpeg: Uint8Array } | null {
+  try {
+    if (buf.byteLength < 8) return null;
+    const dv = new DataView(buf);
+    const magic = String.fromCharCode(
+      dv.getUint8(0),
+      dv.getUint8(1),
+      dv.getUint8(2),
+      dv.getUint8(3),
+    );
+    if (magic !== "PBF1") return null;
+    const len = dv.getUint32(4);
+    if (8 + len > buf.byteLength) return null;
+    const meta = JSON.parse(
+      new TextDecoder().decode(new Uint8Array(buf, 8, len)),
+    ) as FrameMeta;
+    // A view, not .buffer: the Blob must hold only the JPEG bytes.
+    return { meta, jpeg: new Uint8Array(buf, 8 + len) };
+  } catch {
+    return null;
+  }
 }

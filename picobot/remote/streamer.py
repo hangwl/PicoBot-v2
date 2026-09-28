@@ -273,8 +273,11 @@ class FrameStreamer:
         *,
         interval: float = 0.35,
         quality: int = 70,
+        active: Optional[Callable[[], bool]] = None,
     ) -> None:
         self.provider = provider
+        # Skip capture/encode entirely while nobody is watching.
+        self.active = active
         self.send = send
         self.interval = interval
         self.quality = quality
@@ -304,6 +307,9 @@ class FrameStreamer:
     def _loop(self) -> None:
         while not self._stop.is_set():
             started = time.time()
+            if self.active is not None and not self.active():
+                self._stop.wait(max(0.05, self.interval))
+                continue
             try:
                 snap = self.provider(self.mode) or {}
                 img = snap.get("img")

@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
+import os
 import ssl
 import threading
 import time
@@ -98,6 +100,20 @@ def _kit_summary(cfg) -> str:
     return f"{travel}{extra}, {attacks}"
 
 
+# BotConfig fields a class profile may override (see BotConfig._apply_class).
+_CLASS_FIELDS = (
+    "class_travel", "air_attacks", "teleport_key", "teleport_cooldown",
+    "jump_key", "up_jump_skill_key", "flash_jump_key", "flash_jump_enabled",
+    "skills",
+)
+
+# Frame-meta keys holding minimap-px coordinates.
+_MINIMAP_OVERLAYS = (
+    "platforms", "ropes", "anchors", "nav_edges", "nav_plan", "nav_route",
+    "player", "target", "rune",
+)
+
+
 def _offset_meta(snap: dict, dx: int, dy: int) -> None:
     """Shift region-space overlay coords by (dx, dy) — used when the
     frame image is the panel composite (title zone above the map) so
@@ -168,6 +184,7 @@ class BotHost:
 
         self.bot = None
         self.bot_thread: Optional[threading.Thread] = None
+        self._bot_stop = threading.Event()
         self.measurer = None
 
         callbacks = RemoteCallbacks(
@@ -203,6 +220,7 @@ class BotHost:
             self._provide_frame,
             self.remote.broadcast_frame,
             interval=1.0 / max(1.0, float(self.config.view_fps)),
+            active=self.remote.has_frame_clients,
         )
         self.bus.subscribe(self._forward_event)
 
@@ -277,16 +295,29 @@ class BotHost:
         if not self.serial_port or not self.remote.serial_manager.is_open:
             self.bus.emit("error", "no serial — pick a port in the Connection panel")
             return
+        if self.measurer and self.measurer.running():
+            self.bus.emit("error", "stop measuring before starting the bot")
+            return
+        self._bot_stop.clear()
         self.bot_thread = threading.Thread(
             target=self._bot_entry, name="SmartBot", daemon=True
         )
         self.bot_thread.start()
 
     def stop_bot(self) -> None:
-        if self.bot is not None:
-            self.bot.stop()
+        # Set first: a stop that lands while the bot is still being
+        # constructed must not be lost (_bot_entry checks it).
+        self._bot_stop.set()
+        bot = self.bot
+        if bot is not None:
+            bot.stop()
         if self.bot_thread and self.bot_thread.is_alive():
             self.bot_thread.join(timeout=4)
+
+    def _send_bot_state(self, running: bool) -> None:
+        self.remote.broadcast(
+            "dash|" + json.dumps({"event": "bot", "running": running})
+        )
 
     def _bot_entry(self) -> None:
         from .bot import HidController, SmartBot
@@ -314,7 +345,10 @@ class BotHost:
                 notify_callback=self.telegram.send_message,
                 event_bus=bus,
             )
+            if self._bot_stop.is_set():
+                return
             self.bus.emit("bot", "started")
+            self._send_bot_state(True)
             self.bot.start()
         except Exception as exc:
             logger.error("Smart bot failed: %s", exc)
@@ -322,6 +356,7 @@ class BotHost:
         finally:
             self.bot = None
             self.bus.emit("bot", "stopped")
+            self._send_bot_state(False)
 
     # -- Frames & events -------------------------------------------------------
     def _forward_event(self, event: dict) -> None:
@@ -403,9 +438,7 @@ class BotHost:
         graph = self._nav_graph(entry, region)
         if graph is not None:
             platforms = [(p.x0, p.y0, p.x1, p.y1) for p in graph.platforms]
-        if self._nav_show:
-            graph = self._nav_graph(entry, region)
-            if graph is not None:
+            if self._nav_show:
                 nav_edges = [
                     (l.kind, l.x0, l.y0, l.x1, l.y1) for l in graph.transfer_legs()
                 ]
@@ -789,8 +822,8 @@ class BotHost:
             if img is None:
                 return {"state": "IDLE"}
             meta = self._map_meta()
-            meta.pop("platforms", None)
-            meta.pop("anchors", None)
+            for key in _MINIMAP_OVERLAYS:
+                meta.pop(key, None)
             return {
                 "img": annotate_title(img),
                 "layout": self._layout_source(),
@@ -798,20 +831,23 @@ class BotHost:
             }
         if mode == "window":
             meta = self._map_meta()
-            meta.pop("platforms", None)
+            feed = self._get_feed() if bot is None else None
             if bot is not None:
-                img = bot._window_capture()
-                if img is None:
-                    return None
-                return {"img": img, "layout": self._layout_source(), **meta}
-            feed = self._get_feed()
-            if feed is None:
+                img, region = bot._window_capture(), bot.minimap.region
+            elif feed is not None:
+                img, region = feed.window_img(), feed.minimap.region
+            else:
                 return None
-            return {
-                "img": feed.window_img(),
-                "layout": self._layout_source(),
-                **meta,
-            }
+            if img is None:
+                return None
+            # Overlays are minimap-relative; the window image is the whole
+            # client area, so move them to where the minimap sits in it.
+            if region:
+                _offset_meta(meta, int(region[0]), int(region[1]))
+            else:
+                for key in _MINIMAP_OVERLAYS:
+                    meta.pop(key, None)
+            return {"img": img, "layout": self._layout_source(), **meta}
         band = band_rect = None
         region = None
         if bot is not None:
@@ -1006,6 +1042,15 @@ class BotHost:
             self.bus.emit("error", f"no class profile named {name!r}")
             return
         self.stop_bot()
+        # Start from the global (profile-free) values so nothing the
+        # previous profile set survives into one that doesn't set it.
+        from .bot import BotConfig
+
+        base = BotConfig.from_dict(
+            {**(getattr(self.config, "bot", None) or {}), "class": None}
+        )
+        for field in _CLASS_FIELDS:
+            setattr(cfg, field, getattr(base, field))
         cfg.class_active = name
         cfg._apply_class({"active": name, "profiles": cfg.class_profiles},
                          cfg)
@@ -1028,7 +1073,14 @@ class BotHost:
         if policy in ("weighted", "greedy"):
             cfg.patrol_policy = policy
         if temp is not None:
-            cfg.patrol_weight_temp = max(0.05, float(temp))
+            try:
+                t = float(temp)
+            except (TypeError, ValueError):
+                t = math.nan
+            if not math.isfinite(t):
+                self.bus.emit("error", f"invalid patrol temperature: {temp!r}")
+                return
+            cfg.patrol_weight_temp = max(0.05, t)
         bot_cfg = getattr(self.config, "bot", None) or {}
         bot_cfg["patrol_policy"] = cfg.patrol_policy
         bot_cfg["patrol_weight_temp"] = cfg.patrol_weight_temp
@@ -1097,12 +1149,25 @@ class BotHost:
         if port == "auto":
             self.bus.emit("host", "probing serial ports…")
 
+            # Windows COM ports are exclusive: the port we already hold
+            # can't be re-opened by the probe, so skip it explicitly.
+            current = (
+                self.serial_port
+                if self.serial_port and self.remote.serial_manager.is_open
+                else None
+            )
+
             def probe() -> None:
                 from .transport import discover_data_port
 
-                found = discover_data_port()
+                found = discover_data_port(exclude_port=current)
                 if found:
                     self._finish_serial_connect(found)
+                elif current:
+                    self.bus.emit(
+                        "host", f"no other Pico port found — staying on {current}"
+                    )
+                    self._send_host_state()
                 else:
                     self.bus.emit("error", "no Pico DATA port discovered")
                     self._send_host_state()
@@ -1124,6 +1189,12 @@ class BotHost:
     def _set_window(self, title: str) -> None:
         title = title.strip()
         if not title or title == self.window_title:
+            return
+        if self.is_bot_running() or (self.measurer and self.measurer.running()):
+            # The running bot shares the feed's monitor; closing it
+            # underneath would blind the bot.
+            self.bus.emit("error", "stop the bot before switching windows")
+            self._send_host_state()
             return
         self.window_title = title
         self.config.default_target_window = title
@@ -1185,7 +1256,7 @@ class BotHost:
         payload = {
             "event": "skills",
             "source": "global" if target is self.bot_config.skills
-            else f"profile {self.bot_config.class_active}",
+            else self.bot_config.class_active,
             "skills": {
                 n: (s.to_dict() if isinstance(s, Skill) else dict(s))
                 for n, s in target.items()
@@ -1229,19 +1300,20 @@ class BotHost:
     def _skills_commit(self) -> None:
         """Persist skills to config.json and update a running bot live."""
         bot_cfg = getattr(self.config, "bot", None) or {}
-        # Materialize the full effective set so a legacy attack_keys config
-        # doesn't lose its synthesized skills on the first UI edit.
-        bot_cfg["skills"] = {
-            n: s.to_dict() for n, s in self.bot_config.skills.items()
-        }
         profile = (self.bot_config.class_profiles or {}).get(
             self.bot_config.class_active)
-        if profile is not None and isinstance(profile.get("skills"), dict):
+        if profile is not None:
             # The edit landed in the active profile's own kit — persist
-            # the class block too.
+            # only the class block; the global book stays untouched.
             cls = dict(bot_cfg.get("class") or {})
             cls["profiles"] = self.bot_config.class_profiles
             bot_cfg["class"] = cls
+        else:
+            # Materialize the full effective set so a legacy attack_keys
+            # config doesn't lose its synthesized skills on the first edit.
+            bot_cfg["skills"] = {
+                n: s.to_dict() for n, s in self.bot_config.skills.items()
+            }
         self.config.bot = bot_cfg
         save_config(self.config)
         bot = self.bot
@@ -1301,14 +1373,15 @@ class BotHost:
             cls = dict(bot_cfg.get("class") or {})
             cls["profiles"] = cfg.class_profiles
             bot_cfg["class"] = cls
-        if "jump_key" in changed:
-            bot_cfg["jump_key"] = cfg.jump_key
-        if "up_jump_skill_key" in changed:
-            bot_cfg["up_jump_skill_key"] = cfg.up_jump_skill_key
-        if "flash_jump" in changed:
-            fj = dict(bot_cfg.get("flash_jump") or {})
-            fj.update(changed["flash_jump"])
-            bot_cfg["flash_jump"] = fj
+        else:
+            if "jump_key" in changed:
+                bot_cfg["jump_key"] = cfg.jump_key
+            if "up_jump_skill_key" in changed:
+                bot_cfg["up_jump_skill_key"] = cfg.up_jump_skill_key
+            if "flash_jump" in changed:
+                fj = dict(bot_cfg.get("flash_jump") or {})
+                fj.update(changed["flash_jump"])
+                bot_cfg["flash_jump"] = fj
         for k in ("nav_threshold_px", "dwell_weave"):
             if k in changed:
                 bot_cfg[k] = changed[k]
@@ -1371,6 +1444,13 @@ def main() -> None:
         help="save detection debug captures to debug_capture_dir",
     )
     args = parser.parse_args()
+
+    # config.json, maps/, nav_reach*.json and debug/ are relative paths:
+    # anchor them to the project folder so launching from a shortcut or
+    # another directory doesn't start from a blank config.
+    root = Path(__file__).resolve().parent.parent
+    if (root / "pyproject.toml").exists():
+        os.chdir(root)
 
     configure_logging()
     config = load_config()

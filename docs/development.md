@@ -4,14 +4,17 @@
 
 Python 3.14+. Install editable: `pip install -e .`
 
-The repo pins `.python-version` to `3.14`; if the pyenv shim isn't
-installed the repo's own venv interpreter works:
+Development happens on Windows. Use the repo's venv interpreter:
 
-```bash
-.venv/bin/python -m picobot          # run the host
-.venv/bin/python -m pytest tests/ -x -q   # the suite (~300 tests, ~1s)
-cd web && npm install && npm run build    # rebuild the dashboard app (web/dist)
+```powershell
+.venv\Scripts\python.exe -m picobot                 # run the host
+.venv\Scripts\python.exe -m pytest tests/ -x -q     # the suite (~400 tests, ~2s)
+cd web; npm install; npm run build                   # build the dashboard app (web/dist)
+cd web; npm run dev                                  # hot-reload UI against a running host
 ```
+
+`web/dist` is not committed — build it before the first run. Git should
+use `core.autocrlf=true` (files are CRLF on disk, LF in the repo).
 
 ## Test layout
 

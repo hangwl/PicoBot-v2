@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .fileio import write_text_atomic
 from .settings import CONFIG_FILE
+
+# Commands, the port probe and the bot can all persist settings.
+_SAVE_LOCK = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +140,8 @@ def save_config(config: AppConfig, path: str | Path = CONFIG_FILE) -> None:
         payload = asdict(config)
         # Ensure deprecated keys are not written back out
         payload.pop("last_window", None)
-        cfg_path.write_text(json.dumps(payload, indent=4), encoding="utf-8")
+        text = json.dumps(payload, indent=4)
+        with _SAVE_LOCK:
+            write_text_atomic(cfg_path, text)
     except OSError as exc:
         logger.error("Could not write config file %s: %s", cfg_path, exc)

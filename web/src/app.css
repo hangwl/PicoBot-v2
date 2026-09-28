@@ -1,4 +1,4 @@
-/* Shared UI bits: the dark theme matches the legacy dashboard. */
+/* Shared UI bits: dark theme. */
 :root {
   --bg: #0b0d12;
   --panel: #14161c;
@@ -50,12 +50,26 @@ button, select, input {
 button.primary { border-color: var(--ok); color: var(--ok); }
 button.danger { border-color: var(--bad); color: var(--bad); }
 button.armed { border-color: var(--warn); color: var(--warn); }
+button:disabled, select:disabled { opacity: .45; cursor: not-allowed; }
 .chip {
   padding: 2px 8px; border-radius: 10px; background: #1c1f22;
   font-size: 11px; color: var(--dim);
 }
 .chip.on { color: var(--ok); border-color: var(--ok); }
 .chip.warn { color: var(--warn); }
+.chip.bad { color: var(--bad); }
+.hint { margin-top: 4px; font-size: 11px; color: var(--dim); }
+.hint.warn { color: var(--warn); }
+.pad {
+  display: grid; gap: 4px;
+  grid-template-columns: repeat(3, 44px);
+  grid-template-areas: ". up ." "left down right";
+}
+.pad button { min-height: 44px; }
+.pad [aria-label="up"] { grid-area: up; }
+.pad [aria-label="left"] { grid-area: left; }
+.pad [aria-label="down"] { grid-area: down; }
+.pad [aria-label="right"] { grid-area: right; }
 canvas#view {
   display: block; width: 100%; max-width: 560px; height: auto;
   background: #000; border-radius: 4px; image-rendering: pixelated;
@@ -68,13 +82,16 @@ canvas#view {
 }
 .logline .t { color: var(--dim); margin-right: 6px; }
 .logline.warn { color: var(--warn); }
-.logline.bad { color: var(--bad); }
+.logline.error { color: var(--bad); }
+.logline.debug { color: var(--dim); }
 #tabs { display: none; }
 @media (max-width: 720px) {
   main { padding: 10px; }
+  main { padding-bottom: 64px; }
   #tabs {
-    display: flex; gap: 6px; padding: 6px 10px; position: sticky;
-    bottom: 0; background: var(--panel); border-top: 1px solid var(--edge);
+    display: flex; gap: 6px; padding: 6px 10px; position: fixed;
+    left: 0; right: 0; bottom: 0; z-index: 10;
+    background: var(--panel); border-top: 1px solid var(--edge);
   }
   #tabs button { flex: 1; }
   main [data-tab] { display: none; }

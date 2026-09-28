@@ -147,5 +147,71 @@ class HttpTemplateTests(unittest.TestCase):
             self.assertEqual(srv._read_index(9000), "wss://h:9000")
 
 
+class HeldKeyTests(unittest.TestCase):
+    def test_keys_held_by_a_dropped_client_are_released(self):
+        srv = RemoteControlServer("", 0, _callbacks(), serial_manager=Mock())
+        c = Mock()
+        for m in ("key|down|left", "key|down|alt", "key|up|alt"):
+            asyncio.run(srv._handle_ws_message(c, m))
+        while not srv.cmd_queue.empty():
+            srv.cmd_queue.get_nowait()
+        srv._on_ws_client_disconnected(c)
+        sent = [srv.cmd_queue.get_nowait()[0] for _ in range(srv.cmd_queue.qsize())]
+        self.assertEqual(sent, ["hid|key|up|left"])
+
+    def test_bot_query_replies_with_dash_event(self):
+        srv = RemoteControlServer(
+            "", 0, _callbacks(is_bot_running=lambda: True),
+            serial_manager=Mock(),
+        )
+        c = _Client()
+        asyncio.run(srv._handle_ws_message(c, "bot|query"))
+        self.assertEqual(c.sent, ['dash|{"event": "bot", "running": true}'])
+
+    def test_has_frame_clients(self):
+        srv = RemoteControlServer("", 0, _callbacks(), serial_manager=Mock())
+        self.assertFalse(srv.has_frame_clients())
+        asyncio.run(srv._handle_ws_message(Mock(), "dash|subscribe|frames"))
+        self.assertTrue(srv.has_frame_clients())
+
+
+class HttpStaticTests(unittest.TestCase):
+    def _dist(self, tmp):
+        dist = Path(tmp) / "dist"
+        (dist / "assets").mkdir(parents=True)
+        (dist / "index.html").write_text(
+            '<meta name="pb-ws-port" content="REPLACE_WS_PORT">'
+        )
+        (dist / "favicon.svg").write_text("<svg/>")
+        (dist / "assets" / "app.js").write_text("js")
+        (Path(tmp) / "secret.txt").write_text("no")
+        return dist
+
+    def test_root_files_assets_and_spa_fallback(self):
+        with TemporaryDirectory() as tmp:
+            port = [8765]
+            srv = EmbeddedHTTPServer(lambda: port[0], 0, static_dir=self._dist(tmp))
+            self.assertEqual(srv._serve_static("/favicon.svg")[1], b"<svg/>")
+            self.assertEqual(srv._serve_static("/assets/app.js")[1], b"js")
+            port[0] = 8766          # WS fell back to the next port
+            ctype, body = srv._serve_static("/some/route")
+            self.assertTrue(ctype.startswith("text/html"))
+            self.assertIn(b'content="8766"', body)
+            ctype, body = srv._serve_static("/../secret.txt")
+            self.assertNotIn(b"no", body)
+
+
+class StreamerIdleTests(unittest.TestCase):
+    def test_no_capture_without_viewers(self):
+        from picobot.remote.streamer import FrameStreamer
+
+        provider = Mock(return_value={})
+        st = FrameStreamer(provider, Mock(), interval=0.01, active=lambda: False)
+        st.start()
+        time.sleep(0.1)
+        st.stop()
+        provider.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

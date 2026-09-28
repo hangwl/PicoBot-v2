@@ -433,7 +433,7 @@ class HostCommandTests(unittest.TestCase):
             self.assertTrue(
                 self.host.reach.path.name.endswith("nav_reach_hero.json"))
 
-    def test_profile_skills_applied_on_class_use(self):
+    def test_profile_movekeys_applied_on_class_use(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)
             self.host.bot_config.class_profiles = {
@@ -998,6 +998,126 @@ class HostCommandTests(unittest.TestCase):
             if t.name == "PortProbe":
                 t.join(timeout=3)
         self.assertEqual(done, ["COM9"])
+
+    # -- lifecycle races, per-view overlays, profile isolation ----------------
+    def test_stop_during_bot_construction_prevents_start(self):
+        self.host._bot_stop.set()
+        with patch("picobot.bot.SmartBot") as sb, \
+             patch("picobot.bot.HidController"):
+            self.host._bot_entry()
+        sb.return_value.start.assert_not_called()
+        states = [json.loads(m[5:]) for m in self.sent
+                  if '"event": "bot"' in m]
+        self.assertEqual(states[-1], {"event": "bot", "running": False})
+
+    def test_bot_entry_broadcasts_running_state(self):
+        self.host._bot_stop.clear()
+        with patch("picobot.bot.SmartBot"), patch("picobot.bot.HidController"):
+            self.host._bot_entry()
+        states = [json.loads(m[5:])["running"] for m in self.sent
+                  if '"event": "bot"' in m]
+        self.assertEqual(states, [True, False])
+
+    def test_start_bot_refused_while_measuring(self):
+        self.host.serial_port = "COM6"
+        self.host.remote.serial_manager = Mock(is_open=True)
+        self.host.measurer = Mock(running=Mock(return_value=True))
+        with patch("threading.Thread") as th:
+            self.host.start_bot()
+        th.assert_not_called()
+        errs = [e["msg"] for e in self.host.bus.history() if e["kind"] == "error"]
+        self.assertTrue(any("measuring" in m for m in errs))
+
+    def test_window_switch_refused_while_bot_runs(self):
+        feed = Mock()
+        self.host._feed = feed
+        self.host.bot_thread = Mock(is_alive=Mock(return_value=True))
+        self.host._handle_command("host|window|OtherWin")
+        self.assertEqual(self.host.window_title, "OldWin")
+        self.assertIs(self.host._feed, feed)
+        feed.close.assert_not_called()
+
+    def test_window_frame_moves_overlays_onto_the_minimap(self):
+        feed = Mock()
+        feed.window_img.return_value = np.zeros((600, 800, 3), dtype=np.uint8)
+        feed.minimap.region = (10, 70, 200, 100)
+        self.host._feed = feed
+        with patch.object(self.host, "_map_meta", return_value={
+            "platforms": [(0, 50, 100, 50)], "anchors": [(5, 40)],
+            "map": "m1",
+        }):
+            snap = self.host._provide_frame("window")
+        self.assertEqual(snap["platforms"], [(10, 120, 110, 120)])
+        self.assertEqual(snap["anchors"], [(15, 110)])
+
+    def test_title_frame_drops_minimap_overlays(self):
+        feed = Mock()
+        feed.name_img.return_value = PanelAssemblyTests._band()
+        self.host._feed = feed
+        with patch.object(self.host, "_map_meta", return_value={
+            "platforms": [(0, 1, 2, 3)], "ropes": [(0, 1, 2, 3)],
+            "nav_route": [("walk", 0, 1, 2, 3)], "map": "m1",
+        }):
+            snap = self.host._provide_frame("title")
+        for key in ("platforms", "ropes", "nav_route"):
+            self.assertNotIn(key, snap)
+        self.assertEqual(snap["map"], "m1")
+
+    def test_class_switch_does_not_inherit_previous_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.config.bot = {"jump_key": "space"}
+            self.host.bot_config.class_profiles = {
+                "mage": {"travel": "teleport", "teleport_key": "shift",
+                         "jump_key": "c",
+                         "skills": {"blink": {"key": "x", "kind": "attack"}}},
+                "hero": {"travel": "flash"},
+            }
+            self.host._class_use("mage")
+            self.host._class_use("hero")
+            cfg = self.host.bot_config
+            self.assertEqual(cfg.jump_key, "space")
+            self.assertIsNone(cfg.teleport_key)
+            self.assertNotIn("blink", cfg.skills)
+
+    def test_profile_edits_leave_the_global_book_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.config.bot = {
+                "skills": {"g": {"key": "g", "kind": "attack"}},
+            }
+            self.host.bot_config.class_profiles = {
+                "mage": {"travel": "flash"},
+            }
+            self.host._class_use("mage")
+            self.host._handle_command(
+                'skills|set|{"name":"p","key":"p","kind":"attack"}')
+            self.host._handle_command('movekeys|set|{"jump_key":"c"}')
+            self.assertEqual(list(self.host.config.bot["skills"]), ["g"])
+            self.assertNotIn("jump_key", self.host.config.bot)
+            self.assertEqual(self.host.bot_config.jump_key, "c")
+
+    def test_patrol_temp_rejects_non_finite(self):
+        before = self.host.bot_config.patrol_weight_temp
+        for bad in ("inf", "nan", "abc"):
+            self.host._handle_command(f"patrol|temp|{bad}")
+        self.assertEqual(self.host.bot_config.patrol_weight_temp, before)
+
+    def test_serial_auto_skips_the_port_already_open(self):
+        self.host.serial_port = "COM6"
+        self.host.remote.serial_manager = Mock(is_open=True)
+        with patch(
+            "picobot.transport.discover_data_port", return_value=None
+        ) as disc:
+            self.host._handle_command("host|serial|auto")
+            import threading
+
+            for t in threading.enumerate():
+                if t.name == "PortProbe":
+                    t.join(timeout=3)
+        self.assertEqual(disc.call_args.kwargs.get("exclude_port"), "COM6")
+        msgs = [e["msg"] for e in self.host.bus.history() if e["kind"] == "host"]
+        self.assertTrue(any("staying on COM6" in m for m in msgs))
 
 
 if __name__ == "__main__":
