@@ -137,6 +137,8 @@ class MoveMeasurer:
                 bot.sleep(0.5)
             elif move == "up_flash":
                 bot._up_flash(None)
+            elif move == "teleport":
+                bot.teleport(direction)
         finally:
             if direction:
                 bot.hid.key_up(direction)

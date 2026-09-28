@@ -15,7 +15,7 @@ def reach(explore=1.0, **over):
     base = {
         "jump": Reach(8, 4), "flash": Reach(25, 4), "double_flash": Reach(40, 4),
         "up_flash": Reach(6, 20), "up_side_flash": Reach(25, 16),
-        "rope_lift": Reach(3, 30),
+        "rope_lift": Reach(3, 30), "teleport": Reach(25, 12),
     }
     base.update(over)
     return ReachModel(base, explore=explore)
@@ -117,6 +117,17 @@ class NavGraphTests(unittest.TestCase):
             first_up = next(l for l in legs if l.kind == "up_flash")
             via.add(first_up.x0 < 100)
         self.assertEqual(via, {True, False})
+
+    def test_teleport_edges_exist_only_for_teleport_kits(self):
+        plats = [FLOOR, MID, (140, 84, 190, 84)]
+        mage = NavGraph(plats, reach(teleport=Reach(30, 12)),
+                        allow_flash=False, allow_teleport=True)
+        kinds_seen = {l.kind for l in mage.transfer_legs()}
+        self.assertIn("teleport", kinds_seen)
+        self.assertNotIn("flash", kinds_seen)
+        self.assertNotIn("up_flash", kinds_seen)
+        hero = NavGraph(plats, reach(), allow_flash=True, allow_teleport=False)
+        self.assertNotIn("teleport", {l.kind for l in hero.transfer_legs()})
 
     def test_wall_bounds_are_padded_outward_from_zones(self):
         b = wall_bounds({"left": 0.1, "right": 0.9}, 200, 150, 3)

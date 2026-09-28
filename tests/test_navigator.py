@@ -17,7 +17,7 @@ def reach(**over):
     base = {
         "jump": Reach(8, 4), "flash": Reach(25, 4), "double_flash": Reach(40, 4),
         "up_flash": Reach(6, 20), "up_side_flash": Reach(25, 16),
-        "rope_lift": Reach(3, 30),
+        "rope_lift": Reach(3, 30), "teleport": Reach(25, 12),
     }
     base.update(over)
     return ReachModel(base, explore=1.0)
@@ -87,6 +87,15 @@ class SimBot:
 
     def rope_lift_remaining(self):
         return self.rope_cd if self.rope else float("inf")
+
+    def teleport_remaining(self):
+        return getattr(self, "teleport_cd", 0.0)
+
+    def teleport(self, direction):
+        self.moves.append("teleport")
+        self.held = direction
+        self._air(25 * self._sign() if direction else 0, 6)
+        self.held = None
 
     def rope_lift(self):
         if self.rope_cd > 0:
@@ -287,6 +296,15 @@ class NavigatorTests(unittest.TestCase):
         bot.fail_rope = True
         self.assertFalse(self._nav(bot).go((100, 40), max_failures=1, max_steps=2))
         self.assertIn("rope_exit", bot.moves)
+
+    def test_teleport_leg_executes_and_respects_cooldown(self):
+        plats = [FLOOR, MID, (140, 84, 190, 84)]
+        bot = SimBot(plats, (60, 84))
+        bot.g = NavGraph(plats, reach(teleport=Reach(30, 12), rope_lift=Reach(0, 0)),
+                         allow_flash=False, allow_teleport=True)
+        bot.rope = 0
+        self.assertTrue(self._nav(bot).go((170, 84)))
+        self.assertIn("teleport", bot.moves)
 
     def test_rope_fires_without_precise_stop(self):
         # The takeoff is approached to within walk_band, then the rope

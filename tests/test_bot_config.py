@@ -28,6 +28,30 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(cfg.minimap_region, (10, 20, 100, 80))
         self.assertEqual(cfg.skill_gap_seconds, (0.2, 0.4))
 
+    def test_class_profile_selects_kit(self):
+        cfg = BotConfig.from_dict({"class": {
+            "active": "mage",
+            "profiles": {
+                "mage": {"travel": "teleport", "air_attacks": False,
+                         "teleport_key": "shift",
+                         "teleport_cooldown": 0.8},
+                "hero": {"travel": "flash"},
+            },
+        }})
+        self.assertEqual(cfg.class_active, "mage")
+        self.assertEqual(cfg.class_travel, "teleport")
+        self.assertFalse(cfg.air_attacks)
+        self.assertEqual(cfg.teleport_key, "shift")
+        self.assertEqual(cfg.teleport_cooldown, 0.8)
+        self.assertEqual(cfg.class_profiles["hero"], {"travel": "flash"})
+
+    def test_teleport_without_key_falls_back_to_flash(self):
+        cfg = BotConfig.from_dict({"class": {
+            "active": "mage",
+            "profiles": {"mage": {"travel": "teleport"}},
+        }})
+        self.assertEqual(cfg.class_travel, "flash")
+
     def test_from_dict_none_gives_defaults(self):
         self.assertEqual(BotConfig.from_dict(None), BotConfig())
 

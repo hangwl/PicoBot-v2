@@ -40,6 +40,7 @@ COSTS = {
     # Rope lift is preferred for rises whenever it's ready; the navigator
     # drops it from plans while it's cooling down.
     "up_flash": 1.0, "up_side_flash": 1.3, "rope_lift": 0.5,
+    "teleport": 0.5,
 }
 CLIMB_SPEED = 30.0     # minimap px/s up or down a drawn rope
 JUMP_GRAB_REACH = 24.0  # rope bottom ends within this rise of a platform
@@ -121,6 +122,8 @@ class NavGraph:
         rope_max_px: Optional[float] = None,
         ropes: Optional[Iterable[Segment]] = None,
         rope_penalty: float = 5.0,
+        allow_flash: bool = True,
+        allow_teleport: bool = False,
     ) -> None:
         plats = [
             Platform.from_segment(s) for s in segments
@@ -143,6 +146,9 @@ class NavGraph:
         self.rope_max_px = (
             reach.base["rope_lift"].rise if rope_max_px is None else rope_max_px
         )
+        # Class kit: which move families the graph may generate.
+        self.allow_flash = allow_flash
+        self.allow_teleport = allow_teleport
         self.nodes: List[Tuple[int, float]] = []
         self._index: Dict[Tuple[int, float], int] = {}
         self.edges: List[List[_Edge]] = []
@@ -219,6 +225,11 @@ class NavGraph:
     def _move(self, i: int, xa: float, j: int, xb: float, kind: str,
               dx: float, rise: float) -> bool:
         """Add a jump-type edge if ``kind``'s reach covers (dx, rise)."""
+        if kind in ("flash", "double_flash", "up_flash", "up_side_flash") \
+                and not self.allow_flash:
+            return False
+        if kind == "teleport" and not self.allow_teleport:
+            return False
         fit = self.reach.fits(kind, dx, max(0.0, rise))
         if fit is None:
             return False
@@ -263,6 +274,7 @@ class NavGraph:
             elif self.above(x, yp, exclude=i) == j:
                 rise = yp - q.y_at(x)
                 self._move(i, x, j, x, "up_flash", 0.0, rise)
+                self._move(i, x, j, x, "teleport", 0.0, rise)
 
     def _link_rope_tiers(self, i: int, p: Platform) -> None:
         """Rope lift grabs the highest platform within ``rope_max_px``."""
@@ -329,11 +341,12 @@ class NavGraph:
             dx = abs(land_x - takeoff)
             rise = ey - q.y_at(near)
             if rise <= LEVEL_PX:
-                for kind in ("jump", "flash", "double_flash"):
+                for kind in ("jump", "flash", "double_flash", "teleport"):
                     self._move(i, takeoff, j, land_x, kind, dx, rise)
             else:
                 self._move(i, takeoff, j, land_x, "up_side_flash", dx, rise)
                 self._move(i, takeoff, j, land_x, "up_flash", dx, rise)
+                self._move(i, takeoff, j, land_x, "teleport", dx, rise)
 
     # -- Queries ------------------------------------------------------------------
     def point(self, node: int) -> Tuple[float, float]:
@@ -449,7 +462,8 @@ def wall_bounds(walls: Optional[dict], w: float, h: float, pad: float) -> Option
 
 def graph_for(
     entry, region, reach: ReachModel, pad: float = 0.0,
-    rope_penalty: float = 5.0,
+    rope_penalty: float = 5.0, allow_flash: bool = True,
+    allow_teleport: bool = False,
 ) -> Optional[NavGraph]:
     """NavGraph from a map entry's drawn platforms and ropes in ``region``
     px, platforms clipped to its padded wall zones."""
@@ -460,7 +474,8 @@ def graph_for(
     ropes = [(s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in (entry.ropes or ())]
     return NavGraph(
         segs, reach, bounds=wall_bounds(entry.walls, w, h, pad), ropes=ropes,
-        rope_penalty=rope_penalty,
+        rope_penalty=rope_penalty, allow_flash=allow_flash,
+        allow_teleport=allow_teleport,
     )
 
 
@@ -472,18 +487,21 @@ class GraphCache:
         self._graph: Optional[NavGraph] = None
 
     def get(self, entry, region, reach: ReachModel, pad: float = 0.0,
-            rope_penalty: float = 5.0) -> Optional[NavGraph]:
+            rope_penalty: float = 5.0, allow_flash: bool = True,
+            allow_teleport: bool = False) -> Optional[NavGraph]:
         if entry is None or not entry.platforms or not region:
             return None
         key = (
             entry.name, tuple(tuple(s) for s in entry.platforms),
             tuple(tuple(s) for s in (entry.ropes or ())),
             tuple(sorted((entry.walls or {}).items())), pad, rope_penalty,
+            allow_flash, allow_teleport,
             region[2], region[3], reach.snapshot(),
         )
         if key != self._key:
             self._key, self._graph = key, graph_for(
-                entry, region, reach, pad, rope_penalty)
+                entry, region, reach, pad, rope_penalty,
+                allow_flash, allow_teleport)
         return self._graph
 
 

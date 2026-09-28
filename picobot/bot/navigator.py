@@ -58,8 +58,13 @@ class Navigator:
         # Same jitter draws for the whole segment — re-planning each step
         # must not flip between near-equal alternatives.
         rng = random.Random(hash((round(goal[0]), round(goal[1]), self._seed)))
-        # Rope lift only when ready right now — never wait on its cooldown.
-        exclude = () if bot.rope_lift_remaining() <= 0 else ("rope_lift",)
+        # Rope lift / teleport only when ready right now — never wait.
+        exclude = tuple(
+            k for k, remaining in (
+                ("rope_lift", bot.rope_lift_remaining()),
+                ("teleport", bot.teleport_remaining()),
+            ) if remaining > 0
+        )
         legs = self.graph.route(pos, goal, jitter=self.jitter, rng=rng, exclude=exclude)
         if legs is None:
             return "noroute"
@@ -152,6 +157,10 @@ class Navigator:
             if not bot.climb("down", leg.y1, x=leg.x0):
                 self._rope_fallback(leg)
                 return "failed"
+        elif kind == "teleport":
+            if bot.teleport_remaining() > 0:
+                return "cooldown"
+            bot.teleport(direction)
         elif kind == "drop":
             self._hold_until(
                 direction, lambda p: p[1] > leg.y0 + self.graph.snap_px, 1.5,

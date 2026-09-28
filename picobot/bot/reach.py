@@ -27,8 +27,9 @@ from typing import Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 HORIZONTAL = ("jump", "flash", "double_flash")
-UPWARD = ("up_flash", "up_side_flash", "rope_lift")
-MOVES = HORIZONTAL + UPWARD
+UPWARD = ("up_flash", "rope_lift")
+DIAGONAL = ("up_side_flash", "teleport")   # learn sideways AND rise
+MOVES = HORIZONTAL + UPWARD + DIAGONAL
 
 
 @dataclass
@@ -46,6 +47,7 @@ def base_reach(config) -> Dict[str, Reach]:
         "up_flash": Reach(6.0, config.nav_up_flash_px),
         "up_side_flash": Reach(config.nav_up_side_dx_px, config.nav_up_flash_px * 0.8),
         "rope_lift": Reach(3.0, config.nav_rope_lift_px),
+        "teleport": Reach(config.nav_teleport_dx, config.nav_teleport_rise),
     }
 
 
@@ -120,9 +122,10 @@ class ReachModel:
         ceil_before = (c0.dx, c0.rise) if c0 else None
         pdx, prise = planned
         horizontal = move in HORIZONTAL
+        diagonal = move in DIAGONAL            # learn dx and rise both
         if ok:
             odx, orise = observed
-            if horizontal or move == "up_side_flash":
+            if horizontal or diagonal:
                 e.dx = max(e.dx, odx)
             if not horizontal:
                 e.rise = max(e.rise, orise)
@@ -133,7 +136,7 @@ class ReachModel:
             if streak < 2:
                 # One miss may be input timing — cap retries but keep the
                 # proven envelope.
-                if horizontal or move == "up_side_flash":
+                if horizontal or diagonal:
                     c.dx = min(c.dx, pdx * 0.97)
                 if not horizontal:
                     c.rise = min(c.rise, prise * 0.97)
@@ -141,7 +144,7 @@ class ReachModel:
                 self._dirty = True
                 self.save()
                 return
-            if horizontal or move == "up_side_flash":
+            if horizontal or diagonal:
                 if pdx <= e.dx:
                     e.dx = max(self.base[move].dx * 0.5, pdx * self.shrink)
                 c.dx = min(c.dx, pdx * 0.97)

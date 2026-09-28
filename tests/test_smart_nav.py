@@ -446,6 +446,40 @@ class ArrivalSkillTests(unittest.TestCase):
         self.assertEqual([s.name for s, _ in bot._arrival_skills(listed, 0.0)], ["main"])
 
 
+class TravelKitTests(unittest.TestCase):
+    """The class kit picks the weave primitive and where attacks fire."""
+
+    def test_teleport_travel_uses_teleport_weave(self):
+        bot = _bot([(10, 50), (40, 50), (80, 50)], target=(80, 50))
+        bot.config.class_travel = "teleport"
+        bot.config.teleport_key = "shift"
+        bot._teleport_weave = Mock()
+        self.assertTrue(bot.move_to_point(80, 50, style="mixed"))
+        self.assertGreaterEqual(bot._teleport_weave.call_count, 2)
+
+    def test_air_attacks_false_attacks_after_landing(self):
+        # Mages can't attack airborne: the attack tail rides the airtime
+        # first, then weaves the attacks on the ground.
+        bot = _weave_bot((50, 50))
+        bot.config.air_attacks = False
+        order = []
+        bot.sleep = Mock(side_effect=lambda dt: order.append("sleep") or False)
+        bot._weave_attacks = Mock(side_effect=lambda: order.append("attack") or 1)
+        bot._after_flash(0.34)
+        self.assertEqual(order, ["sleep", "attack"])
+
+    def test_air_attacks_true_weaves_midair(self):
+        bot = _weave_bot((50, 50))
+        bot.config.air_attacks = True
+        order = []
+        bot.sleep = Mock(side_effect=lambda dt: order.append("sleep") or False)
+        bot._weave_attacks = Mock(side_effect=lambda: order.append("attack") or 1)
+        bot._after_flash(0.34)
+        self.assertEqual(order[0], "sleep")
+        self.assertEqual(order[1], "attack")   # attack before the airtime tail
+        self.assertEqual(len(order), 3)
+
+
 class WeaveTests(unittest.TestCase):
     """dwell_weave: hop across the anchor's platform, attack mid-air."""
 

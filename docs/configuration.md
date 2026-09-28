@@ -14,6 +14,19 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "up_jump_skill_cooldown": 3.0,
     "skill_gap_seconds": [0.5, 1.0],
     "walk_band_px": 8,
+    "class": {
+      "active": "default",
+      "profiles": {
+        "default": {"travel": "flash"},
+        "mage": {"travel": "teleport", "air_attacks": false,
+                 "teleport_key": "shift", "teleport_cooldown": 0.8}
+      }
+    },
+    "air_attacks": true,
+    "teleport_key": null,
+    "teleport_cooldown": 1.0,
+    "nav_teleport_dx": 25,
+    "nav_teleport_rise": 12,
     "nav_threshold_px": 5,
     "nav_up_flash_px": 26,
     "nav_rope_lift_px": 90,
@@ -84,6 +97,10 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 - `rope_penalty` — extra seconds added to every rope-climb edge; ropes
   are planned only when no jump/rope-lift path is within this much
   cheaper. Set 0 to allow ropes freely.
+- `class` — named class profiles with an active selector; the active
+  profile overlays `travel` (flash|teleport|walk), `air_attacks` and the
+  teleport keys. See
+  [bot-behavior.md](bot-behavior.md#class-profiles).
 - `walk_band_px` — walking distance: the bot flash-travels until inside
   this band, then walks the last stretch for a precise stop.
 - `nav_*_px` are **starting** move reaches in minimap px (conservative);

@@ -451,9 +451,13 @@ class SmartBot(BotBase):
 
     def _nav_graph(self) -> Optional[NavGraph]:
         """Movement graph of the current map's drawn platforms, or None."""
+        cfg = self.config
         return self._nav_cache.get(
             self._current_map_entry(), self.minimap.region, self.reach,
-            self.config.wall_pad_px, self.config.rope_penalty,
+            cfg.wall_pad_px, cfg.rope_penalty,
+            allow_flash=cfg.class_travel == "flash" and cfg.flash_jump_enabled,
+            allow_teleport=cfg.class_travel == "teleport"
+            and bool(cfg.teleport_key),
         )
 
     def _map_walls(self) -> Optional[dict]:
@@ -510,11 +514,36 @@ class SmartBot(BotBase):
 
     def _after_flash(self, airtime: float) -> None:
         """The movement rule's tail: once a flash has triggered, weave 1–2
-        attacks, then ride out the rest of the airtime."""
+        attacks, then ride out the rest of the airtime. Classes that
+        can't attack airborne attack after landing instead."""
+        if not self.config.air_attacks:
+            self.sleep(human_between(airtime, airtime * 0.6, airtime * 1.6))
+            self._weave_attacks()
+            return
         self.sleep(human_between(0.09, 0.05, 0.15))
         n = self._weave_attacks()
         rest = airtime if n < 2 else airtime * 0.65
         self.sleep(human_between(rest, rest * 0.6, rest * 1.6))
+
+    def _weave_move(self, direction: str) -> None:
+        """One travel weave in the class's style: flash (jump → mid-air
+        re-press → attacks), teleport (blink → attacks on landing), or a
+        plain walk weave."""
+        if self.config.class_travel == "teleport" and self.config.teleport_key:
+            self._teleport_weave(direction)
+        else:
+            self._flash_weave(direction)
+
+    def _teleport_weave(self, direction: str) -> None:
+        """Hold ``direction``, blink, then 1–2 attacks — on landing for
+        classes that can't attack airborne."""
+        self.hid.key_down(direction)
+        try:
+            self.hid.press(self.config.teleport_key)
+            self._last_teleport = time.time()
+            self._after_flash(0.3)
+        finally:
+            self.hid.key_up(direction)
 
     def _flash_weave(self, direction: str) -> None:
         """The movement rule: hold ``direction`` through jump → flash-jump
@@ -570,13 +599,18 @@ class SmartBot(BotBase):
         precise stop. Hop distance is learned from observed hops. Aborts
         (False) on hazards, focus loss, or stop.
         """
+        kit = self.config.class_travel
         threshold = threshold or self.config.nav_threshold_px
         # Hysteresis band: release the direction inside `stop_band`, only
         # acquire it beyond `start_band` — stops left/right flapping on the
         # target column.
         stop_band = threshold * 0.75
         start_band = threshold * 1.5
-        flash_ok = self.config.flash_jump_enabled and style in ("flash", "mixed")
+        flash_ok = (
+            (self.config.flash_jump_enabled if kit == "flash"
+             else bool(self.config.teleport_key))
+            and style in ("flash", "mixed")
+        )
         self.viz["target"] = (target_x, target_y)
         self.event("nav", f"→ ({target_x}, {target_y})", {"style": style})
         self.log(f"Navigating to ({target_x}, {target_y}) [{style}]")
@@ -661,7 +695,7 @@ class SmartBot(BotBase):
                 if flash_ok and room and abs(dx) > self._hop_px:
                     sync_dir(None)
                     hop_from = cx
-                    self._flash_weave("right" if dx > 0 else "left")
+                    self._weave_move("right" if dx > 0 else "left")
                     stuck = stuck + 1 if last == pos else 0
                     last = pos
                     if stuck >= 4:
@@ -753,6 +787,28 @@ class SmartBot(BotBase):
             self.hid.release_all()
             self.viz["target"] = None
         return False
+
+    def teleport_remaining(self) -> float:
+        """Seconds until the teleport skill is usable (inf = none bound)."""
+        if not self.config.teleport_key:
+            return float("inf")
+        last = getattr(self, "_last_teleport", 0.0)
+        return max(0.0, self.config.teleport_cooldown - (time.time() - last))
+
+    def teleport(self, direction: Optional[str] = None) -> bool:
+        """Blink in ``direction`` (mage-style travel); False when unbound
+        or cooling down — the planner excludes it while cooling."""
+        if self.teleport_remaining() > 0 or not self.is_window_focused():
+            return False
+        self._last_teleport = time.time()
+        self.hid.key_down(direction) if direction else None
+        try:
+            self.hid.press(self.config.teleport_key)
+            self.sleep(human_between(0.3, 0.2, 0.45))
+        finally:
+            if direction:
+                self.hid.key_up(direction)
+        return True
 
     def rope_exit(self, direction: str) -> None:
         """Leap off a rope: hold a direction and jump — there is no single
@@ -1134,7 +1190,7 @@ class SmartBot(BotBase):
         self._weave_hop(direction)
 
     def _weave_hop(self, direction: str) -> None:
-        self._flash_weave(direction)
+        self._weave_move(direction)
 
     def _plan_route(self, pos) -> None:
         """Order the anchors into a checkpoint route from ``pos``.

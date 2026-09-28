@@ -443,9 +443,12 @@ class BotHost:
         }
 
     def _nav_graph(self, entry, region):
+        cfg = self.bot_config
         return self._nav_cache.get(
-            entry, region, self.reach, self.bot_config.wall_pad_px,
-            self.bot_config.rope_penalty,
+            entry, region, self.reach, cfg.wall_pad_px, cfg.rope_penalty,
+            allow_flash=cfg.class_travel == "flash" and cfg.flash_jump_enabled,
+            allow_teleport=cfg.class_travel == "teleport"
+            and bool(cfg.teleport_key),
         )
 
     def _nav_command(self, msg: str) -> None:

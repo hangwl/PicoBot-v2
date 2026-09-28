@@ -43,6 +43,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
   actually found elsewhere.
 - **Pin semantics**: `active_map` stands unless a confident title match
   names a different stored map. Blank-name layout writes need `via: ocr`.
+- **Class profiles** gate the move kit: `class_travel` (flash|teleport|
+  walk) decides which edges the graph generates and which weave
+  primitive runs; `air_attacks: false` moves the attack tail after
+  landing (mages can't attack suspended). Teleport is a move kind with
+  a learned envelope and cooldown-aware planning.
 - **Movement rule (human-like)**: bot-controlled travel between points
   is flash hops — jump, then the mid-air re-press — with **1–2 attacks
   woven after the flash triggers** (never before: it eats the re-press

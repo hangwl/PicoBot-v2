@@ -99,6 +99,35 @@ rope line).
 - The dashboard's **Route** button shows every edge (colours per move)
   and previews routes on click.
 
+## Class profiles
+
+`config.json` holds named class profiles with an active selector — the
+kit decides which moves exist and where attacks fire:
+
+```json
+"class": {
+  "active": "mage",
+  "profiles": {
+    "mage":  {"travel": "teleport", "air_attacks": false,
+              "teleport_key": "shift", "teleport_cooldown": 0.8},
+    "hero":  {"travel": "flash"}
+  }
+}
+```
+
+- `travel: flash` — jump + mid-air re-press (the default kit); the graph
+  generates flash/double-flash/up-flash/up-side edges.
+- `travel: teleport` — blink (gains height): the graph generates
+  **teleport edges** instead (horizontal gaps and up-teleports), with a
+  learned reach envelope (`nav_teleport_dx`/`nav_teleport_rise`,
+  refined like every move) and cooldown-aware planning (excluded while
+  cooling, never waited on). The weave is blink → attack → blink.
+- `travel: walk` — no air movement; attacks weave into walks.
+- `air_attacks: false` — the attack tail fires **after landing**
+  (mages can't attack suspended); `true` weaves mid-air as usual.
+- A teleport without a bound key falls back to `flash`.
+- Measure-moves covers teleport when a key is bound.
+
 ## Movement rule & attack weaving
 
 Bot-controlled movement looks like a player farming, not a macro:

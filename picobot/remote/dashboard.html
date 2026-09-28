@@ -585,6 +585,7 @@ $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 
 // --- Drag-to-draw platforms on the Minimap view ------------------------
 let platMode = false, platStart = null;
+let routeMode = false, anchorMode = false;
 function armAnchors() {
   anchorMode = !anchorMode;
   if (anchorMode && platMode) armPlats();

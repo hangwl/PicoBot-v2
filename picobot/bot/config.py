@@ -90,6 +90,20 @@ class BotConfig:
     flash_jump_key: Optional[str] = None  # None = reuse jump_key
     travel_style: str = "mixed"           # default leg style: walk|flash|mixed
 
+    # -- Class profile ----------------------------------------------------------
+    # Named profiles select the character's movement kit; the active one
+    # overlays the flat keys below. flash: jump + mid-air re-press, air
+    # attacks. teleport: blink (gains height), attacks on landing.
+    # walk: neither — weave attacks into walks.
+    class_profiles: dict = field(default_factory=dict)
+    class_active: str = "default"
+    class_travel: str = "flash"           # flash | teleport | walk
+    air_attacks: bool = True              # attacks may fire while airborne
+    teleport_key: Optional[str] = None    # blink skill (mage-style classes)
+    teleport_cooldown: float = 1.0
+    nav_teleport_dx: float = 25.0         # sideways reach of a teleport
+    nav_teleport_rise: float = 12.0       # height an up-teleport gains
+
     # -- Maps -------------------------------------------------------------------
     maps_dir: str = "maps"
     auto_select_map: bool = True
@@ -113,6 +127,35 @@ class BotConfig:
                 "buff_keys": self.buff_keys,
                 "buff_interval_seconds": self.buff_interval_seconds,
             }).skills
+
+    @staticmethod
+    def _apply_class(block: Optional[dict], cfg: "BotConfig") -> None:
+        """Apply the active class profile over the flat keys."""
+        if not isinstance(block, dict):
+            return
+        profiles = block.get("profiles")
+        if isinstance(profiles, dict):
+            cfg.class_profiles = {
+                str(k): dict(v) for k, v in profiles.items()
+                if isinstance(v, dict)
+            }
+        active = str(block.get("active") or block.get("name") or "default")
+        cfg.class_active = active
+        profile = cfg.class_profiles.get(active)
+        if isinstance(profile, dict):
+            if "travel" in profile:
+                cfg.class_travel = str(profile["travel"])
+            if "air_attacks" in profile:
+                cfg.air_attacks = bool(profile["air_attacks"])
+            if "teleport_key" in profile:
+                k = profile["teleport_key"]
+                cfg.teleport_key = str(k) if k else None
+            if "teleport_cooldown" in profile:
+                cfg.teleport_cooldown = float(profile["teleport_cooldown"])
+        if cfg.class_travel not in ("flash", "teleport", "walk"):
+            cfg.class_travel = "flash"
+        if cfg.class_travel == "teleport" and not cfg.teleport_key:
+            cfg.class_travel = "flash"     # no key bound — can't blink
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "BotConfig":
@@ -184,6 +227,14 @@ class BotConfig:
             cfg.flash_jump_key = str(key) if key else None
         if "travel_style" in data:
             cfg.travel_style = str(data["travel_style"])
+        if "air_attacks" in data:
+            cfg.air_attacks = bool(data["air_attacks"])
+        if "teleport_key" in data:
+            v = data["teleport_key"]
+            cfg.teleport_key = str(v) if v else None
+        if "teleport_cooldown" in data:
+            cfg.teleport_cooldown = float(data["teleport_cooldown"])
+        cls._apply_class(data.get("class"), cfg)
         if "maps_dir" in data:
             cfg.maps_dir = str(data["maps_dir"])
         if data.get("debug_capture_dir"):
