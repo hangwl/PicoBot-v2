@@ -92,7 +92,7 @@ class SmartBot(BotBase):
         self._identity_version = -1
         self._nav_cache = GraphCache()
         self._reach = reach or ReachModel(
-            base_reach(config), path=config.nav_reach_file
+            base_reach(config), path=config.reach_path()
         )
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0

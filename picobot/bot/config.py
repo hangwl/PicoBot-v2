@@ -8,6 +8,7 @@ defaults so the bot can run with an empty config.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from ..vision.minimap import MinimapColors
@@ -57,6 +58,16 @@ class BotConfig:
     patrol_policy: str = "weighted"       # weighted | greedy — loop ordering
     patrol_weight_temp: float = 1.0       # roulette temperature (1 = 1/cost)
     nav_reach_file: str = "nav_reach.json"
+
+    def reach_path(self) -> str:
+        """Per-character reach file: nav_reach.json, or
+        nav_reach_<profile>.json when a class profile is active — each
+        class measures its own movement ranges."""
+        if self.class_active and self.class_active != "default" \
+                and self.class_profiles:
+            p = Path(self.nav_reach_file)
+            return str(p.with_name(f"{p.stem}_{self.class_active}{p.suffix}"))
+        return self.nav_reach_file
     anchor_float_px: float = 4.0           # anchors hover this far above the platform line
     flash_repress_seconds: float = 0.15    # jump -> flash re-press gap
     combo_repress_seconds: float = 0.16    # gap between chained flashes

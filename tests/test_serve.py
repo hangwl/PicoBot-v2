@@ -418,7 +418,22 @@ class HostCommandTests(unittest.TestCase):
                     if e["kind"] == "bot"]
             self.assertTrue(any("class: mage" in m for m in msgs))
 
-    def test_profile_movement_keys_applied_and_edited(self):
+    def test_class_use_swaps_to_the_profile_reach_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.bot_config.class_profiles = {
+                "mage": {"travel": "teleport", "teleport_key": "shift"},
+                "hero": {"travel": "flash"},
+            }
+            self.host._class_use("mage")
+            self.assertTrue(
+                self.host.reach.path.name.endswith("nav_reach_mage.json"))
+            # Each profile measures and learns independently.
+            self.host._class_use("hero")
+            self.assertTrue(
+                self.host.reach.path.name.endswith("nav_reach_hero.json"))
+
+    def test_profile_skills_applied_on_class_use(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)
             self.host.bot_config.class_profiles = {

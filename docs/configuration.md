@@ -118,7 +118,8 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   this band, then walks the last stretch for a precise stop.
 - `nav_*_px` are **starting** move reaches in minimap px (conservative);
   the bot learns real values from observed moves and stores them in
-  `nav_reach_file` (gitignored, per character). Delete that file to
+  `nav_reach_file` (gitignored) — with a class profile active the file
+  is `nav_reach_<profile>.json` (per character). Delete that file to
   relearn. See [bot-behavior.md](bot-behavior.md#moves--learned-reach-navgraphpy-reachpy-navigatorpy).
 - Removed keys (`stationary_mode`, `enable_random_wander`,
   `stationary_seconds`, `wander_seconds`, `wander_edge_margin_px`,

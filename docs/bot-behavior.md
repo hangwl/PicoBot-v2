@@ -147,6 +147,10 @@ kit decides which moves exist and where attacks fire:
   (seeded from the global book on first edit) and shows which book it's
   editing.
 - Measure-moves covers teleport when a key is bound.
+- **Reach is per profile:** measurement writes
+  `nav_reach_<profile>.json` (e.g. `nav_reach_mage.json`) — each class
+  measures its own movement ranges, and switching profiles swaps the
+  learned envelopes.
 
 ## Movement rule & attack weaving
 

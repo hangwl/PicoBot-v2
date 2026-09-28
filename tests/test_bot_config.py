@@ -42,6 +42,15 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(cfg.teleport_cooldown, 0.8)
         self.assertEqual(cfg.class_profiles["hero"], {"travel": "flash"})
 
+    def test_reach_path_is_per_profile(self):
+        cfg = BotConfig.from_dict({"class": {
+            "active": "mage",
+            "profiles": {"mage": {"travel": "teleport"}},
+        }})
+        self.assertEqual(cfg.reach_path(), "nav_reach_mage.json")
+        self.assertEqual(BotConfig.from_dict({}).reach_path(),
+                         "nav_reach.json")
+
     def test_patrol_policy_parsed_and_validated(self):
         cfg = BotConfig.from_dict({"patrol_policy": "greedy",
                                    "patrol_weight_temp": 0.5})

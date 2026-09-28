@@ -1010,6 +1010,10 @@ class BotHost:
         cfg.class_active = name
         cfg._apply_class({"active": name, "profiles": cfg.class_profiles},
                          cfg)
+        # Reach is per character: swap to this profile's learned envelopes.
+        from .bot.reach import ReachModel, base_reach
+
+        self.reach = ReachModel(base_reach(cfg), path=cfg.reach_path())
         bot_cfg = getattr(self.config, "bot", None) or {}
         cls = dict(bot_cfg.get("class") or {})
         cls["active"] = name
