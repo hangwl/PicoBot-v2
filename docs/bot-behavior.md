@@ -61,7 +61,14 @@ every move whose **reach** covers the gap:
 
 There is no direct release from a rope: after any failed climb the bot
 leaps off (hold direction + jump) toward the nearest platform and
-replans from where it lands.
+replans from where it lands. The same exit fires when the player dot
+stays invisible for ~2.5s — a fragmented glyph over a rope line is the
+usual cause (marker detection retries without erosion first).
+
+Rope climbs cost `rope_penalty` (default 5s) on top of climb time —
+**ropes are a last resort**: platforms are normally reachable via jumps,
+rope lift, or (future) teleport. Set `rope_penalty: 0` to let the
+planner use them freely.
 
 - Reach = sideways `dx` and upward `rise` in minimap px. Starting values
   are realistic guesses (`nav_*` config keys); the **Measure moves**

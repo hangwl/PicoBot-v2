@@ -1,4 +1,5 @@
 import random
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -163,6 +164,20 @@ class PatrolTests(unittest.TestCase):
         goal = bot.move_to_point.call_args[0][0]
         self.assertEqual(goal, 30)                  # toward the graph
         self.assertTrue(any("walking back out" in l for l in bot.log_lines))
+
+    def test_persistent_blind_dot_leaps_off_the_rope(self):
+        # The dot can stay invisible while hanging on a rope — after 2.5s
+        # blind, leap off toward the last known position's nearest platform.
+        bot = PatrolBot([FLOOR], (60, 100), [(20, 100), (180, 100)])
+        bot.rope_exit = Mock()
+        bot._blind_wait = Mock()
+        p = Patrol(bot)
+        p._blind_since = time.monotonic() - 3.0     # blind window elapsed
+        bot.minimap.player_pos = Mock(return_value=None)
+        p._last_pos = (60, 100)                     # last known position
+        p.tick()
+        bot.rope_exit.assert_called_once()
+        self.assertEqual(bot.attacks, 0)
 
     def test_anchor_off_platform_is_banned_with_message(self):
         bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (95, 20)])

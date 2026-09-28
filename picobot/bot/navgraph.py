@@ -120,6 +120,7 @@ class NavGraph:
         takeoff_inset_px: float = 3.0,
         rope_max_px: Optional[float] = None,
         ropes: Optional[Iterable[Segment]] = None,
+        rope_penalty: float = 5.0,
     ) -> None:
         plats = [
             Platform.from_segment(s) for s in segments
@@ -130,6 +131,9 @@ class NavGraph:
         self.platforms: List[Platform] = plats
         self.bounds = bounds
         self.ropes = [s for s in (ropes or []) if abs(s[2] - s[0]) < 20.0]
+        # Rope climbs are a last resort: platforms are normally reachable
+        # via jumps/rope lift/teleport, so climbs cost a penalty on top.
+        self.rope_penalty = rope_penalty
         self.reach = reach
         self.walk_speed = walk_speed
         self.snap_px = snap_px
@@ -291,7 +295,7 @@ class NavGraph:
             if land is None:
                 land = self.locate(rx, bottom)   # rope ends at a platform row
             if land is not None and land != hi:
-                cost = 0.5 + (bottom - top) / CLIMB_SPEED
+                cost = 0.5 + (bottom - top) / CLIMB_SPEED + self.rope_penalty
                 self._link(self._node(hi, rx), self._node(land, rx),
                            "climb_down", cost)
             # Up: jump-grab from every platform in reach below the end.
@@ -303,7 +307,7 @@ class NavGraph:
                 tx = min(p.x1 - 1.0, max(p.x0 + 1.0, rx))
                 if abs(rx - tx) > DRIFT_REACH:
                     continue
-                cost = 0.7 + (bottom - top) / CLIMB_SPEED
+                cost = 0.7 + (bottom - top) / CLIMB_SPEED + self.rope_penalty
                 self._link(self._node(i, tx), self._node(hi, rx),
                            "climb_up", cost)
 
@@ -443,7 +447,10 @@ def wall_bounds(walls: Optional[dict], w: float, h: float, pad: float) -> Option
     )
 
 
-def graph_for(entry, region, reach: ReachModel, pad: float = 0.0) -> Optional[NavGraph]:
+def graph_for(
+    entry, region, reach: ReachModel, pad: float = 0.0,
+    rope_penalty: float = 5.0,
+) -> Optional[NavGraph]:
     """NavGraph from a map entry's drawn platforms and ropes in ``region``
     px, platforms clipped to its padded wall zones."""
     if entry is None or not entry.platforms or not region:
@@ -453,6 +460,7 @@ def graph_for(entry, region, reach: ReachModel, pad: float = 0.0) -> Optional[Na
     ropes = [(s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in (entry.ropes or ())]
     return NavGraph(
         segs, reach, bounds=wall_bounds(entry.walls, w, h, pad), ropes=ropes,
+        rope_penalty=rope_penalty,
     )
 
 
@@ -463,17 +471,19 @@ class GraphCache:
         self._key = None
         self._graph: Optional[NavGraph] = None
 
-    def get(self, entry, region, reach: ReachModel, pad: float = 0.0) -> Optional[NavGraph]:
+    def get(self, entry, region, reach: ReachModel, pad: float = 0.0,
+            rope_penalty: float = 5.0) -> Optional[NavGraph]:
         if entry is None or not entry.platforms or not region:
             return None
         key = (
             entry.name, tuple(tuple(s) for s in entry.platforms),
             tuple(tuple(s) for s in (entry.ropes or ())),
-            tuple(sorted((entry.walls or {}).items())), pad,
+            tuple(sorted((entry.walls or {}).items())), pad, rope_penalty,
             region[2], region[3], reach.snapshot(),
         )
         if key != self._key:
-            self._key, self._graph = key, graph_for(entry, region, reach, pad)
+            self._key, self._graph = key, graph_for(
+                entry, region, reach, pad, rope_penalty)
         return self._graph
 
 

@@ -443,7 +443,10 @@ class BotHost:
         }
 
     def _nav_graph(self, entry, region):
-        return self._nav_cache.get(entry, region, self.reach, self.bot_config.wall_pad_px)
+        return self._nav_cache.get(
+            entry, region, self.reach, self.bot_config.wall_pad_px,
+            self.bot_config.rope_penalty,
+        )
 
     def _nav_command(self, msg: str) -> None:
         """nav|show|on|off, nav|preview|x,y (minimap px) — route preview

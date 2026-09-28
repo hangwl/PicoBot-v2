@@ -21,6 +21,7 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "nav_jump_px": 10,
     "nav_gap_px": 30,
     "nav_double_gap_px": 48,
+    "rope_penalty": 5,
     "nav_reach_file": "nav_reach.json",
     "anchor_float_px": 4,
     "flash_repress_seconds": 0.15,
@@ -80,6 +81,9 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 - Vertical jumps that produce no progress twice in a row end the leg
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.
+- `rope_penalty` — extra seconds added to every rope-climb edge; ropes
+  are planned only when no jump/rope-lift path is within this much
+  cheaper. Set 0 to allow ropes freely.
 - `walk_band_px` — walking distance: the bot flash-travels until inside
   this band, then walks the last stretch for a precise stop.
 - `nav_*_px` are **starting** move reaches in minimap px (conservative);

@@ -155,6 +155,16 @@ class NavGraphTests(unittest.TestCase):
         self.assertTrue(
             any(l.kind == "climb_down" for l in g.transfer_legs()))
 
+    def test_rope_climbs_cost_a_penalty(self):
+        # Ropes are a last resort: the penalty pushes climb edges behind
+        # any reasonable non-rope alternative.
+        plats = [FLOOR, MID]
+        g = NavGraph(plats, reach(), ropes=[(80, 100, 82, 84)],
+                     rope_penalty=5.0)
+        rope_cost = next(
+            l.cost for l in g.transfer_legs() if l.kind == "climb_up")
+        self.assertGreaterEqual(rope_cost, 5.0)
+
     def test_hanging_rope_boards_by_jump_grab(self):
         # The rope hangs from the tall platform; its bottom end is 20px
         # above the floor — reachable by a jump-grab, not by standing.

@@ -37,16 +37,41 @@ class Patrol:
         self._nav: Optional[Navigator] = None
         self._replan_at = 0.0
         self._break_logged = 0.0
+        self._blind_since = None
+        self._last_pos: Optional[Point] = None
 
     # -- Tick -------------------------------------------------------------------------
     def tick(self) -> None:
         bot = self.bot
         img = bot.minimap_frame()
         pos = bot.minimap.player_pos(img) if img is not None else None
+        if pos is not None:
+            self._last_pos = pos
         bot.viz["player"] = pos
         if pos is None:
+            # The dot can stay invisible while hanging on a rope (the
+            # glyph fragments over the rope line) — if it persists, leap
+            # off: direction + jump is the only way down.
+            now = time.monotonic()
+            since = self._blind_since
+            if since is None:
+                self._blind_since = now
+            elif now - since > 2.5:
+                self._blind_since = now
+                graph0 = bot._nav_graph()
+                last = getattr(self, "_last_pos", None)
+                if graph0 is not None and graph0.platforms and last:
+                    near = min(
+                        graph0.platforms,
+                        key=lambda p: min(abs(p.x0 - last[0]),
+                                          abs(p.x1 - last[0])),
+                    )
+                    cx = min((abs(near.x0 - last[0]), near.x0),
+                             (abs(near.x1 - last[0]), near.x1))[1]
+                    bot.rope_exit("right" if cx > last[0] else "left")
             bot._blind_wait()
             return
+        self._blind_since = None
         graph = bot._nav_graph()
         if graph is None:
             # No drawn platforms: straight-line patrol.

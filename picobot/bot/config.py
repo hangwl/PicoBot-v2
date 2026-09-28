@@ -53,6 +53,7 @@ class BotConfig:
     nav_jump_px: float = 10.0             # widest gap a plain jump clears
     nav_gap_px: float = 30.0              # widest gap a flash jump clears
     nav_double_gap_px: float = 48.0       # widest gap a double flash clears
+    rope_penalty: float = 5.0             # extra climb cost — ropes are a last resort
     nav_reach_file: str = "nav_reach.json"
     anchor_float_px: float = 4.0           # anchors hover this far above the platform line
     flash_repress_seconds: float = 0.15    # jump -> flash re-press gap
@@ -132,7 +133,7 @@ class BotConfig:
             "vert_jump_interval",
             "weave_double_chance", "wall_pad_px", "anchor_float_px",
             "walk_band_px",
-            "flash_repress_seconds", "combo_repress_seconds",
+            "flash_repress_seconds", "combo_repress_seconds", "rope_penalty",
         )
         for name in floats:
             if name in data:

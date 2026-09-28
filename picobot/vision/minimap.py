@@ -196,6 +196,32 @@ def erode3(mask: np.ndarray) -> np.ndarray:
     return out
 
 
+def dilate3(mask: np.ndarray) -> np.ndarray:
+    """3x3 binary dilation via shifted ORs — grows the mask by 1px."""
+    m = mask
+    h, w = mask.shape
+    out = mask.copy()
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dy == 0 and dx == 0:
+                continue
+            shifted = np.zeros_like(mask)
+            src_y = slice(max(0, -dy), h - max(0, dy))
+            src_x = slice(max(0, -dx), w - max(0, dx))
+            dst_y = slice(max(0, dy), h - max(0, -dy))
+            dst_x = slice(max(0, dx), w - max(0, -dx))
+            shifted[dst_y, dst_x] = m[src_y, src_x]
+            out |= shifted
+    return out
+
+
+def close3(mask: np.ndarray) -> np.ndarray:
+    """Morphological closing — bridges gaps up to ~2px (a rope line drawn
+    over the player dot splits its blob; closing reconnects it) without
+    moving the blob's bounds."""
+    return erode3(dilate3(mask))
+
+
 def blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
     """Mean (x, y) of set pixels. Returns None if the mask is empty."""
     ys, xs = np.nonzero(mask)
@@ -424,8 +450,14 @@ class MinimapAnalyzer:
         feet: bool = False,
     ) -> Optional[Tuple[int, int]]:
         inner, off = self._interior(minimap_img)
-        mask = erode3(color_mask(inner, bgr, tolerance))
+        # Closing bridges thin occluders (a rope line drawn over the dot
+        # splits the blob) before erosion drops noise pixels.
+        mask = erode3(dilate3(color_mask(inner, bgr, tolerance)))
         blob = _largest_blob(mask)
+        if blob is None:
+            # Still nothing: a wider color net without erosion, as a last
+            # resort for occluders wider than the closing can bridge.
+            blob = _largest_blob(color_mask(inner, bgr, tolerance + 6))
         if blob is None:
             return None
         cx, cy, ymax = blob

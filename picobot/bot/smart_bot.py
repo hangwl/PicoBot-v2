@@ -453,7 +453,7 @@ class SmartBot(BotBase):
         """Movement graph of the current map's drawn platforms, or None."""
         return self._nav_cache.get(
             self._current_map_entry(), self.minimap.region, self.reach,
-            self.config.wall_pad_px,
+            self.config.wall_pad_px, self.config.rope_penalty,
         )
 
     def _map_walls(self) -> Optional[dict]:
@@ -814,6 +814,9 @@ class SmartBot(BotBase):
                 lost = 0
                 y = pos[1]
                 if y <= target + 2:
+                    # Hold up a moment longer — the mount onto the platform
+                    # happens at the rope's top.
+                    self.sleep(human_between(0.3, 0.2, 0.45))
                     return True
                 if last_y is not None:
                     if y < last_y:
