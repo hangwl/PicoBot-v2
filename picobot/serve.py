@@ -351,6 +351,7 @@ class BotHost:
             self.bot = None
             self.bus.emit("bot", "stopped")
             self._send_bot_state(False)
+            self._send_class()   # farming refines reach: refresh the count
 
     # -- Frames & events -------------------------------------------------------
     def _forward_event(self, event: dict) -> None:
@@ -1009,6 +1010,11 @@ class BotHost:
             self.bus.emit("error", f"no class profile named {name!r}")
             return
         self.stop_bot()
+        # A measurement runs on this same config and records into the old
+        # profile's reach file — never let it continue under a new kit.
+        if self.measurer and self.measurer.running():
+            self.measurer.stop()
+            self.bus.emit("measure", "measurement stopped — class switched")
         # Start from the global (profile-free) values so nothing the
         # previous profile set survives into one that doesn't set it.
         from .bot import BotConfig
@@ -1033,7 +1039,10 @@ class BotHost:
         self.config.bot = bot_cfg
         save_config(self.config)
         self.bus.emit("bot", f"class: {name} ({_kit_summary(cfg)})")
+        # The kit owns the skills and move keys: every client re-reads them.
         self._send_class()
+        self._send_skills()
+        self._send_config()
 
     def _patrol_policy_set(self, policy: str = "", temp=None) -> None:
         cfg = self.bot_config
@@ -1205,7 +1214,7 @@ class BotHost:
     def _skills_target(self):
         """The skill book the Skills panel edits: the active profile's own
         kit when one is active (seeded from the global book on first
-        edit), else the global book."""
+        edit), else the global book. Only call it to write."""
         cfg = self.bot_config
         profile = (cfg.class_profiles or {}).get(cfg.class_active)
         if profile is None:
@@ -1219,15 +1228,17 @@ class BotHost:
         return profile["skills"], cfg.class_active
 
     def _send_skills(self) -> None:
-        target, _ = self._skills_target()
+        """The book the bot uses. Read-only: a profile inheriting the
+        global book is shown as such, not seeded (that happens on the
+        first edit)."""
+        cfg = self.bot_config
+        profile = (cfg.class_profiles or {}).get(cfg.class_active)
+        own = profile is not None and isinstance(profile.get("skills"), dict)
         payload = {
             "event": "skills",
-            "source": "global" if target is self.bot_config.skills
-            else self.bot_config.class_active,
-            "skills": {
-                n: (s.to_dict() if isinstance(s, Skill) else dict(s))
-                for n, s in target.items()
-            },
+            "source": cfg.class_active if profile is not None else "global",
+            "inherited": profile is not None and not own,
+            "skills": {n: s.to_dict() for n, s in cfg.skills.items()},
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
 
@@ -1389,9 +1400,12 @@ class BotHost:
             notify_callback=self.telegram.send_message,
             event_bus=self.bus,
         )
-        self.measurer = MoveMeasurer(
-            bot, on_event=lambda k, m: self.bus.emit(k, m)
-        )
+        def on_event(kind: str, msg: str) -> None:
+            self.bus.emit(kind, msg)
+            if msg.startswith("done"):
+                self._send_class()   # the measured-moves count changed
+
+        self.measurer = MoveMeasurer(bot, on_event=on_event)
         self.measurer.start()
         self.bus.emit("measure", "measuring — watch the character work each move")
 

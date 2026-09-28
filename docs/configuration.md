@@ -110,7 +110,10 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   every profile carries its kit, the top-level `skills`/`jump_key`/
   `up_jump_skill_key`/`flash_jump` keys are optional fallbacks (the
   dashboard's movekeys/skills editors write into the active profile
-  once one is active). See
+  once one is active). A profile **without** a `skills` entry uses the
+  global book; one **with** a `skills` entry — even `{}` — uses exactly
+  that kit (empty = no attacks). The first dashboard skill edit copies
+  the global book into an inheriting profile. See
   [bot-behavior.md](bot-behavior.md#class-profiles).
 - `walk_band_px` — walking distance: the bot flash-travels until inside
   this band, then walks the last stretch for a precise stop.

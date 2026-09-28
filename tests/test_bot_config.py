@@ -40,6 +40,29 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(cfg.teleport_cooldown, 0.8)
         self.assertEqual(cfg.class_profiles["hero"], {"travel": "flash"})
 
+    def test_profile_skills_survive_startup_without_global_book(self):
+        # The legacy attack_keys fallback must not replace the kit.
+        cfg = BotConfig.from_dict({"class": {
+            "active": "mage",
+            "profiles": {"mage": {"skills": {
+                "blink": {"key": "x", "kind": "attack"}}}},
+        }})
+        self.assertEqual(sorted(cfg.skills), ["blink"])
+
+    def test_empty_profile_kit_is_empty_not_global(self):
+        cfg = BotConfig.from_dict({
+            "skills": {"g": {"key": "g", "kind": "attack"}},
+            "class": {"active": "mage", "profiles": {"mage": {"skills": {}}}},
+        })
+        self.assertEqual(cfg.skills, {})
+
+    def test_profile_without_skills_inherits_global(self):
+        cfg = BotConfig.from_dict({
+            "skills": {"g": {"key": "g", "kind": "attack"}},
+            "class": {"active": "hero", "profiles": {"hero": {"travel": "flash"}}},
+        })
+        self.assertEqual(sorted(cfg.skills), ["g"])
+
     def test_reach_path_is_per_profile(self):
         cfg = BotConfig.from_dict({"class": {
             "active": "mage",

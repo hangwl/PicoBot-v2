@@ -1046,6 +1046,84 @@ class HostCommandTests(unittest.TestCase):
             self.assertIsNone(cfg.teleport_key)
             self.assertNotIn("blink", cfg.skills)
 
+    def _events(self, name):
+        return [json.loads(m[5:]) for m in self.sent
+                if m.startswith("dash|") and f'"event": "{name}"' in m]
+
+    def test_class_switch_resyncs_skills_and_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.config.bot = {"jump_key": "space"}
+            self.host.bot_config.class_profiles = {
+                "mage": {"jump_key": "c",
+                         "skills": {"blink": {"key": "x", "kind": "attack"}}},
+                "hero": {"skills": {"slash": {"key": "a", "kind": "attack"}}},
+            }
+            self.host._class_use("mage")
+            self.sent.clear()
+            self.host._class_use("hero")
+            skills = self._events("skills")[-1]
+            self.assertEqual(skills["source"], "hero")
+            self.assertEqual(list(skills["skills"]), ["slash"])
+            self.assertEqual(self._events("config")[-1]["config"]["jump_key"],
+                             "space")
+
+    def test_emptied_profile_kit_matches_what_the_bot_uses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.config.bot = {
+                "skills": {"g": {"key": "g", "kind": "attack"}},
+            }
+            self.host.bot_config.class_profiles = {
+                "hero": {"skills": {"slash": {"key": "a", "kind": "attack"}}},
+                "mage": {},
+            }
+            self.host._class_use("hero")
+            self.host._handle_command("skills|del|slash")
+            self.host._class_use("mage")
+            self.host._class_use("hero")        # re-apply the emptied kit
+            self.assertEqual(self.host.bot_config.skills, {})
+            self.assertEqual(self._events("skills")[-1]["skills"], {})
+
+    def test_showing_an_inheriting_profile_does_not_seed_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.config.bot = {
+                "skills": {"g": {"key": "g", "kind": "attack"}},
+            }
+            self.host.bot_config.class_profiles = {"hero": {"travel": "flash"}}
+            self.host._class_use("hero")
+            self.host._handle_command("skills|list")
+            shown = self._events("skills")[-1]
+            self.assertTrue(shown["inherited"])
+            self.assertEqual(list(shown["skills"]), ["g"])
+            self.assertNotIn("skills", self.host.bot_config.class_profiles["hero"])
+            # The first edit gives the profile its own kit.
+            self.host._handle_command(
+                'skills|set|{"name":"p","key":"p","kind":"attack"}')
+            self.assertEqual(
+                sorted(self.host.bot_config.class_profiles["hero"]["skills"]),
+                ["g", "p"])
+            self.assertFalse(self._events("skills")[-1]["inherited"])
+
+    def test_class_switch_stops_a_running_measurement(self):
+        self.host.bot_config.class_profiles = {"hero": {"travel": "flash"}}
+        measurer = Mock(running=Mock(return_value=True))
+        self.host.measurer = measurer
+        self.host._class_use("hero")
+        measurer.stop.assert_called_once()
+
+    def test_finished_measurement_refreshes_measured_count(self):
+        self.host._feed = Mock()
+        with patch("picobot.bot.SmartBot"),                 patch("picobot.bot.measure.MoveMeasurer") as mm:
+            self.host._measure_start()
+        on_event = mm.call_args.kwargs["on_event"]
+        self.sent.clear()
+        on_event("measure", "measuring moves — keep the game focused")
+        self.assertEqual(self._events("class"), [])
+        on_event("measure", "done — reach saved. Measured: flash")
+        self.assertEqual(len(self._events("class")), 1)
+
     def test_profile_edits_leave_the_global_book_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)

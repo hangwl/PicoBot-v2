@@ -329,10 +329,18 @@ function SkillsPage({ s }: { s: AppState }) {
   return (
     <div class="form">
       <p class="muted">
-        Editing {s.skillSource === "global" ? "the global skills" : `${s.skillSource}'s kit`}.
+        {s.skillSource === "global"
+          ? "Editing the global skills."
+          : s.skillsInherited
+            ? `${s.skillSource} uses the global skills. Your first change gives it its own kit.`
+            : `Editing ${s.skillSource}'s kit.`}
       </p>
       <ul class="rows">
-        {!names.length && <li class="muted">Add your attack and buff keys below.</li>}
+        {!names.length && (
+          <li class="muted">
+            No skills — the bot won't attack. Add your attack and buff keys below.
+          </li>
+        )}
         {names.map((n) => {
           const sk = s.skills[n];
           return (

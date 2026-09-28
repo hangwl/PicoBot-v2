@@ -171,9 +171,11 @@ class BotConfig:
                     cfg.flash_jump_key = str(v) if v else None
                 if "enabled" in fj:
                     cfg.flash_jump_enabled = bool(fj["enabled"])
-            if isinstance(profile.get("skills"), dict) and profile["skills"]:
-                # The profile owns the character's kit: it replaces the
-                # global skill book (per-map overrides still merge on top).
+            if isinstance(profile.get("skills"), dict):
+                # A skills entry — even an empty one — means the profile
+                # owns the character's kit: it replaces the global book
+                # (per-map overrides still merge on top). No entry
+                # inherits the global book.
                 from .skills import Skill
 
                 cfg.skills = {
@@ -248,6 +250,12 @@ class BotConfig:
                 name: Skill.from_dict(name, spec)
                 for name, spec in data["skills"].items()
             }
+        else:
+            # No explicit skills map: synthesize from the (possibly
+            # overridden) legacy key lists — before the class profile,
+            # which may replace the book.
+            cfg.skills = {}
+            cfg.__post_init__()
         if isinstance(data.get("rotation"), dict):
             cfg.rotation = Rotation.from_dict(data["rotation"])
         if "flash_jump" in data and isinstance(data["flash_jump"], dict):
@@ -274,11 +282,6 @@ class BotConfig:
             cfg.active_map = str(v) if v else None
         if "auto_select_map" in data:
             cfg.auto_select_map = bool(data["auto_select_map"])
-        if not (isinstance(data.get("skills"), dict) and data["skills"]):
-            # No explicit skills map: rebuild from the (possibly overridden)
-            # legacy key lists.
-            cfg.skills = {}
-        cfg.__post_init__()
         return cfg
 
 

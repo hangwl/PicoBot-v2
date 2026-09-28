@@ -69,6 +69,7 @@ export interface AppState {
   temp: number;
   measured: number;
   skillSource: string;
+  skillsInherited: boolean;
   skills: Record<string, SkillSpec>;
   ports: HostPort[];
   windows: string[];
@@ -111,6 +112,7 @@ const initial: AppState = {
   temp: 1,
   measured: 0,
   skillSource: "global",
+  skillsInherited: false,
   skills: {},
   ports: [],
   windows: [],
@@ -351,6 +353,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
     case "skills":
       set({
         skillSource: (p.source as string) ?? "global",
+        skillsInherited: Boolean(p.inherited),
         skills: (p.skills as Record<string, SkillSpec>) ?? {},
       });
       return;
