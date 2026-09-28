@@ -1284,6 +1284,20 @@ class BotHost:
             return
         # bot.config is the same BotConfig — live fields, nothing else to do.
         bot_cfg = getattr(self.config, "bot", None) or {}
+        profile = (cfg.class_profiles or {}).get(cfg.class_active)
+        if profile is not None:
+            # A profile is active: the movement keys belong to its kit —
+            # mirror the edits into the profile and persist the class block.
+            for k in ("jump_key", "up_jump_skill_key"):
+                if k in changed:
+                    profile[k] = changed[k]
+            if "flash_jump" in changed:
+                fj = dict(profile.get("flash_jump") or {})
+                fj.update(changed["flash_jump"])
+                profile["flash_jump"] = fj
+            cls = dict(bot_cfg.get("class") or {})
+            cls["profiles"] = cfg.class_profiles
+            bot_cfg["class"] = cls
         if "jump_key" in changed:
             bot_cfg["jump_key"] = cfg.jump_key
         if "up_jump_skill_key" in changed:

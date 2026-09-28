@@ -152,6 +152,18 @@ class BotConfig:
                 cfg.teleport_key = str(k) if k else None
             if "teleport_cooldown" in profile:
                 cfg.teleport_cooldown = float(profile["teleport_cooldown"])
+            if "jump_key" in profile:
+                cfg.jump_key = str(profile["jump_key"] or "space")
+            if "up_jump_skill_key" in profile:
+                k = profile["up_jump_skill_key"]
+                cfg.up_jump_skill_key = str(k) if k else None
+            if isinstance(profile.get("flash_jump"), dict):
+                fj = profile["flash_jump"]
+                if "key" in fj:
+                    v = fj["key"]
+                    cfg.flash_jump_key = str(v) if v else None
+                if "enabled" in fj:
+                    cfg.flash_jump_enabled = bool(fj["enabled"])
             if isinstance(profile.get("skills"), dict) and profile["skills"]:
                 # The profile owns the character's kit: it replaces the
                 # global skill book (per-map overrides still merge on top).

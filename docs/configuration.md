@@ -20,6 +20,8 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
         "default": {"travel": "flash"},
         "mage": {"travel": "teleport", "air_attacks": false,
                  "teleport_key": "shift", "teleport_cooldown": 0.8,
+                 "jump_key": "space", "up_jump_skill_key": "alt",
+                 "flash_jump": {"key": null, "enabled": false},
                  "skills": {"blink": {"key": "shift", "kind": "movement"},
                             "main": {"key": "a", "kind": "attack"}}}
       }
@@ -104,8 +106,13 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   are planned only when no jump/rope-lift path is within this much
   cheaper. Set 0 to allow ropes freely.
 - `class` — named class profiles with an active selector; the active
-  profile overlays `travel` (flash|teleport|walk), `air_attacks` and the
-  teleport keys. See
+  profile overlays `travel` (flash|teleport|walk), `air_attacks`, the
+  teleport keys, **its own movement keys** (`jump_key`,
+  `up_jump_skill_key`, `flash_jump`) and **its own `skills` kit**. When
+  every profile carries its kit, the top-level `skills`/`jump_key`/
+  `up_jump_skill_key`/`flash_jump` keys are optional fallbacks (the
+  dashboard's movekeys/skills editors write into the active profile
+  once one is active). See
   [bot-behavior.md](bot-behavior.md#class-profiles).
 - `walk_band_px` — walking distance: the bot flash-travels until inside
   this band, then walks the last stretch for a precise stop.

@@ -418,6 +418,27 @@ class HostCommandTests(unittest.TestCase):
                     if e["kind"] == "bot"]
             self.assertTrue(any("class: mage" in m for m in msgs))
 
+    def test_profile_movement_keys_applied_and_edited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.bot_config.class_profiles = {
+                "mage": {"travel": "teleport", "teleport_key": "shift",
+                         "jump_key": "space", "up_jump_skill_key": "alt",
+                         "flash_jump": {"key": None, "enabled": False}},
+            }
+            self.host._class_use("mage")
+            cfg = self.host.bot_config
+            self.assertEqual(
+                (cfg.jump_key, cfg.up_jump_skill_key,
+                 cfg.flash_jump_enabled), ("space", "alt", False))
+            # A movekeys edit lands in the profile's kit and persists.
+            self.host._handle_command(
+                'movekeys|set|{"up_jump_skill_key":"ctrl"}')
+            self.assertEqual(cfg.up_jump_skill_key, "ctrl")
+            saved = (self.host.config.bot or {}).get("class", {}) \
+                .get("profiles", {}).get("mage", {})
+            self.assertEqual(saved.get("up_jump_skill_key"), "ctrl")
+
     def test_profile_skills_applied_on_class_use(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)
