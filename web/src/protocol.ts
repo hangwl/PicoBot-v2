@@ -89,7 +89,8 @@ export interface AppState {
   logFilter: LogFilter;
   viewMode: ViewMode;
   canvasMode: CanvasMode;
-  tab: "run" | "view" | "skills" | "log" | "pad";
+  /** Hash route: home | control | setup | setup/<page> | log. */
+  route: string;
 }
 
 const initial: AppState = {
@@ -130,7 +131,7 @@ const initial: AppState = {
   logFilter: "info",
   viewMode: "minimap",
   canvasMode: "none",
-  tab: "run",
+  route: readRoute(),
 };
 
 let state: AppState = initial;
@@ -186,6 +187,19 @@ function setFrame(next: Frame) {
   frameListeners.forEach((l) => l());
   prev?.bitmap.close();
 }
+
+// -- Routing ----------------------------------------------------------------
+// The hash holds the screen so the phone's back button walks back through
+// it (setup page → setup list → previous tab).
+function readRoute(): string {
+  return location.hash.replace(/^#\/?/, "") || "home";
+}
+
+export function go(route: string) {
+  if (readRoute() !== route) location.hash = `/${route}`;
+}
+
+window.addEventListener("hashchange", () => set({ route: readRoute() }));
 
 // -- WebSocket --------------------------------------------------------------
 let ws: WebSocket | null = null;
@@ -260,8 +274,14 @@ function onFrame(buf: ArrayBuffer) {
   const decoded = decodeFrame(buf);
   if (!decoded) return;
   const { meta, jpeg } = decoded;
+  const hazard = meta.hazard ? String(meta.hazard) : "none";
+  if (hazard !== "none" && state.hazard === "none") {
+    // A new hazard needs a human: bring up the pad and buzz the phone.
+    go("control");
+    navigator.vibrate?.([200, 100, 200]);
+  }
   set({
-    hazard: meta.hazard ? String(meta.hazard) : "none",
+    hazard,
     botState: meta.state ? String(meta.state) : "–",
     viewMode: (meta.mode as ViewMode) ?? state.viewMode,
   });

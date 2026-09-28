@@ -9,7 +9,7 @@ export default defineConfig({
     overrides: [
       {
         // NumberField is guarded (parseFloat + isFinite + min/max clamp).
-        files: ["src/panels.tsx"],
+        files: ["src/setup.tsx"],
         rules: ["react-doctor/no-unguarded-numeric-input-parse"],
       },
     ],

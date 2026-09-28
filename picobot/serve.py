@@ -758,6 +758,15 @@ class BotHost:
             (s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in entry.platforms
         ]
 
+    @staticmethod
+    def _bot_status(bot) -> dict:
+        """FSM state + hazard for views that don't carry the bot's viz
+        snapshot — a rune must stay visible while it's solved in Window
+        view."""
+        if bot is None:
+            return {"state": "IDLE"}
+        return {"state": bot.viz.get("state"), "hazard": bot.viz.get("hazard")}
+
     def _provide_frame(self, mode: str):
         bot = self.bot
         if mode == "title":
@@ -784,6 +793,7 @@ class BotHost:
                 "img": annotate_title(img),
                 "layout": self._layout_source(),
                 **meta,
+                **self._bot_status(bot),
             }
         if mode == "window":
             meta = self._map_meta()
@@ -803,7 +813,10 @@ class BotHost:
             else:
                 for key in _MINIMAP_OVERLAYS:
                     meta.pop(key, None)
-            return {"img": img, "layout": self._layout_source(), **meta}
+            return {
+                "img": img, "layout": self._layout_source(), **meta,
+                **self._bot_status(bot),
+            }
         band = band_rect = None
         region = None
         if bot is not None:

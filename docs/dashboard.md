@@ -6,19 +6,6 @@ strings; pushes are `dash|{json}` text messages plus binary view frames.
 The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
 `ws_tls` is on.
 
-## Setup flow
-
-The left column walks the end-to-end setup as a checklist: **identify**
-the map (title OCR) → **draw platforms** → **place anchors** →
-**measure moves** → pick the **class profile** (or create one with
-**+ new class…**: name, travel style, air attacks, teleport key —
-created, persisted and applied live) and **patrol policy** → **Start**. Each row shows its state (green = done) with a one-click
-jump to the tool. The status strip under the header shows the detected
-map, the active class kit, and the patrol policy at a glance. Switching
-the class profile applies **live** — the bot is stopped first (the kit
-decides which moves exist), the profile is persisted to config, and the
-planner rebuilds with the new kit.
-
 ## The app
 
 The dashboard is a Preact + TypeScript app in `web/`, served from
@@ -27,43 +14,68 @@ The dashboard is a Preact + TypeScript app in `web/`, served from
 without it the host serves a page saying so. The protocol is versioned via the
 `hello` handshake and documented in [protocol.md](protocol.md).
 
-## Panels
+## Layout
 
-- **Connection** — Pico DATA serial port (or *Auto* probe, which skips
-  the port already open) and game window title; persisted to
-  `config.json`. The window can't be switched while the bot runs.
-- **Map** — the single source of truth: selector pins a map
-  (`active_map`), `auto-detect` defers to live identity, `+ new map…`
-  names the next layout save (which then pins the new map). `detected:` shows
-  `alias (ocr|pin) · title "…" 98%` — the resolved map, how it was
-  resolved, the accepted title and its match score, and `reading title…`
-  while a vote is in progress.
-- **View** — frame views + layout tools:
-  - **Panel** (default) — the whole located minimap panel: title strip
-    on top (green boxes = accepted text lines, orange = the OCR crop),
-    a separator at the panel's divider row, then the annotated minimap
-    (player dot, anchors, nav target, hazards,
-    platforms). Its right edge extends to the title's end so long names
-    aren't clipped. Platform drags land correctly — frames carry an
-    `ox`/`oy` minimap offset that the client subtracts.
-  - **Title** — the raw segmented band as OCR sees it (verification).
-  - **Window** — the full client area, overlays moved onto the minimap.
-  - Drawing tools (plats, anchors, route) only act in the Panel view;
-    arming one switches to it.
-  - **Place anchors** — click to add a patrol checkpoint (snaps to the
-    drawn platform); Undo anchor removes the last one.
-  - **Route** — overlays the movement graph (greens: up flash / up-side
-    flash / rope lift; oranges: down-jump / drop; purples: jump / flash /
-    double flash); click the Panel view to preview a route (yellow).
-    While patrolling, the full loop plan is drawn olive and the current
-    segment yellow.
-  - fps selector persists `view_fps` (1–30).
-- **Bot** — Start/Stop (enabled by the live running state).
-- **Skills** — registry for attacks, buffs, summons; **Move keys** —
-  jump / rope lift / flash keys and nav radius (only edited fields are
-  saved; with a class profile active they go into that profile).
-- **Remote input** — arrow pad + key buttons (rune solving from a phone).
-- **Events** — structured log with severity tabs.
+Mobile-first. On a phone the app is four screens behind a bottom nav;
+from 900px wide it becomes two columns — the live column (view, drawing
+tools, status, Start/Stop) on the left and Control / Setup / Log tabbed
+on the right. The screen lives in the URL hash (`#/home`, `#/control`,
+`#/setup/skills`, `#/log`), so the phone's back button walks back through
+it and a screen can be bookmarked.
+
+A sticky top bar always shows the bot's state (Farming / Traveling /
+Paused / Stopped / Offline, with a coloured dot), the map and the link.
+
+- **Home** — the live view, view switcher (Panel / Window / Title) and
+  fps, a status list (map + how it was identified, class kit, route
+  size, last skill cast) and one large Start/Stop button.
+- **Control** — rune solving on one screen: hazard banner, a compact
+  view, the arrow pad, quick keys (jump key, ctrl, shift, enter) and a
+  free-form key field. A new hazard (rune, another player, verification
+  prompt) jumps here from any screen and vibrates the phone where the
+  browser allows it; the bot resumes by itself once it clears. The Control
+  tab carries a red badge while a hazard is active.
+- **Setup** — a readiness banner (map identified → platforms → anchors →
+  moves measured; tap it for the next step) over a list of one-off tasks,
+  each opening its own page:
+  - **Map and layout** — pin a map, `Auto-detect` (live identity), or
+    `New map…` (names the next layout save and pins it); detected map,
+    how it was resolved, the accepted title and score; Save layout /
+    Re-detect / Forget (confirmed).
+  - **Class** — pick or create a profile (name, movement, air attacks,
+    teleport key). Switching applies live and stops the bot first.
+  - **Skills** — the active skill book (the profile's kit when one is
+    active); add or remove (confirmed) attacks, buffs, summons.
+  - **Move keys** — jump / rope lift / flash keys and arrival radius; only
+    edited fields are saved.
+  - **Measure moves**, **Patrol** (loop order + temperature),
+    **Connection** (Pico serial port, *Find the Pico* auto-probe that
+    skips the open port, game window — locked while the bot runs).
+- **Log** — the event log with severity filters; while scrolled up it
+  stops following and shows an "N new" chip that jumps back down.
+
+### Drawing (desktop)
+
+Layout drawing is desktop-only: the tools sit under the view in the live
+column and act in the Panel view (arming one switches to it).
+
+- **Draw platforms** — drag along each platform line; stays armed for
+  successive drags. **Undo platform** pops the last one.
+- **Place anchors** — click to add a patrol checkpoint (snaps to the
+  drawn platform); **Undo anchor** removes the last one.
+- **Preview route** — overlays the movement graph (greens: up flash /
+  up-side flash / rope lift; oranges: down-jump / drop; purples: jump /
+  flash / double flash); click to preview a route (yellow). While
+  patrolling, the full loop plan is drawn olive and the current segment
+  yellow.
+
+Frames carry an `ox`/`oy` minimap offset that the client subtracts, and
+the view is letterboxed to fit the screen, so drags land where drawn.
+The **Panel** view is the whole located minimap panel (title strip with
+green boxes = accepted text lines, orange = the OCR crop, then the
+annotated minimap); **Title** is the raw segmented band as OCR sees it;
+**Window** is the full client area with overlays moved onto the minimap.
+All three carry the bot's state and hazard.
 
 ## Event log
 

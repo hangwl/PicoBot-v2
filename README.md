@@ -40,24 +40,19 @@ override the remembered values and are persisted the same way.
 
 ## The dashboard at a glance
 
-- **Connection** — Pico DATA serial port + game window (persisted).
-- **Map** — the single source of truth for which map every section acts on:
-  pin a map, `auto-detect` defers to live identity (the OCR'd map
-  title), and `detected:` shows the map, how it was resolved, and the title.
-- **View** — the **Panel** feed composites the located minimap panel:
-  title strip on top (text lines boxed, orange = OCR crop), a divider
-  separator, then the annotated minimap below — its right edge extends to
-  the title's end so long names aren't clipped. Also **Title** (raw
-  segmented band) and **Window** (full client).
-  Layout tools: *Save layout* / *Forget* / *Re-detect* / *Draw plats* /
-  *Place anchors* / route preview.
-- **Bot** — Start/Stop the smart bot.
-- **Measure moves** — the character works each move kind so the planner
-  learns its reach.
-- **Skills** — registry for attacks, buffs, summons, movement keys.
-- **Remote input** — arrow pad + key buttons (rune solving from a phone).
-- **Events** — levelled log (`debug < info < warn < error`) with
-  severity tabs; HID/serial chatter sits at debug.
+Mobile-first: on a phone it's four screens behind a bottom nav; on a
+desktop, two columns. See [docs/dashboard.md](docs/dashboard.md).
+
+- **Home** — live view, bot status, one big Start/Stop.
+- **Control** — rune solving: hazard banner, view, arrow pad and keys.
+  A rune or another player jumps here and vibrates the phone.
+- **Setup** — readiness checklist plus pages for map and layout, class,
+  skills, move keys, measuring moves, patrol and connection.
+- **Log** — levelled events (`debug < info < warn < error`) with
+  severity filters; HID/serial chatter sits at debug.
+
+Drawing platforms and placing anchors happens on the desktop, with the
+tools under the view.
 
 ## How it works
 

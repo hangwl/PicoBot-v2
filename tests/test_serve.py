@@ -1004,6 +1004,17 @@ class HostCommandTests(unittest.TestCase):
             snap = self.host._provide_frame("window")
         self.assertEqual(snap["platforms"], [(10, 120, 110, 120)])
         self.assertEqual(snap["anchors"], [(15, 110)])
+        self.assertEqual(snap["state"], "IDLE")
+
+    def test_window_frame_carries_bot_hazard(self):
+        bot = Mock()
+        bot._window_capture.return_value = np.zeros((600, 800, 3), dtype=np.uint8)
+        bot.minimap.region = (10, 70, 200, 100)
+        bot.viz = {"state": "PAUSE", "hazard": "rune"}
+        self.host.bot = bot
+        with patch.object(self.host, "_map_meta", return_value={"map": "m1"}):
+            snap = self.host._provide_frame("window")
+        self.assertEqual((snap["state"], snap["hazard"]), ("PAUSE", "rune"))
 
     def test_title_frame_drops_minimap_overlays(self):
         feed = Mock()
