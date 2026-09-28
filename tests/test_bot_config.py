@@ -42,6 +42,16 @@ class BotConfigTests(unittest.TestCase):
         self.assertEqual(cfg.teleport_cooldown, 0.8)
         self.assertEqual(cfg.class_profiles["hero"], {"travel": "flash"})
 
+    def test_patrol_policy_parsed_and_validated(self):
+        cfg = BotConfig.from_dict({"patrol_policy": "greedy",
+                                   "patrol_weight_temp": 0.5})
+        self.assertEqual(cfg.patrol_policy, "greedy")
+        self.assertEqual(cfg.patrol_weight_temp, 0.5)
+        self.assertEqual(
+            BotConfig.from_dict({"patrol_policy": "bogus"}).patrol_policy,
+            "weighted",
+        )
+
     def test_teleport_without_key_falls_back_to_flash(self):
         cfg = BotConfig.from_dict({"class": {
             "active": "mage",

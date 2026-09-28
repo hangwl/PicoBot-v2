@@ -53,6 +53,9 @@ what was tried and what was learned in `docs/learnings.md` instead.
   woven after the flash triggers** (never before: it eats the re-press
   window). Walk only for short final approaches. Delays are log-normal
   (`timing.human_between`/`human_delay`), never flat `uniform`.
+- **Loop ordering is a policy** (`patrol_policy`): `weighted` roulette
+  (∝ 1/cost^temp, default) or `greedy` cheapest-next — both ban
+  unreachable anchors and execute the plan strictly.
 - **Always on the move, strictly on plan**: the patrol executes a
   pre-planned anchor loop leg by leg; the next loop is planned before the
   current one ends, and with no planned path the bot halts (break) rather

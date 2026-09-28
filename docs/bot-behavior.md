@@ -1,6 +1,20 @@
 # Bot behavior
 
-## Continuous patrol (`patrol.py`)
+## Continuous patrol
+
+**Loop ordering policy** (`patrol_policy`):
+
+- `weighted` (default) — the next anchor is drawn by roulette with
+  probability ∝ 1/route-cost^`patrol_weight_temp` (temp 1 = 1/cost).
+  Near anchors are likely, far anchors keep a real chance — nothing is
+  neglected, and the loop never becomes a metronome. Lower the temp
+  toward uniform randomness; raise it toward greedy.
+- `greedy` — always the cheapest next anchor, with ±20% cost jitter for
+  variety.
+
+Both ban unreachable anchors for 30s, execute the plan strictly
+(splice-on-fail, 3 misses → ban), and pipeline the next loop before the
+current one ends. (`patrol.py`)
 
 With ≥2 anchors and drawn platforms the bot strictly follows a planned
 loop:

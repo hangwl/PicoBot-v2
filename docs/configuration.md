@@ -35,6 +35,8 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "nav_gap_px": 30,
     "nav_double_gap_px": 48,
     "rope_penalty": 5,
+    "patrol_policy": "weighted",
+    "patrol_weight_temp": 1.0,
     "nav_reach_file": "nav_reach.json",
     "anchor_float_px": 4,
     "flash_repress_seconds": 0.15,
@@ -92,6 +94,10 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
 - Vertical jumps that produce no progress twice in a row end the leg
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.
+- `patrol_policy` — loop ordering: `weighted` (roulette ∝ 1/cost, far
+  anchors stay in the draw) or `greedy` (cheapest next, ±20% jitter).
+  `patrol_weight_temp` tunes the roulette: lower → more uniform,
+  higher → more greedy.
 - `rope_penalty` — extra seconds added to every rope-climb edge; ropes
   are planned only when no jump/rope-lift path is within this much
   cheaper. Set 0 to allow ropes freely.

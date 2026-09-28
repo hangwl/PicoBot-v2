@@ -54,6 +54,8 @@ class BotConfig:
     nav_gap_px: float = 30.0              # widest gap a flash jump clears
     nav_double_gap_px: float = 48.0       # widest gap a double flash clears
     rope_penalty: float = 5.0             # extra climb cost — ropes are a last resort
+    patrol_policy: str = "weighted"       # weighted | greedy — loop ordering
+    patrol_weight_temp: float = 1.0       # roulette temperature (1 = 1/cost)
     nav_reach_file: str = "nav_reach.json"
     anchor_float_px: float = 4.0           # anchors hover this far above the platform line
     flash_repress_seconds: float = 0.15    # jump -> flash re-press gap
@@ -175,6 +177,7 @@ class BotConfig:
             "weave_double_chance", "anchor_float_px",
             "walk_band_px",
             "flash_repress_seconds", "combo_repress_seconds", "rope_penalty",
+            "patrol_weight_temp",
         )
         for name in floats:
             if name in data:
@@ -185,6 +188,9 @@ class BotConfig:
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))
+        if "patrol_policy" in data:
+            v = str(data["patrol_policy"])
+            cfg.patrol_policy = v if v in ("weighted", "greedy") else "weighted"
         if "attack_keys" in data:
             cfg.attack_keys = [str(k) for k in data["attack_keys"]]
         if "buff_keys" in data:

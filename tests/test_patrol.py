@@ -110,11 +110,29 @@ class PatrolTests(unittest.TestCase):
         # Regression: arriving 2px from the next up-flash takeoff stalled
         # the bot (no-op walk leg re-planned forever).
         bot = PatrolBot([FLOOR, MID], (10, 100), [(78, 100), (80, 84)], rope=0)
+        bot.config.patrol_policy = "greedy"      # deterministic order
         p = Patrol(bot, rng=random.Random(0))
         for _ in range(6):
             p.tick()
         self.assertIn("up_flash", bot.moves)
         self.assertGreaterEqual(sum(l.startswith("Checkpoint:") for l in bot.log_lines), 2)
+
+    def test_weighted_policy_gives_far_anchors_a_real_draw(self):
+        # P(next) ∝ 1/cost: a far anchor (cost 10 vs 1) still gets picked
+        # on a high roulette draw instead of being neglected.
+        bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (180, 100)])
+        p = Patrol(bot)
+        p.rng = Mock()
+        p.rng.random.return_value = 0.95
+        self.assertEqual(p._pick_next({0: 1.0, 1: 10.0}, [0, 1]), 1)
+        p.rng.random.return_value = 0.1
+        self.assertEqual(p._pick_next({0: 1.0, 1: 10.0}, [0, 1]), 0)
+
+    def test_greedy_policy_picks_cheapest(self):
+        bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (180, 100)])
+        bot.config.patrol_policy = "greedy"
+        p = Patrol(bot, rng=random.Random(0))
+        self.assertEqual(p._pick_next({0: 1.0, 1: 10.0}, [0, 1]), 0)
 
     def test_repeated_misses_ban_the_anchor(self):
         bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)

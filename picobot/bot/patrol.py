@@ -208,21 +208,21 @@ class Patrol:
         ]
         segments, flat = [], []
         while remaining:
-            costs = {
-                i: graph.route_cost(cur, anchors[i]) * (1 + self.rng.uniform(-0.2, 0.2))
-                for i in remaining
-            }
-            nxt = min(remaining, key=costs.get)
-            if costs[nxt] == float("inf"):
+            costs = {i: graph.route_cost(cur, anchors[i]) for i in remaining}
+            # Unreachable anchors can't be picked by either policy — ban
+            # them up front so the loop always makes progress.
+            for i in [i for i in remaining if costs[i] == float("inf")]:
                 why = (
                     "not on a drawn platform — re-place it"
-                    if graph.locate(*anchors[nxt]) is None
+                    if graph.locate(*anchors[i]) is None
                     else "no route from here"
                 )
-                bot.log(f"Patrol: skipping {rot.anchors[nxt].name} for a while ({why})")
-                bot._ckpt_ban[nxt] = now + 30.0
-                remaining.remove(nxt)
-                continue
+                bot.log(f"Patrol: skipping {rot.anchors[i].name} for a while ({why})")
+                bot._ckpt_ban[i] = now + 30.0
+                remaining.remove(i)
+            if not remaining:
+                break
+            nxt = self._pick_next(costs, remaining)
             recorded = rot.legs.get((cur_i, nxt)) if cur_i is not None else None
             if recorded is not None:
                 segments.append((nxt, None, cur_i))
@@ -234,6 +234,28 @@ class Patrol:
             cur = anchors[nxt]
             cur_i = nxt
         return segments, flat
+
+    def _pick_next(self, costs: dict, remaining: list) -> int:
+        """Loop-order policy: ``weighted`` roulette (P ∝ 1/cost^temp — far
+        anchors stay in the draw instead of being neglected) or ``greedy``
+        cheapest-next with ±20% cost jitter for variety."""
+        cfg = self.bot.config
+        if getattr(cfg, "patrol_policy", "weighted") == "greedy":
+            jittered = {
+                i: costs[i] * (1 + self.rng.uniform(-0.2, 0.2))
+                for i in remaining
+            }
+            return min(remaining, key=jittered.get)
+        temp = max(0.05, getattr(cfg, "patrol_weight_temp", 1.0))
+        weights = {i: 1.0 / (max(costs[i], 0.5) ** temp) for i in remaining}
+        total = sum(weights.values())
+        r = self.rng.random() * total
+        acc = 0.0
+        for i, w in weights.items():
+            acc += w
+            if r <= acc:
+                return i
+        return next(iter(weights))
 
     def _plan_loop(self, graph, pos: Point) -> None:
         self.plan, _ = self._greedy(graph, pos, None)
