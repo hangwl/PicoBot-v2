@@ -454,39 +454,16 @@ class SmartBot(BotBase):
         cfg = self.config
         return self._nav_cache.get(
             self._current_map_entry(), self.minimap.region, self.reach,
-            cfg.wall_pad_px, cfg.rope_penalty,
+            cfg.rope_penalty,
             allow_flash=cfg.class_travel == "flash" and cfg.flash_jump_enabled,
             allow_teleport=cfg.class_travel == "teleport"
             and bool(cfg.teleport_key),
         )
 
-    def _map_walls(self) -> Optional[dict]:
-        entry = self._current_map_entry()
-        return entry.walls if entry is not None else None
-
     def _walk_span(self, x: float, y: float):
-        """Span travel flashes may use: the graph's clipped platform under
-        the player (wall zones respected), else the raw drawing."""
-        graph = self._nav_graph()
-        if graph is not None:
-            i = graph.locate(x, y)
-            if i is not None:
-                p = graph.platforms[i]
-                return (p.x0, p.x1)
+        """Span travel flashes may use: the drawn platform under the
+        player — its ends are the boundaries."""
         return platform_span_at(self._platform_segments_px(), x, y)
-
-    def _wall_limits(self) -> Tuple[float, float]:
-        """(left, right) x the bot must stay between: per-map walls (else
-        ``wall_zone_px`` edge margins), each padded ``wall_pad_px`` inward."""
-        cfg = self.config
-        walls = self._map_walls() or {}
-        map_w = self._region_wh()[0]
-        left = self._rx(walls["left"]) if walls.get("left") is not None else cfg.wall_zone_px
-        right = (
-            self._rx(walls["right"]) if walls.get("right") is not None
-            else map_w - cfg.wall_zone_px
-        )
-        return left + cfg.wall_pad_px, right - cfg.wall_pad_px
 
     def down_jump(self, img=None) -> None:
         if not self.is_window_focused():
@@ -1161,25 +1138,16 @@ class SmartBot(BotBase):
                 lo, hi = blo, bhi
         direction = self._weave_dir or random.choice(("left", "right"))
         if pos is not None:
-            # Wall zones: inside a left/right wall boundary the only sane
-            # facing is inward — overrides platform bounds and prevents
-            # wall-banging. Per-map walls (absolute x) replace the global
-            # edge margins; absent sides fall back to wall_zone_px.
-            left_wall, right_wall = self._wall_limits()
-            if pos[0] <= left_wall:
-                direction = "right"
-            elif pos[0] >= right_wall:
-                direction = "left"
-            elif pos[0] <= lo:
+            # The drawn platform's ends are the boundaries — bounce before
+            # a hop could leave the platform.
+            if pos[0] <= lo:
                 direction = "right"
             elif pos[0] >= hi:
                 direction = "left"
             elif random.random() < 0.06:
                 direction = "left" if direction == "right" else "right"
-            # Never start a hop that would land past the bounce range or
-            # inside a (padded) wall zone.
-            room_l = pos[0] - max(lo, left_wall)
-            room_r = min(hi, right_wall) - pos[0]
+            room_l = pos[0] - lo
+            room_r = hi - pos[0]
             if direction == "left" and room_l < self._hop_px <= room_r:
                 direction = "right"
             elif direction == "right" and room_r < self._hop_px <= room_l:
@@ -1299,15 +1267,10 @@ class SmartBot(BotBase):
             self._ckpt_ban[idx] = now + 30.0
             self._ckpt_idx = None
             return
-        # Head toward the checkpoint; walls still override the heading.
+        # Head toward the checkpoint; the drawn platform's ends bound it.
         dx = tx - pos[0]
         direction = self._weave_dir or ("right" if dx >= 0 else "left")
-        left_wall, right_wall = self._wall_limits()
-        if pos[0] <= left_wall:
-            direction = "right"
-        elif pos[0] >= right_wall:
-            direction = "left"
-        elif dx > cfg.nav_threshold_px:
+        if dx > cfg.nav_threshold_px:
             direction = "right"
         elif dx < -cfg.nav_threshold_px:
             direction = "left"

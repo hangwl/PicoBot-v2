@@ -152,12 +152,6 @@
         <label>drag a rect on the Window view</label>
       </div>
       <div class="row" style="margin-top:8px">
-        <button id="wallL" title="stand at the left wall, then click — player left of it always faces right">L wall</button>
-        <button id="wallR" title="stand at the right wall, then click — player right of it always faces left">R wall</button>
-        <button id="wallClear" title="remove all boundaries for this map">Clear</button>
-        <label>walls at player pos (uses Map selection)</label>
-      </div>
-      <div class="row" style="margin-top:8px">
         <button id="drawPlats" title="arm, then drag along each platform on the Minimap view — click again to stop">Draw plats</button>
         <button id="platUndo" title="remove the last drawn platform segment">Undo</button>
         <button id="platClear" title="remove all platforms for this map">Clear</button>
@@ -579,9 +573,6 @@ const layTarget = () => {
 $("layoutSave").onclick = () => send("layout|save" + layTarget());
 $("layoutClear").onclick = () => send("layout|clear" + layTarget());
 $("layoutReset").onclick = () => send("layout|reset");
-$("wallL").onclick = () => send("layout|wall|left" + layTarget());
-$("wallR").onclick = () => send("layout|wall|right" + layTarget());
-$("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 
 // --- Drag-to-draw platforms on the Minimap view ------------------------
 let platMode = false, platStart = null;

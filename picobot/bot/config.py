@@ -64,8 +64,6 @@ class BotConfig:
     weave_double_chance: float = 0.4      # P(2 attacks) per flash weave, else 1
     weave_range_px: int = 24              # fallback half-width around the anchor
     weave_edge_margin_px: int = 4         # stay this far inside platform bounds
-    wall_zone_px: int = 16                # force inward dir inside this edge zone
-    wall_pad_px: float = 3.0              # buffer beyond each drawn wall zone
 
     # -- Vision ----------------------------------------------------------------
     minimap_colors: MinimapColors = field(default_factory=MinimapColors)
@@ -174,7 +172,7 @@ class BotConfig:
             "up_jump_skill_cooldown", "nav_up_flash_px", "nav_rope_lift_px",
             "nav_up_side_dx_px", "nav_jump_px", "nav_gap_px", "nav_double_gap_px",
             "vert_jump_interval",
-            "weave_double_chance", "wall_pad_px", "anchor_float_px",
+            "weave_double_chance", "anchor_float_px",
             "walk_band_px",
             "flash_repress_seconds", "combo_repress_seconds", "rope_penalty",
         )
@@ -183,7 +181,7 @@ class BotConfig:
                 setattr(cfg, name, float(data[name]))
         ints = ("nav_threshold_px", "nav_stuck_limit",
                 "marker_inset_px", "weave_range_px", "weave_edge_margin_px",
-                "wall_zone_px", "name_scan_px", "debug_capture_max_events")
+                "name_scan_px", "debug_capture_max_events")
         for name in ints:
             if name in data:
                 setattr(cfg, name, int(data[name]))

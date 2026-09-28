@@ -92,12 +92,9 @@ class _VisionFeed:
 def _offset_meta(snap: dict, dx: int, dy: int) -> None:
     """Shift region-space overlay coords by (dx, dy) — used when the
     frame image is the panel composite (title zone above the map) so
-    platforms/walls/anchors still land on the minimap."""
+    platforms/anchors still land on the minimap."""
     if not dx and not dy:
         return
-    walls = snap.get("walls")
-    if walls:
-        snap["walls"] = {k: v + dx for k, v in walls.items()}
     for key in ("platforms", "ropes"):
         if snap.get(key):
             snap[key] = [
@@ -381,7 +378,7 @@ class BotHost:
             v = float(v)
             return int(round(v * span)) if 0.0 <= v <= 1.0 else int(round(v))
 
-        walls = anchors = platforms = ropes = None
+        anchors = platforms = ropes = None
         if entry is not None and entry.rotation.anchors and w and h:
             anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
         if entry is not None and entry.ropes and w and h:
@@ -390,15 +387,6 @@ class BotHost:
                  round(s[2] * w), round(s[3] * h))
                 for s in entry.ropes
             ]
-        if entry is not None and entry.walls and w:
-            walls = {
-                side: px(v, w)
-                for side, v in (
-                    ("left", entry.walls.get("left")),
-                    ("right", entry.walls.get("right")),
-                )
-                if isinstance(v, (int, float))
-            } or None
         conf = (
             res.score
             if entry is not None and res.title_map == entry.name else None
@@ -406,12 +394,7 @@ class BotHost:
         nav_edges = nav_route = None
         graph = self._nav_graph(entry, region)
         if graph is not None:
-            # Show the graph's clipped platforms — wall zones eat
-            # platform ends, and the overlay should reflect what the bot
-            # actually walks.
-            platforms = [
-                (p.x0, p.y0, p.x1, p.y1) for p in graph.platforms
-            ]
+            platforms = [(p.x0, p.y0, p.x1, p.y1) for p in graph.platforms]
         if self._nav_show:
             graph = self._nav_graph(entry, region)
             if graph is not None:
@@ -436,8 +419,6 @@ class BotHost:
             "map_conf": conf,
             "map_title": res.title,
             "no_rotation": not bool(rot.anchors),
-            "walls": walls,
-            "wall_pad": self.bot_config.wall_pad_px if walls else None,
             "anchors": anchors,
             "ropes": ropes,
         }
@@ -445,7 +426,7 @@ class BotHost:
     def _nav_graph(self, entry, region):
         cfg = self.bot_config
         return self._nav_cache.get(
-            entry, region, self.reach, cfg.wall_pad_px, cfg.rope_penalty,
+            entry, region, self.reach, cfg.rope_penalty,
             allow_flash=cfg.class_travel == "flash" and cfg.flash_jump_enabled,
             allow_teleport=cfg.class_travel == "teleport"
             and bool(cfg.teleport_key),
@@ -624,60 +605,6 @@ class BotHost:
         self._save_entry(entry)
         self.bus.emit("map", f"layout cleared for {entry.name}")
 
-    def _layout_set_wall(self, msg: str) -> None:
-        """layout|wall|left|right|clear[|<name>] — map boundaries.
-
-        ``left``/``right`` pin a wall at the player's current minimap x
-        (inside it the weave faces inward). ``clear`` removes them all.
-        Unlike the global ``wall_zone_px`` edge margins, these work on
-        maps whose play area doesn't span the minimap edge-to-edge. The
-        map's bottom needs no boundary: down-jumps only exist toward
-        drawn platforms below.
-        """
-        parts = msg.split("|", 3)
-        side = parts[2] if len(parts) > 2 else ""
-        name = parts[3].strip() if len(parts) > 3 else ""
-        if side not in ("left", "right", "clear"):
-            return False
-        entry, err = self._layout_target(name)
-        if entry is None:
-            self.bus.emit("error", err)
-            return
-        if side == "clear":
-            entry.walls = None
-            self._save_entry(entry)
-            self.bus.emit("map", f"walls cleared for {entry.name}")
-            return
-        pos = region = None
-        bot = self.bot
-        if bot is not None:
-            img = bot.viz.get("img")
-            pos = bot.minimap.player_pos(img) if img is not None else None
-            region = bot.minimap.region
-        feed = self._get_feed()
-        if pos is None and feed is not None:
-            img = feed.minimap_img()
-            pos = feed.minimap.player_pos(img) if img is not None else None
-        if not region and feed is not None:
-            region = feed.minimap.region
-        if pos is None or not region:
-            self.bus.emit(
-                "error", "no player position — can't place a wall"
-            )
-            return
-        span = region[2]
-        if not span:
-            self.bus.emit("error", "no minimap region — can't place a wall")
-            return
-        walls = dict(entry.walls or {})
-        v = pos[0]
-        walls[side] = round(max(0.0, min(1.0, v / span)), 4)
-        entry.walls = walls
-        self._save_entry(entry)
-        axis = "x"
-        self.bus.emit(
-            "map", f"{side} wall set at {axis}={v} for {entry.name}"
-        )
 
     def _minimap_frame_img(self):
         """Latest minimap image: the running bot's, else a feed capture."""
@@ -854,7 +781,6 @@ class BotHost:
             if img is None:
                 return {"state": "IDLE"}
             meta = self._map_meta()
-            meta.pop("walls", None)
             meta.pop("platforms", None)
             meta.pop("anchors", None)
             return {
@@ -864,7 +790,6 @@ class BotHost:
             }
         if mode == "window":
             meta = self._map_meta()
-            meta.pop("walls", None)   # minimap-relative — meaningless here
             meta.pop("platforms", None)
             if bot is not None:
                 img = bot._window_capture()
@@ -948,9 +873,6 @@ class BotHost:
             self._layout_save(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg == "layout|clear" or msg.startswith("layout|clear|"):
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
-        elif msg.startswith("layout|wall|"):
-            if self._layout_set_wall(msg) is False:
-                return False
         elif msg.startswith("layout|anchor|"):
             self._layout_anchor(msg)
         elif msg.startswith("layout|plat|"):
@@ -1199,9 +1121,6 @@ class BotHost:
         if "nav_threshold_px" in spec and spec["nav_threshold_px"] is not None:
             cfg.nav_threshold_px = min(15, max(2, int(spec["nav_threshold_px"])))
             changed["nav_threshold_px"] = cfg.nav_threshold_px
-        if "wall_zone_px" in spec and spec["wall_zone_px"] is not None:
-            cfg.wall_zone_px = min(60, max(0, int(spec["wall_zone_px"])))
-            changed["wall_zone_px"] = cfg.wall_zone_px
         if "dwell_weave" in spec:
             cfg.dwell_weave = bool(spec["dwell_weave"])
             changed["dwell_weave"] = cfg.dwell_weave
@@ -1217,7 +1136,7 @@ class BotHost:
             fj = dict(bot_cfg.get("flash_jump") or {})
             fj.update(changed["flash_jump"])
             bot_cfg["flash_jump"] = fj
-        for k in ("nav_threshold_px", "wall_zone_px", "dwell_weave"):
+        for k in ("nav_threshold_px", "dwell_weave"):
             if k in changed:
                 bot_cfg[k] = changed[k]
         self.config.bot = bot_cfg

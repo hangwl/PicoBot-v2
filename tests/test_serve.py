@@ -156,7 +156,6 @@ class PanelAssemblyTests(unittest.TestCase):
         from picobot.serve import _offset_meta
 
         snap = {
-            "walls": {"left": 20, "right": 180},
             "platforms": [(10, 60, 100, 60)],
             "anchors": [(40, 50)],
             "player": (80, 50),
@@ -165,7 +164,6 @@ class PanelAssemblyTests(unittest.TestCase):
         }
         snap["ropes"] = [(10, 60, 12, 20)]
         _offset_meta(snap, 7, 52)
-        self.assertEqual(snap["walls"], {"left": 27, "right": 187})
         self.assertEqual(snap["platforms"], [(17, 112, 107, 112)])
         self.assertEqual(snap["ropes"], [(17, 112, 19, 72)])
         self.assertEqual(snap["anchors"], [(47, 102)])
@@ -374,63 +372,6 @@ class HostCommandTests(unittest.TestCase):
         ]
         self.assertTrue(any("isn't verified" in m for m in msgs))
 
-    def test_wall_set_at_player_x_via_feed(self):
-        img = np.zeros((150, 200, 3), dtype=np.uint8)
-        feed = Mock()
-        feed.minimap_img.return_value = img
-        feed.minimap.player_pos.return_value = (50, 40)
-        feed.minimap.region = (0, 0, 200, 150)
-        self.host._feed = feed
-        with tempfile.TemporaryDirectory() as tmp:
-            self._use_store(tmp)
-            self.host.maps.save(MapEntry(name="m1"))
-            self.assertTrue(
-                self.host._handle_command("layout|wall|left|m1")
-            )
-            saved = MapStore(tmp).get("m1")
-            self.assertEqual(saved.walls, {"left": 0.25})
-            self.assertTrue(
-                self.host._handle_command("layout|wall|right|m1")
-            )
-            saved = MapStore(tmp).get("m1")
-            self.assertEqual(
-                saved.walls, {"left": 0.25, "right": 0.25}
-            )
-            self.assertTrue(
-                self.host._handle_command("layout|wall|clear|m1")
-            )
-            self.assertIsNone(MapStore(tmp).get("m1").walls)
-
-    def test_wall_set_via_running_bot(self):
-        bot = Mock()
-        bot.viz = {"img": np.zeros((150, 200, 3), dtype=np.uint8)}
-        bot.minimap.player_pos.return_value = (160, 40)
-        bot.minimap.region = (0, 0, 200, 150)
-        self.host.bot = bot
-        with tempfile.TemporaryDirectory() as tmp:
-            self._use_store(tmp)
-            self.host.maps.save(MapEntry(name="m1"))
-            self.assertTrue(
-                self.host._handle_command("layout|wall|right|m1")
-            )
-            saved = MapStore(tmp).get("m1")
-            self.assertEqual(saved.walls, {"right": 0.8})
-
-    def test_wall_set_without_player_pos_errors(self):
-        feed = Mock()
-        feed.minimap_img.return_value = None
-        feed.minimap.region = (0, 0, 200, 150)
-        self.host._feed = feed
-        with tempfile.TemporaryDirectory() as tmp:
-            self._use_store(tmp)
-            self.host.maps.save(MapEntry(name="m1"))
-            self.host._handle_command("layout|wall|left|m1")
-            self.assertIsNone(MapStore(tmp).get("m1").walls)
-        msgs = [
-            e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
-        ]
-        self.assertTrue(any("no player position" in m for m in msgs))
-
     def test_wall_set_verifies_map_identity_when_blank(self):
         # Blank name must still verify — a stale pin must not write
         # walls into the wrong map file.
@@ -501,7 +442,6 @@ class HostCommandTests(unittest.TestCase):
         # zones eat platform ends and the user must see it.
         entry = MapEntry(
             name="m1", platforms=[[0.05, 0.25, 0.5, 0.25]],
-            walls={"left": 0.1},
         )
         feed = Mock()
         feed.minimap.region = (0, 0, 200, 150)
@@ -511,7 +451,7 @@ class HostCommandTests(unittest.TestCase):
             self._use_store(tmp)
             self.host.maps.save(entry)
             meta = self.host._map_meta()
-        self.assertEqual(meta["platforms"], [(23.0, 37.5, 100.0, 37.5)])
+        self.assertEqual(meta["platforms"], [(10.0, 37.5, 100.0, 37.5)])
 
     def test_map_meta_reports_ropes(self):
         entry = MapEntry(name="m1", platforms=[[0.0, 0.5, 1.0, 0.5]],
@@ -567,36 +507,15 @@ class HostCommandTests(unittest.TestCase):
         self.assertEqual(meta["map_via"], "pin")
         self.assertIsNone(meta["map_conf"])
 
-    def test_map_meta_walls_survive_bot_without_resolved_map(self):
-        # Walls must not vanish when the bot starts before it has synced
-        # its own map — meta reads the shared identity.
-        self._region_feed()
-        bot = Mock()
-        bot._map = None
-        bot.viz = {}
-        bot.minimap.region = (0, 0, 200, 150)
-        self.host.bot = bot
-        with tempfile.TemporaryDirectory() as tmp:
-            self._use_store(tmp).save(MapEntry(
-                name="m1", map_name="Arcana Cave", walls={"left": 0.25},
-            ))
-            self._read_title("Arcana Cave")
-            meta = self.host._map_meta()
-        self.assertEqual(meta["map"], "m1")
-        self.assertEqual(meta["walls"], {"left": 50})   # 0.25 * 200
-
     def test_map_meta_title_beats_stale_pin(self):
         self._region_feed()
         with tempfile.TemporaryDirectory() as tmp:
             store = self._use_store(tmp, pin="oldmap")
             store.save(MapEntry(name="oldmap", map_name="Kerning Square"))
-            store.save(MapEntry(
-                name="m1", map_name="Arcana Cave", walls={"right": 0.8},
-            ))
+            store.save(MapEntry(name="m1", map_name="Arcana Cave"))
             self._read_title("Arcana Cave")
             meta = self.host._map_meta()
         self.assertEqual(meta["map"], "m1")
-        self.assertEqual(meta["walls"], {"right": 160})  # 0.8 * 200
 
     def _nav_setup(self, tmp, player=(20, 100)):
         feed = self._region_feed()
@@ -664,11 +583,6 @@ class HostCommandTests(unittest.TestCase):
         msgs = [e["msg"] for e in self.host.bus.history() if e["kind"] == "map"]
         self.assertTrue(any("no drawn platform under it" in m for m in msgs))
 
-    def test_padded_wall_limits_drawn(self):
-        img = np.zeros((150, 200, 3), dtype=np.uint8)
-        out = annotate(img, {"walls": {"left": 50}, "wall_pad": 3})
-        self.assertTrue((out[60, 53] == (140, 140, 255)).all())   # left + pad
-
     def test_layout_save_backfills_title(self):
         feed = self._region_feed()
         feed.minimap.region = (8, 40, 200, 150)
@@ -702,21 +616,6 @@ class HostCommandTests(unittest.TestCase):
         out = annotate(img, snap)
         self.assertTrue((out[60, 50] != img[60, 50]).any())   # line drawn
         self.assertTrue((out[70, 50] == img[70, 50]).all())   # rest clean
-
-    def test_wall_zones_are_rectangular(self):
-        # Zones shade the forbidden region, not just a dashed line:
-        # left wall at x=50 blocks [0,50); right at 160 blocks [160,w).
-        img = np.zeros((150, 200, 3), dtype=np.uint8)
-        img[:] = (10, 10, 10)
-        out = annotate(img, {"walls": {"left": 50, "right": 160}})
-        self.assertTrue((out[60, 20] != img[60, 20]).any())  # in left zone
-        self.assertTrue((out[60, 180] != img[60, 180]).any())
-        # Wall line itself is the zone border (solid red).
-        self.assertTrue((out[60, 49] == (60, 60, 255)).all())
-        self.assertTrue((out[60, 160] == (60, 60, 255)).all())
-        # Walkable middle stays clean.
-        self.assertTrue((out[60, 100] == img[60, 100]).all())
-        self.assertTrue((out[60, 55] == img[60, 55]).all())
 
     def test_layout_save_blank_uses_title_verified_map(self):
         feed = Mock()
@@ -887,10 +786,6 @@ class HostCommandTests(unittest.TestCase):
         self.host._handle_command(
             'movekeys|set|{"nav_threshold_px":99}')  # clamped
         self.assertEqual(self.host.bot_config.nav_threshold_px, 15)
-        self.host._handle_command(
-            'movekeys|set|{"wall_zone_px":20}')
-        self.assertEqual(self.host.bot_config.wall_zone_px, 20)
-        self.assertEqual(self.host.config.bot["wall_zone_px"], 20)
 
     def test_movekeys_set_blank_rope_restores_combo(self):
         self.host.bot_config.up_jump_skill_key = "alt"

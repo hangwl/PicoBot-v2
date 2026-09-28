@@ -13,8 +13,8 @@ move to another platform is possible. Edges:
   (``rope_max_px``, ~90 in-game) — the skill always grabs the topmost
   platform in range, so no edge points at a lower one.
 
-Wall zones (``Bounds``, already padded) clip platforms: nothing is
-planned inside a zone, and clipped ends are closed — no drop or gap move
+Platform ends are the boundaries: the bot never plans beyond a drawn
+platform's span, so drawn geometry alone prevents wall-banging.
 
 Whether a jump-type edge exists comes from the :class:`ReachModel`
 envelopes (learned from observed moves); edges beyond the proven
@@ -50,21 +50,11 @@ LEVEL_PX = 4.0          # max rise for a "horizontal" gap move
 
 
 @dataclass(frozen=True)
-class Bounds:
-    """Walkable x range: [left, right] (None = open on that side)."""
-
-    left: Optional[float] = None
-    right: Optional[float] = None
-
-
-@dataclass(frozen=True)
 class Platform:
     x0: float
     y0: float
     x1: float
     y1: float
-    open0: bool = True   # left end is a real edge (moves may leave it)
-    open1: bool = True
 
     @classmethod
     def from_segment(cls, s: Segment) -> "Platform":
@@ -79,17 +69,6 @@ class Platform:
             return (self.y0 + self.y1) / 2.0
         t = min(1.0, max(0.0, (x - self.x0) / (self.x1 - self.x0)))
         return self.y0 + t * (self.y1 - self.y0)
-
-    def clip(self, b: Bounds) -> Optional["Platform"]:
-        x0, x1, open0, open1 = self.x0, self.x1, True, True
-        if b.left is not None and x0 < b.left:
-            x0, open0 = b.left, False
-        if b.right is not None and x1 > b.right:
-            x1, open1 = b.right, False
-        if x1 - x0 < 1.0:
-            return None
-        return Platform(x0, self.y_at(x0), x1, self.y_at(x1), open0, open1)
-
 
 @dataclass(frozen=True)
 class Leg:
@@ -114,7 +93,6 @@ class NavGraph:
         segments: Iterable[Segment],
         reach: ReachModel,
         *,
-        bounds: Optional[Bounds] = None,
         walk_speed: float = 40.0,
         snap_px: float = 8.0,
         edge_inset_px: float = 4.0,
@@ -129,10 +107,7 @@ class NavGraph:
             Platform.from_segment(s) for s in segments
             if abs(s[2] - s[0]) >= 1.0
         ]
-        if bounds is not None:
-            plats = [c for p in plats if (c := p.clip(bounds)) is not None]
         self.platforms: List[Platform] = plats
-        self.bounds = bounds
         self.ropes = [s for s in (ropes or []) if abs(s[2] - s[0]) < 20.0]
         # Rope climbs are a last resort: platforms are normally reachable
         # via jumps/rope lift/teleport, so climbs cost a penalty on top.
@@ -246,9 +221,8 @@ class NavGraph:
             for j, q in enumerate(plats):
                 if i != j:
                     self._link_stacked(i, p, j, q)
-            for end, step, open_ in ((p.x0, -1.0, p.open0), (p.x1, 1.0, p.open1)):
-                if open_:
-                    self._link_off_end(i, end, step)
+            for end, step in ((p.x0, -1.0), (p.x1, 1.0)):
+                self._link_off_end(i, end, step)
         for i, p in enumerate(plats):
             self._link_rope_tiers(i, p)
         self._link_ropes()
@@ -448,34 +422,21 @@ def _merge_walks(legs: List[Leg]) -> List[Leg]:
     return out
 
 
-def wall_bounds(walls: Optional[dict], w: float, h: float, pad: float) -> Optional[Bounds]:
-    """Padded walkable bounds from a map's normalized ``walls``: the left
-    zone grows ``pad`` px rightward, the right zone leftward."""
-    if not walls:
-        return None
-    left, right = walls.get("left"), walls.get("right")
-    return Bounds(
-        None if left is None else left * w + pad,
-        None if right is None else right * w - pad,
-    )
-
-
 def graph_for(
-    entry, region, reach: ReachModel, pad: float = 0.0,
+    entry, region, reach: ReachModel,
     rope_penalty: float = 5.0, allow_flash: bool = True,
     allow_teleport: bool = False,
 ) -> Optional[NavGraph]:
     """NavGraph from a map entry's drawn platforms and ropes in ``region``
-    px, platforms clipped to its padded wall zones."""
+    px. Platform ends are the boundaries — no wall zones."""
     if entry is None or not entry.platforms or not region:
         return None
     w, h = region[2], region[3]
     segs = [(s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in entry.platforms]
     ropes = [(s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in (entry.ropes or ())]
     return NavGraph(
-        segs, reach, bounds=wall_bounds(entry.walls, w, h, pad), ropes=ropes,
-        rope_penalty=rope_penalty, allow_flash=allow_flash,
-        allow_teleport=allow_teleport,
+        segs, reach, ropes=ropes, rope_penalty=rope_penalty,
+        allow_flash=allow_flash, allow_teleport=allow_teleport,
     )
 
 
@@ -486,7 +447,7 @@ class GraphCache:
         self._key = None
         self._graph: Optional[NavGraph] = None
 
-    def get(self, entry, region, reach: ReachModel, pad: float = 0.0,
+    def get(self, entry, region, reach: ReachModel,
             rope_penalty: float = 5.0, allow_flash: bool = True,
             allow_teleport: bool = False) -> Optional[NavGraph]:
         if entry is None or not entry.platforms or not region:
@@ -494,18 +455,14 @@ class GraphCache:
         key = (
             entry.name, tuple(tuple(s) for s in entry.platforms),
             tuple(tuple(s) for s in (entry.ropes or ())),
-            tuple(sorted((entry.walls or {}).items())), pad, rope_penalty,
-            allow_flash, allow_teleport,
+            rope_penalty, allow_flash, allow_teleport,
             region[2], region[3], reach.snapshot(),
         )
         if key != self._key:
             self._key, self._graph = key, graph_for(
-                entry, region, reach, pad, rope_penalty,
+                entry, region, reach, rope_penalty,
                 allow_flash, allow_teleport)
         return self._graph
 
 
-__all__ = [
-    "Bounds", "COSTS", "GraphCache", "Leg", "NavGraph", "Platform",
-    "graph_for", "wall_bounds",
-]
+__all__ = ["COSTS", "GraphCache", "Leg", "NavGraph", "Platform", "graph_for"]

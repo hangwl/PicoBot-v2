@@ -394,19 +394,6 @@ class FlashAttackTests(unittest.TestCase):
             presses = self._presses(fn, *args)
             self.assertEqual(presses, ["space"] * jumps + ["a"], fn)
 
-    def test_weave_refuses_hop_into_padded_wall(self):
-        from picobot.bot.maps import MapEntry
-
-        # Left wall at x=40 (+6 pad = 46); standing at 55 facing left, a
-        # 14px hop would land at 41 — inside the padded zone.
-        bot = _weave_bot((55, 50), bounds=(0, 150))
-        bot._map = MapEntry(name="m", walls={"left": 0.2}, platforms=_plats(0, 150))
-        bot.maps = Mock(**{"get.return_value": bot._map})
-        bot._weave_dir = "left"
-        with patch("random.random", return_value=0.5):
-            bot._weave_attack()
-        self.assertEqual(bot._weave_dir, "right")
-
 class RoamFallbackTests(unittest.TestCase):
     """No anchors: keep moving around where grinding started instead of
     standing still spamming attacks."""
@@ -497,67 +484,6 @@ class WeaveTests(unittest.TestCase):
         bot = _weave_bot((88, 50), bounds=(10, 90))  # at right edge
         bot._weave_dir = "right"
         bot._weave_attack()
-        self.assertEqual(bot._weave_dir, "left")
-
-    def test_wall_zone_forces_inward_facing(self):
-        bot = _weave_bot((8, 50), bounds=(10, 90))   # inside left wall zone
-        bot._weave_dir = "left"
-        bot._weave_attack()
-        self.assertEqual(bot._weave_dir, "right")
-        self.assertEqual(bot.hid.downs, ["right"])
-        # right edge — even if platform bounds say "right is fine"
-        bot = _weave_bot((195, 50), bounds=(10, 199))
-        bot._weave_dir = "right"
-        bot._weave_attack()
-        self.assertEqual(bot._weave_dir, "left")
-
-    def test_wall_zone_disabled_at_zero(self):
-        # x=20 is inside the default 16px zone + 6px padding — with both
-        # disabled, direction stays on the platform-bounds/random logic.
-        bot = _weave_bot((20, 50), bounds=(0, 100))
-        bot.config.wall_zone_px = 0
-        bot.config.wall_pad_px = 0
-        bot._weave_dir = "left"
-        with patch("random.random", return_value=0.5):
-            bot._weave_attack()
-        self.assertEqual(bot._weave_dir, "left")
-
-    def test_per_map_walls_override_edge_zones(self):
-        # Map walls are absolute x positions — for maps whose play area
-        # doesn't span the minimap, the edge zone is never reached.
-        from picobot.bot.maps import MapEntry
-
-        # Left wall at x=60 (0.3 * 200): pos x=55 is outside the global
-        # 16px edge zone but inside the wall — must face right.
-        bot = _weave_bot((55, 50), bounds=(0, 150))
-        bot._map = MapEntry(
-            name="m", walls={"left": 0.3}, platforms=_plats(0, 150)
-        )
-        bot._weave_dir = "left"
-        with patch("random.random", return_value=0.5):
-            bot._weave_attack()
-        self.assertEqual(bot._weave_dir, "right")
-        # Inside the wall on the right side: normal platform logic.
-        bot = _weave_bot((80, 50), bounds=(0, 150))
-        bot._map = MapEntry(
-            name="m", walls={"left": 0.3}, platforms=_plats(0, 150)
-        )
-        bot._weave_dir = "right"
-        with patch("random.random", return_value=0.5):
-            bot._weave_attack()
-        self.assertEqual(bot._weave_dir, "right")
-
-    def test_per_map_right_wall(self):
-        from picobot.bot.maps import MapEntry
-
-        # Right wall at x=150 (0.75 * 200): pos x=160 must face left.
-        bot = _weave_bot((160, 50), bounds=(0, 199))
-        bot._map = MapEntry(
-            name="m", walls={"right": 0.75}, platforms=_plats(0, 199)
-        )
-        bot._weave_dir = "right"
-        with patch("random.random", return_value=0.5):
-            bot._weave_attack()
         self.assertEqual(bot._weave_dir, "left")
 
     def test_marks_attack_used_for_cooldowns(self):
@@ -712,19 +638,6 @@ class PatrolTests(unittest.TestCase):
         bot._patrol_tick()
         self.assertEqual(bot.hid.presses, [])
         bot.sleep.assert_called()
-
-    def test_wall_overrides_checkpoint_heading(self):
-        # Heading left toward a0, but inside the left wall → face right.
-        from picobot.bot.maps import MapEntry
-
-        bot = self._bot((70, 50), self._rot())
-        bot._route = [0, 1]
-        bot._map = MapEntry(
-            name="m", walls={"left": 0.4}, platforms=_plats(10, 90)
-        )  # wall x=80
-        bot._patrol_tick()
-        self.assertEqual(bot._weave_dir, "right")
-        self.assertEqual(bot.hid.downs, ["right"])
 
     def test_single_anchor_falls_back_to_weave(self):
         bot = self._bot((50, 50), Rotation(

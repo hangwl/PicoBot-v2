@@ -2,7 +2,7 @@ import random
 import unittest
 
 from picobot.bot.maps import MapEntry
-from picobot.bot.navgraph import Bounds, NavGraph, graph_for, wall_bounds
+from picobot.bot.navgraph import NavGraph, graph_for
 from picobot.bot.reach import Reach, ReachModel
 
 FLOOR = (0, 100, 200, 100)
@@ -128,31 +128,6 @@ class NavGraphTests(unittest.TestCase):
         self.assertNotIn("up_flash", kinds_seen)
         hero = NavGraph(plats, reach(), allow_flash=True, allow_teleport=False)
         self.assertNotIn("teleport", {l.kind for l in hero.transfer_legs()})
-
-    def test_wall_bounds_are_padded_outward_from_zones(self):
-        b = wall_bounds({"left": 0.1, "right": 0.9}, 200, 150, 3)
-        self.assertEqual((b.left, b.right), (23.0, 177.0))
-        self.assertIsNone(wall_bounds(None, 200, 150, 3))
-
-    def test_walls_clip_platforms_and_block_routes_into_zones(self):
-        g = NavGraph([FLOOR], reach(), bounds=Bounds(left=30, right=170))
-        self.assertEqual((g.platforms[0].x0, g.platforms[0].x1), (30, 170))
-        self.assertIsNone(g.route((100, 100), (10, 100)))       # goal in zone
-        self.assertIsNotNone(g.route((100, 100), (40, 100)))
-
-    def test_clipped_end_is_closed(self):
-        # MID's right end is clipped by the right wall at 100: no drop or
-        # flash may leave through it toward the wall zone.
-        g = NavGraph([FLOOR, MID, SIDE], reach(), bounds=Bounds(right=100))
-        for leg in g.transfer_legs():
-            if leg.kind in ("drop", "flash", "double_flash", "jump"):
-                self.assertLess(max(leg.x0, leg.x1), 100.5)
-
-    def test_graph_for_applies_map_walls(self):
-        entry = MapEntry(name="m", platforms=[[0.0, 0.5, 1.0, 0.5]],
-                         walls={"left": 0.1})
-        g = graph_for(entry, (0, 0, 200, 100), reach(), pad=3)
-        self.assertEqual(g.platforms[0].x0, 23)
 
     def test_drawn_rope_links_two_platforms(self):
         # A rope from the floor (y=100) to a platform 60px up — beyond

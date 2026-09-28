@@ -149,22 +149,6 @@ class PatrolTests(unittest.TestCase):
         bot._patrol_tick.assert_not_called()
         self.assertTrue(any("not on any drawn platform" in l for l in bot.log_lines))
 
-    def test_player_inside_wall_zone_walks_back_out(self):
-        from picobot.bot.navgraph import wall_bounds
-
-        # Platform drawn from x=30; the player at x=10 is inside the
-        # padded left wall zone (0.1*200 + 3 = 23) and off the graph.
-        bot = PatrolBot([(30, 100, 200, 100)], (10, 100),
-                        [(40, 100), (180, 100)])
-        bot._map = SimpleNamespace(walls={"left": 0.1}, name="m")
-        bot._current_map_entry = lambda: bot._map
-        bot.move_to_point = Mock(return_value=True)
-        Patrol(bot).tick()
-        bot.move_to_point.assert_called_once()      # recovery, not a wait
-        goal = bot.move_to_point.call_args[0][0]
-        self.assertEqual(goal, 30)                  # toward the graph
-        self.assertTrue(any("walking back out" in l for l in bot.log_lines))
-
     def test_persistent_blind_dot_leaps_off_the_rope(self):
         # The dot can stay invisible while hanging on a rope — after 2.5s
         # blind, leap off toward the last known position's nearest platform.

@@ -108,20 +108,6 @@ NAV_COLORS = {                                  # BGR
 def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     """Draw overlay markers onto a copy of the frame."""
     out = img.copy()
-    h, w = out.shape[:2]
-    zone = (60, 60, 255)                                     # red zones
-    walls = meta.get("walls") or {}
-    if walls.get("left") is not None:
-        _zone(out, 0, 0, int(walls["left"]), h, zone)          # block left
-    if walls.get("right") is not None:
-        _zone(out, int(walls["right"]), 0, w, h, zone)         # block right
-    pad = meta.get("wall_pad") or 0
-    if pad:                                                    # padded limits
-        soft = (140, 140, 255)
-        if walls.get("left") is not None:
-            _line(out, walls["left"] + pad, 0, walls["left"] + pad, h - 1, soft)
-        if walls.get("right") is not None:
-            _line(out, walls["right"] - pad, 0, walls["right"] - pad, h - 1, soft)
     for seg in meta.get("platforms") or []:
         _line(out, *seg, (255, 200, 40))                  # cyan platforms
     for seg in meta.get("ropes") or []:

@@ -180,22 +180,14 @@ Registered skills have `key`, `kind`, `cooldown`:
 to hand-authored walk legs. There is no wander state or idle breather —
 the bot keeps moving.
 
-## Wall zones
+## Boundaries (no wall zones)
 
-Drawn walls (L/R) are forbidden zones, each extended by `wall_pad_px`
-(default 3) of buffer: the left zone grows rightward, the right zone
-leftward. They bind everything:
-
-- The movement graph clips platforms to the padded limits and closes
-  clipped ends (no drop or gap move leaves toward a wall) — routes and
-  anchors inside a zone are unreachable (logged) rather than attempted.
-- Travel flashes measure room against the **clipped** platform, so a hop
-  never carries into a zone; if a flash overshoot lands inside one
-  anyway, the patrol walks back out toward the graph.
-- Weave hops turn before a hop could land in a zone.
-- Without per-map walls, `wall_zone_px` edge margins apply (also padded).
-- There is no floor boundary: down-jumps only exist toward drawn
-  platforms below, so the lowest drawn platform is the map's bottom.
+There are no wall zones: **the drawn platforms are the only geometry**,
+and their ends are the boundaries. The graph's walk edges run along
+drawn platforms, travel flashes measure room against the platform span,
+and the weave bounces within platform bounds — drawn geometry alone
+prevents wall-banging. Down-jumps only exist toward drawn platforms
+below, so the lowest drawn platform is the map's bottom.
 
 ## Safety
 

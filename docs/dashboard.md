@@ -20,7 +20,7 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
   - **Panel** (default) — the whole located minimap panel: title strip
     on top (green boxes = accepted text lines, orange = the OCR crop),
     a separator at the panel's divider row, then the annotated minimap
-    (player dot, anchors, nav target, hazards, wall zones,
+    (player dot, anchors, nav target, hazards,
     platforms). Its right edge extends to the title's end so long names
     aren't clipped. Platform drags land correctly — frames carry an
     `ox`/`oy` minimap offset that the client subtracts.
@@ -57,7 +57,7 @@ lose history; backlog entries render at their real timestamps.
 ```
 client → host:  map|set|<name> | map|list | cal|start|mark|finish|<name>
                 layout|region|<minimap|title>|x,y,w,h
-                layout|plat|… | layout|wall|left|right|clear[|<name>]
+                layout|plat|… | layout|anchor|… [ |<name>]
                 dash|view|<minimap|window|title> | dash|fps|<n>
                 skills|set|{json} | hid|… | host|window|<title> | host|serial|…
                 dash|subscribe|frames            (opt in to view frames)

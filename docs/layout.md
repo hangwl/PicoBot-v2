@@ -61,11 +61,7 @@ truth, no per-section map names.
   reachable via jumps/rope lift/teleport.
   Platforms are the *authoritative* walkable geometry: anchor snapping,
   nav target projection (~8px snap radius) and weave bounds consult
-  them.
-- **L wall / R wall** — stand at a wall, press the button: stores the
-  boundary (normalized x) and shades the blocked side red. Overrides
-  `wall_zone_px` on that side. A lighter line shows the `wall_pad_px`
-  buffer — the bot never goes past it.
+  them. Platform ends are the bot's boundaries — no wall zones needed.
 - **Save layout / Forget / Re-detect** — commit the located region to
   the map file (backfilling `map_name` from the current title when it's
   missing), drop it, or force re-detection. With no map named, writes
