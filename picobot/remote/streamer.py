@@ -7,7 +7,7 @@ callable. Frame wire format (:func:`pack_frame`)::
     b"PBF1" | uint32 BE json length | json metadata (utf-8) | JPEG bytes
 
 The provider supplies image + metadata, so the same streamer serves the
-live bot view, a raw window feed, or the calibration recorder.
+live bot view, a raw window feed, or the title band.
 """
 
 from __future__ import annotations

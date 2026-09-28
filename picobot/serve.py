@@ -3,7 +3,7 @@
 ``python -m picobot.serve --port COM3 --window "Eluna (x64)"``
 
 Owns the WebSocket/HTTP remote server, the SmartBot lifecycle, the frame
-streamer feeding the dashboard, and the calibration recorder. There is no
+streamer feeding the dashboard, and move measurement. There is no
 desktop UI — the dashboard *is* the UI (locally or over Tailscale).
 """
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class _VisionFeed:
-    """Window/minimap captures for previews, calibration and layout
+    """Window/minimap captures for previews and layout
     commands, plus the :class:`MapMonitor` thread that does map-change
     detection and title reads. Lazily created — pygetwindow/mss only
     exist on the host machine.
@@ -141,7 +141,7 @@ def _offset_meta(snap: dict, dx: int, dy: int) -> None:
 
 
 class BotHost:
-    """Wires transport, bot, streamer, and calibration together."""
+    """Wires transport, bot, streamer, and measurement together."""
 
     def __init__(
         self,
@@ -196,12 +196,6 @@ class BotHost:
             ),
             set_status=lambda m: self.bus.emit("status", m),
             set_ws_port=lambda p: self.bus.emit("status", f"ws port: {p}"),
-            start_macro=lambda: None,
-            stop_macro=lambda: None,
-            is_macro_playing=lambda: False,
-            broadcast=lambda m: None,
-            get_macro_base_path=lambda: "",
-            on_remote_playlist_selected=lambda p: None,
             start_bot=self.start_bot,
             stop_bot=self.stop_bot,
             is_bot_running=self.is_bot_running,
@@ -596,44 +590,6 @@ class BotHost:
             if touched else "no minimap to reset",
         )
 
-    def _layout_set_region(self, msg: str) -> None:
-        """layout|region|minimap|x,y,w,h — hand-drawn rect from Window view.
-
-        Manual rects are treated as trusted (arrival won't drop them),
-        persisted to config.json, and can additionally be committed to
-        the map file via Save layout.
-        """
-        parts = msg.split("|", 3)
-        if len(parts) != 4:
-            return
-        which, payload = parts[2], parts[3]
-        try:
-            rect = tuple(int(float(v)) for v in payload.split(","))
-        except (TypeError, ValueError):
-            return
-        if len(rect) != 4 or rect[2] < 10 or rect[3] < 10:
-            return
-        if which == "title":
-            # Hand-drawn title band — wins over auto detection entirely.
-            self.bot_config.minimap_name_region = rect
-            bot_cfg = getattr(self.config, "bot", None) or {}
-            bot_cfg["minimap_name_region"] = list(rect)
-            self.config.bot = bot_cfg
-            save_config(self.config)
-            self.identity.request("title region")
-            self.bus.emit("vision", f"title region set: {list(rect)}")
-            return
-        if which != "minimap":
-            return
-        for mm in self._analyzers():
-            mm.set_region(rect, explicit=True)
-        self.bot_config.minimap_region = rect
-        bot_cfg = getattr(self.config, "bot", None) or {}
-        bot_cfg["minimap_region"] = list(rect)
-        self.config.bot = bot_cfg
-        save_config(self.config)
-        self.bus.emit("vision", f"minimap region set: {list(rect)}")
-
     def _layout_clear(self, name: str = "") -> None:
         entry, err = self._layout_target(name.strip())
         if entry is None:
@@ -934,8 +890,6 @@ class BotHost:
             self._layout_platform(msg)
         elif msg == "layout|reset":
             self._layout_reset()
-        elif msg.startswith("layout|region|"):
-            self._layout_set_region(msg)
         elif msg.startswith("nav|"):
             self._nav_command(msg)
         elif msg == "skills|list":
@@ -1395,7 +1349,6 @@ class BotHost:
         )
         self._send_config()
 
-    # -- Calibration -------------------------------------------------------------
     # -- Move measurement -------------------------------------------------------
     def _measure_start(self) -> None:
         if self.bot is not None or (self.bot_thread and self.bot_thread.is_alive()):

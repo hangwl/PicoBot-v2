@@ -44,11 +44,8 @@ def _coerce_float(value: Any, default: float) -> float:
 class AppConfig:
     # Default target window to prefer on startup/refresh when unlocked
     default_target_window: str = "Eluna (x64)"
-    last_folder: str = "No folder selected."
-    always_on_top: bool = True
     bot_token: str = ""
     chat_id: str = ""
-    countdown_seconds: int = 60
     serial_port: str = ""
     ws_port: int = 8765
     http_port: int = 8000
@@ -58,9 +55,6 @@ class AppConfig:
     ws_tls: bool = False
     ws_certfile: str = ""
     ws_keyfile: str = ""
-    # Target window lock
-    window_lock_enabled: bool = False
-    window_lock_title: str = ""
     # Smart-bot tuning — see picobot.bot.config.BotConfig for the schema.
     bot: dict = field(default_factory=dict)
 
@@ -87,25 +81,11 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
         return defaults
 
     data = asdict(defaults)
-    # New field replacing deprecated last_window
     data["default_target_window"] = str(
         raw.get("default_target_window", data["default_target_window"])
     )
-    # Migration fallback: if old key exists and new key absent, adopt it once
-    if "last_window" in raw and "default_target_window" not in raw:
-        try:
-            lw = str(raw.get("last_window") or "")
-            if lw:
-                data["default_target_window"] = lw
-        except Exception:
-            pass
-    data["last_folder"] = str(raw.get("last_folder", data["last_folder"]))
-    data["always_on_top"] = bool(raw.get("always_on_top", data["always_on_top"]))
     data["bot_token"] = str(raw.get("bot_token", data["bot_token"]))
     data["chat_id"] = str(raw.get("chat_id", data["chat_id"]))
-    data["countdown_seconds"] = max(
-        1, _coerce_int(raw.get("countdown_seconds"), defaults.countdown_seconds)
-    )
     data["serial_port"] = str(raw.get("serial_port", data["serial_port"]))
     data["ws_port"] = _coerce_int(raw.get("ws_port"), defaults.ws_port)
     data["http_port"] = _coerce_int(raw.get("http_port"), defaults.http_port)
@@ -119,12 +99,6 @@ def load_config(path: str | Path = CONFIG_FILE) -> AppConfig:
     data["ws_tls"] = bool(raw.get("ws_tls", defaults.ws_tls))
     data["ws_certfile"] = str(raw.get("ws_certfile", defaults.ws_certfile))
     data["ws_keyfile"] = str(raw.get("ws_keyfile", defaults.ws_keyfile))
-    data["window_lock_enabled"] = bool(
-        raw.get("window_lock_enabled", defaults.window_lock_enabled)
-    )
-    data["window_lock_title"] = str(
-        raw.get("window_lock_title", defaults.window_lock_title)
-    )
     if isinstance(raw.get("bot"), dict):
         data["bot"] = raw["bot"]
 

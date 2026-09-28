@@ -29,7 +29,7 @@ Why not pixel fingerprints: see [learnings.md](learnings.md).
 
 - `name` — **your alias** (file name, dashboard selector label).
 - `map_name` — **the OCR'd in-game title only**; this is what identity
-  matches. Captured at calibration save, or backfilled by **Save
+  matches. Captured by OCR on arrival, or backfilled by **Save
   layout** when missing. Never overwrite it with the alias.
 - `minimap_region` — the panel rect at save. Re-applied once the title
   verifies the map, so normalized anchors/platforms line up with the

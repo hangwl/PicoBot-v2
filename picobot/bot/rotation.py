@@ -186,8 +186,8 @@ class Rotation:
 
         With no recorded ``(from, to)`` pair, a shortest path over the
         recorded leg graph is composed instead — checkpoint routes are
-        planned dynamically, so they can pick pairs calibration never
-        walked directly."""
+        planned dynamically, so they can pick pairs never recorded
+        directly."""
         steps = self.legs.get((from_idx, to_idx))
         if steps is not None:
             return steps

@@ -72,10 +72,10 @@ fragile and was deliberately abandoned.
 `serve.py`'s `BotHost` is the app: it owns the serial transport, the
 `_VisionFeed` (idle-mode perception), the bot lifecycle, map store,
 move measurer, and the dashboard command surface (`map|set`,
-`cal|*`, `layout|*`, `skills|*`, `dash|view|*`, …).
+`layout|*`, `skills|*`, `dash|view|*`, …).
 
-`remote/control.py` relays `hid|…` payloads (dashboard input pad, the
-Flutter app) to serial. `remote/streamer.py` captures frames at
+`remote/control.py` relays `hid|…` payloads (the dashboard input pad) to
+serial. `remote/streamer.py` captures frames at
 `view_fps`, annotates overlays (`annotate`, `assemble_panel`,
 `annotate_title`), JPEG-encodes, and sends binary frames to clients that
 subscribed (`dash|subscribe|frames`); a client still receiving the
@@ -129,6 +129,5 @@ picobot/
 ├── serve.py            # headless host (the app)
 └── config.py, settings.py, messaging.py
 CIRCUITPY/              # Pico firmware (code.py)
-picobot_controller/     # Flutter remote app
 tests/                  # pytest suite, mirrors picobot/
 ```

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import queue
 import ssl
 import threading
@@ -43,14 +42,7 @@ class RemoteCallbacks:
     log: Callable[[str], None]
     set_status: Callable[[str], None]
     set_ws_port: Callable[[int], None]
-    start_macro: Callable[[], None]
-    stop_macro: Callable[[], None]
-    is_macro_playing: Callable[[], bool]
-    broadcast: Callable[[str], None]
-    get_macro_base_path: Callable[[], str]
-    on_remote_playlist_selected: Callable[[str], None]
-    # Smart-bot lifecycle + dashboard command sink (optional; serve.py wires
-    # these, the legacy Tk app leaves them None).
+    # Smart-bot lifecycle + dashboard command sink.
     start_bot: Optional[Callable[[], None]] = None
     stop_bot: Optional[Callable[[], None]] = None
     is_bot_running: Optional[Callable[[], bool]] = None
@@ -257,7 +249,6 @@ class RemoteControlServer:
         self._held: dict = {}
         self._jobs: "queue.Queue[Optional[Callable[[], None]]]" = queue.Queue()
         self._job_thread: Optional[threading.Thread] = None
-        self.selected_playlist: Optional[str] = None
 
     # -- Lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -444,64 +435,6 @@ class RemoteControlServer:
         payload = f"{event_type}|{key}"
         return self.enqueue_hid_payload(payload, wait_ack=wait_ack, timeout=timeout)
 
-    def _handle_get_playlists(self, websocket) -> None:
-        try:
-            base_path = self.callbacks.get_macro_base_path()
-            self._log(f"Playlists|get: base_path='{base_path}'")
-            if not base_path or not os.path.isdir(base_path):
-                self._log("Playlists|get: base_path missing or not a directory; returning []")
-                playlists = []
-            else:
-                # Heuristic: if the selected base contains .txt files (a single playlist folder),
-                # list playlists from its parent directory instead, so the client can choose siblings.
-                search_root = base_path
-                try:
-                    entries = os.listdir(base_path)
-                except Exception:
-                    entries = []
-                has_txt = any((e.lower().endswith(".txt")) for e in entries)
-                if has_txt:
-                    parent = os.path.dirname(base_path)
-                    if parent and os.path.isdir(parent):
-                        self._log(
-                            f"Playlists|get: base looks like a playlist folder; using parent '{parent}'"
-                        )
-                        search_root = parent
-                else:
-                    self._log(f"Playlists|get: using base_path as search root: '{base_path}'")
-
-                playlists = sorted([
-                    d
-                    for d in os.listdir(search_root)
-                    if os.path.isdir(os.path.join(search_root, d))
-                ])
-                self._log(
-                    f"Playlists|get: found {len(playlists)} playlist dirs under '{search_root}': "
-                    f"{', '.join(playlists) if playlists else '(none)'}"
-                )
-            payload = {"event": "macroPlaylists", "playlists": playlists}
-            self._log(f"Playlists|get: sending payload {payload}")
-            asyncio.run_coroutine_threadsafe(
-                websocket.send(json.dumps(payload)), self.bridge._loop
-            )
-        except Exception as e:
-            self._log(f"Error getting playlists: {e}")
-
-    def _handle_set_playlist(self, playlist: Optional[str]) -> None:
-        self.selected_playlist = playlist
-        self._log(f"Remote client set playlist to: {playlist}")
-        try:
-            base = self.callbacks.get_macro_base_path()
-        except Exception:
-            base = None
-        resolved = os.path.join(base, playlist) if base and playlist else None
-        if resolved:
-            if os.path.isdir(resolved):
-                self._log(f"Playlists|set: resolved path exists: {resolved}")
-            else:
-                self._log(f"Playlists|set: WARN path not found: {resolved}")
-        self.callbacks.on_remote_playlist_selected(playlist or "")
-
     def broadcast(self, message: str) -> None:
         """Send a text message to all connected WebSocket clients."""
         msg = (message or "").strip()
@@ -580,7 +513,7 @@ class RemoteControlServer:
             except Exception:
                 pass
             return
-        # Dashboard commands: bot lifecycle, maps, calibration, stream mode.
+        # Dashboard commands: bot lifecycle, maps, layout, stream mode.
         if msg.startswith(DASHBOARD_PREFIXES):
             if msg == "dash|subscribe|frames":
                 with self.clients_lock:
@@ -603,40 +536,6 @@ class RemoteControlServer:
             self._submit(lambda: self._run_command(msg))
             return
 
-        if msg.startswith("macro|"):
-            parts = msg.split("|")
-            action = parts[1] if len(parts) > 1 else ""
-            if action == "playlists":
-                sub_action = parts[2] if len(parts) > 2 else ""
-                if sub_action == "get":
-                    self._log("WS: macro|playlists|get received")
-                    self._handle_get_playlists(websocket)
-                elif sub_action == "set":
-                    playlist = parts[3] if len(parts) > 3 else None
-                    self._log(f"WS: macro|playlists|set received -> {playlist}")
-                    self._handle_set_playlist(playlist)
-                return
-                return
-
-            if action == "start":
-                self._log("WS: macro|start received")
-                self._schedule(self.callbacks.start_macro)
-            elif action == "stop":
-                self._log("WS: macro|stop received")
-                self._schedule(self.callbacks.stop_macro)
-            elif action == "query":
-                try:
-                    playing = bool(self.callbacks.is_macro_playing())
-                except Exception:
-                    playing = False
-                self._log(f"WS: macro|query received -> playing={playing}")
-                try:
-                    await websocket.send("macro|playing" if playing else "macro|stopped")
-                except Exception:
-                    pass
-            else:
-                self._log(f"WS: unknown macro action '{action}'")
-            return
         self._track_held(websocket, msg)
         self.enqueue_hid_payload(msg)
 

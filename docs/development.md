@@ -65,8 +65,7 @@ use `core.autocrlf=true` (files are CRLF on disk, LF in the repo).
   change as a trigger — translucent UI defeats it (see learnings.md).
 - Event levels: `hid`/serial chatter is `debug`; think before emitting
   chatty kinds at `info`.
-- `picobot_controller/` is a separate Flutter remote app; `CIRCUITPY/` is
-  the Pico firmware (`code.py`).
+- `CIRCUITPY/` is the Pico firmware (`code.py`).
 
 ## Debug frame captures
 

@@ -45,12 +45,10 @@ numbers (successes grow an envelope; two consecutive misses shrink it).
 All layout tools act on the **Map** panel's selection — one source of
 truth, no per-section map names.
 
-- **Draw minimap** — drag the minimap rect on the Window view when
-  frame detection fails. Persisted to `config.json` (`minimap_region`)
-  as a hard pin that survives map changes — since minimap size differs
-  per map, prefer fixing detection over pinning.
-- **Draw title** — drag the title strip on the Window view; pins
-  `minimap_name_region` when auto segmentation fails on a client.
+- The minimap panel and title strip are found automatically. A
+  `minimap_region` / `minimap_name_region` in `config.json` still pins
+  them by hand — since minimap size differs per map, prefer fixing
+  detection over pinning.
 - **Draw plats** — drag a segment along each platform line on the Panel
   view; stays armed for successive drags. **Undo** pops, **Clear** wipes.
 - Ropes are **not drawn** — they're learned: when the bot hangs stable

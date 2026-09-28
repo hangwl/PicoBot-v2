@@ -1,7 +1,7 @@
 """Headless smart-bot entry: ``python -m picobot.bot --port COM3 --window TITLE``.
 
-Runs the FSM-driven bot without the Tk GUI. Configuration comes from the
-``"bot"`` object in config.json (same file the GUI writes).
+Runs the FSM-driven bot without the dashboard host. Configuration comes
+from the ``"bot"`` object in config.json.
 """
 
 from __future__ import annotations

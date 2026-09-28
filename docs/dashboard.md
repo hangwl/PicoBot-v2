@@ -76,8 +76,7 @@ is the default — relay noise hidden, nav/fsm story visible; `All` is for
 Pico link debugging. The client keeps the last 300 events; the log
 follows new lines only while scrolled to the bottom.
 
-Not yet in the app: Calibrate (Record / Mark anchor), Draw minimap /
-Draw title (`layout|region|…`), rope/anchor delete by click.
+Not yet in the app: rope/anchor delete by click.
 
 ## Protocol sketch
 
@@ -85,7 +84,6 @@ Draw title (`layout|region|…`), rope/anchor delete by click.
 client → host:  map|set|<name> | map|list | class|list | class|use|<name>
                 class|add|<name>|{travel,air_attacks,teleport_key,…}
                 patrol|policy|<weighted|greedy> | patrol|temp|<v>
-                layout|region|<minimap|title>|x,y,w,h
                 layout|plat|… | layout|anchor|… [ |<name>]
                 dash|view|<minimap|window|title> | dash|fps|<n>
                 skills|set|{json} | hid|… | host|window|<title> | host|serial|…

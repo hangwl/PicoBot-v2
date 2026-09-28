@@ -1,7 +1,7 @@
 # Dashboard protocol (v1)
 
-The host speaks one WebSocket protocol for every client — the Preact
-dashboard (`web/`) and the Flutter controller are both clients.
+The host speaks one WebSocket protocol; the Preact dashboard (`web/`) is
+its client.
 Versioned by the `hello` handshake: the host sends
 `dash|{"event":"hello","protocol":1}` immediately after a client
 connects. A client that doesn't understand the version should warn and
@@ -36,7 +36,6 @@ and follows the same view.
 | `movekeys|set|{json}` | movement keybinds (jump/rope-lift/flash) + nav radius |
 | `layout|save\|clear\|reset[|<name>]` | layout lifecycle |
 | `layout|plat\|anchor\|…[|<name>]` | drawn geometry (see below) |
-| `layout|region|<minimap\|title>\|x,y,w,h` | region calibration (Window view px) |
 | `nav|show|on\|off` / `nav|preview|x,y` | graph overlay + route preview (minimap px) |
 | `measure|start` / `measure|stop` | move measurement |
 | `host|serial\|<port\|auto>` / `host|window|<title>` | connection |

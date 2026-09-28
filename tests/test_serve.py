@@ -178,12 +178,6 @@ def _callbacks(**overrides) -> RemoteCallbacks:
         log=lambda m: None,
         set_status=lambda m: None,
         set_ws_port=lambda p: None,
-        start_macro=lambda: None,
-        stop_macro=lambda: None,
-        is_macro_playing=lambda: False,
-        broadcast=lambda m: None,
-        get_macro_base_path=lambda: "",
-        on_remote_playlist_selected=lambda p: None,
     )
     kw.update(overrides)
     return RemoteCallbacks(**kw)
@@ -820,43 +814,6 @@ class HostCommandTests(unittest.TestCase):
         self.host._feed = feed
         self.assertTrue(self.host._handle_command("layout|reset"))
         feed.minimap.reset_region.assert_called_once()
-
-    def test_layout_region_minimap_sets_and_persists(self):
-        feed = Mock()
-        self.host._feed = feed
-        self.assertTrue(
-            self.host._handle_command("layout|region|minimap|10,20,100,80")
-        )
-        feed.minimap.set_region.assert_called_once_with(
-            (10, 20, 100, 80), explicit=True
-        )
-        self.assertEqual(
-            self.host.bot_config.minimap_region, (10, 20, 100, 80)
-        )
-        self.assertEqual(
-            self.host.config.bot["minimap_region"], [10, 20, 100, 80]
-        )
-        self.save_mock.assert_called()
-
-    def test_layout_region_rejects_bad_payloads(self):
-        feed = Mock()
-        self.host._feed = feed
-        self.host._handle_command("layout|region|minimap|a,b,c,d")
-        self.host._handle_command("layout|region|minimap|1,2,3,4")  # too small
-        self.host._handle_command("layout|region|garbage|5,8,300,40")
-        feed.minimap.set_region.assert_not_called()
-        self.save_mock.assert_not_called()
-
-    def test_layout_region_title_saves_name_region(self):
-        feed = Mock()
-        self.host._feed = feed
-        self.host._handle_command("layout|region|title|5,8,300,40")
-        self.assertEqual(self.host.bot_config.minimap_name_region,
-                         (5, 8, 300, 40))
-        self.assertEqual(self.host.config.bot["minimap_name_region"],
-                         [5, 8, 300, 40])
-        self.save_mock.assert_called()
-        self.assertTrue(self.host.identity.pending)
 
     def test_skills_set_persists_and_broadcasts(self):
         self.assertTrue(self.host._handle_command(

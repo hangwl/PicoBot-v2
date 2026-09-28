@@ -48,12 +48,12 @@ override the remembered values and are persisted the same way.
   title strip on top (text lines boxed, orange = OCR crop), a divider
   separator, then the annotated minimap below — its right edge extends to
   the title's end so long names aren't clipped. Also **Title** (raw
-  segmented band) and **Window** (full client, for draw tools).
-  Layout tools: *Save layout* / *Forget* / *Re-detect* / *Draw minimap* /
-  *Draw title* / *Draw plats* / wall & floor zone marking.
+  segmented band) and **Window** (full client).
+  Layout tools: *Save layout* / *Forget* / *Re-detect* / *Draw plats* /
+  *Place anchors* / route preview.
 - **Bot** — Start/Stop the smart bot.
-- **Calibrate** — Record → visit each farming spot → *Mark anchor* (F9)
-  → Save. Anchors only; movement is generated live.
+- **Measure moves** — the character works each move kind so the planner
+  learns its reach.
 - **Skills** — registry for attacks, buffs, summons, movement keys.
 - **Remote input** — arrow pad + key buttons (rune solving from a phone).
 - **Events** — levelled log (`debug < info < warn < error`) with
@@ -94,11 +94,3 @@ override the remembered values and are persisted the same way.
 - Open `http://<host>.tail-xxxx.ts.net:8000` on the phone — the dashboard shows
   the live feed and the remote input pad works anywhere. WireGuard
   encryption means no port forwarding and no TLS needed.
-- The Flutter controller app (`picobot_controller/`) still works as a remote
-  control: it sends `hid|…` payloads over the same WebSocket protocol.
-
-## Deprecated
-
-Recorded macro playback (`playback/`, `macro_recorder.py`, playlist commands,
-the Tk GUI) was removed — blind playback is too easily detected. The
-perception-driven rotation system replaces it.

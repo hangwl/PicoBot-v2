@@ -13,10 +13,7 @@ from picobot.remote.http import EmbeddedHTTPServer
 def _callbacks(**kw):
     base = dict(
         schedule=lambda fn: fn(), log=lambda m: None, set_status=lambda m: None,
-        set_ws_port=lambda p: None, start_macro=lambda: None,
-        stop_macro=lambda: None, is_macro_playing=lambda: False,
-        broadcast=lambda m: None, get_macro_base_path=lambda: "",
-        on_remote_playlist_selected=lambda p: None,
+        set_ws_port=lambda p: None,
     )
     base.update(kw)
     return RemoteCallbacks(**base)

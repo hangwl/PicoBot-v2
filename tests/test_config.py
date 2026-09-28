@@ -28,18 +28,15 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.json"
             payload = {
-                # Deprecated key should migrate into default_target_window
-                "last_window": "Notepad",
+                "default_target_window": "Notepad",
                 "ws_port": "9000",
-                "countdown_seconds": "15",
-                "always_on_top": False,
+                "view_fps": "99",
             }
             path.write_text(json.dumps(payload), encoding="utf-8")
             cfg = load_config(path)
         self.assertEqual(cfg.default_target_window, "Notepad")
         self.assertEqual(cfg.ws_port, 9000)
-        self.assertEqual(cfg.countdown_seconds, 15)
-        self.assertFalse(cfg.always_on_top)
+        self.assertEqual(cfg.view_fps, 30.0)
         # Unspecified fields fall back to defaults
         self.assertEqual(cfg.http_port, AppConfig().http_port)
 
@@ -48,11 +45,8 @@ class ConfigTests(unittest.TestCase):
             path = Path(tmp) / "config.json"
             cfg = AppConfig(
                 default_target_window="Game",
-                last_folder="C:/macros",
-                always_on_top=False,
                 bot_token="abc",
                 chat_id="123",
-                countdown_seconds=42,
                 ws_port=9100,
                 http_port=9200,
             )
