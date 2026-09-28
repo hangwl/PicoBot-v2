@@ -46,6 +46,20 @@ export type CanvasMode = "none" | "plats" | "anchors" | "route";
 export type ViewMode = "minimap" | "window" | "title";
 export type LogFilter = "info" | "warn" | "error" | "all";
 
+/** One measured move: its reach in px, or why it was skipped. */
+export interface MoveResult {
+  dx?: number;
+  rise?: number;
+  skipped?: string;
+}
+
+export interface MeasureState {
+  running: boolean;
+  move: string | null;
+  plan: string[];
+  results: Record<string, MoveResult>;
+}
+
 export interface HostPort {
   device: string;
   desc?: string;
@@ -68,6 +82,8 @@ export interface AppState {
   policy: string;
   temp: number;
   measured: number;
+  measurePlan: string[];
+  measuredMoves: string[];
   skillSource: string;
   skillsInherited: boolean;
   skills: Record<string, SkillSpec>;
@@ -82,7 +98,7 @@ export interface AppState {
   flashOn: boolean;
   navR: number;
   fps: number;
-  measureStat: string;
+  measure: MeasureState;
   botRunning: boolean;
   botState: string;
   hazard: string;
@@ -111,6 +127,8 @@ const initial: AppState = {
   policy: "weighted",
   temp: 1,
   measured: 0,
+  measurePlan: [],
+  measuredMoves: [],
   skillSource: "global",
   skillsInherited: false,
   skills: {},
@@ -125,7 +143,7 @@ const initial: AppState = {
   flashOn: true,
   navR: 5,
   fps: 3,
-  measureStat: "",
+  measure: { running: false, move: null, plan: [], results: {} },
   botRunning: false,
   botState: "–",
   hazard: "none",
@@ -250,6 +268,7 @@ export function connect() {
       "host|state",
       "map|list",
       "class|list",
+      "measure|status",
     ])
       send(m);
   };
@@ -317,8 +336,16 @@ function onEvent(p: Record<string, any> & { event: string }) {
       return;
     case "evt":
       pushLog(p as unknown as EvtItem);
-      if (p.kind === "measure" && !String(p.msg).startsWith("measurement"))
-        set({ measureStat: String(p.msg) });
+      return;
+    case "measure":
+      set({
+        measure: {
+          running: Boolean(p.running),
+          move: (p.move as string | null) ?? null,
+          plan: (p.plan as string[]) ?? [],
+          results: (p.results as Record<string, MoveResult>) ?? {},
+        },
+      });
       return;
     case "history":
       set({
@@ -348,6 +375,8 @@ function onEvent(p: Record<string, any> & { event: string }) {
         policy: (p.policy as string) ?? "weighted",
         temp: (p.temp as number) ?? 1,
         measured: (p.measured as number) ?? 0,
+        measurePlan: (p.measure_plan as string[]) ?? [],
+        measuredMoves: (p.measured_moves as string[]) ?? [],
       });
       return;
     case "skills":

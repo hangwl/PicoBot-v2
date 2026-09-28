@@ -75,8 +75,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Landings are scored tolerantly (platform span + row slack) — a
-  successful move must never shrink the envelope. Upward: `up_flash`
-  (Up + jump mid-air), `up_side_flash`, `rope_lift`.
+  successful move must never shrink the envelope. A deliberate
+  measurement is the exception: `ReachModel.calibrate` sets the envelope
+  to the measured result (lower included) and records it in `measured`.
+  Upward: `up_flash` (Up + jump mid-air), `up_side_flash`, `rope_lift`.
 - **Layout save preserves** walls/platforms/`map_name`/skills — a fresh
   `MapEntry` must never wipe drawn geometry.
 - Region/coords: client-area px for rects; 0–1 normalized in map files.

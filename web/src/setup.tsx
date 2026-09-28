@@ -6,6 +6,10 @@ import { kitLabel } from "./live";
 import { type AppState, go, send } from "./protocol";
 
 // -- Readiness -------------------------------------------------------------------
+function allMeasured(s: AppState): boolean {
+  return s.measurePlan.length > 0 && s.measured >= s.measurePlan.length;
+}
+
 interface Step {
   ok: boolean;
   next: string;
@@ -17,7 +21,7 @@ function steps(s: AppState): Step[] {
     { ok: !!s.via, next: "identify the map", page: "map" },
     { ok: s.platformsN > 0, next: "draw platforms (desktop)", page: "map" },
     { ok: s.anchorsN > 0, next: "place anchors (desktop)", page: "map" },
-    { ok: s.measured > 0, next: "measure moves", page: "measure" },
+    { ok: allMeasured(s), next: "measure moves", page: "measure" },
   ];
 }
 
@@ -69,10 +73,11 @@ const ENTRIES: Entry[] = [
   },
   {
     page: "measure", title: "Measure moves", icon: "ruler",
-    sub: (s) => (s.measured > 0
-      ? `${s.measured} moves measured`
-      : `Not measured${s.classActive ? ` for ${s.classActive}` : ""}`),
-    flag: (s) => (s.measured > 0 ? null : "todo"),
+    sub: (s) => (s.measure.running
+      ? "Measuring…"
+      : `${s.measured} of ${s.measurePlan.length} moves measured` +
+        (s.classActive ? ` for ${s.classActive}` : "")),
+    flag: (s) => (allMeasured(s) ? "ok" : "todo"),
   },
   {
     page: "patrol", title: "Patrol", icon: "route",
@@ -453,23 +458,64 @@ function MoveKeysPage({ s }: { s: AppState }) {
   );
 }
 
+const MOVE_LABEL: Record<string, string> = {
+  flash: "Flash jump",
+  double_flash: "Double flash",
+  jump: "Jump",
+  rope_lift: "Rope lift",
+  up_flash: "Up flash",
+  teleport: "Teleport",
+  teleport_up: "Up-teleport",
+};
+
+function moveStatus(s: AppState, move: string): [string, string] {
+  const m = s.measure;
+  const r = m.results[move];
+  if (m.running && m.move === move) return ["Measuring…", "accent"];
+  if (r?.skipped) return [`Skipped: ${r.skipped}`, "warn"];
+  if (r?.dx !== undefined) return [`${r.dx}px across`, "ok"];
+  if (r?.rise !== undefined) return [`${r.rise}px up`, "ok"];
+  if (s.measuredMoves.includes(move)) return ["Measured", "ok"];
+  return ["Not measured", ""];
+}
+
 function MeasurePage({ s }: { s: AppState }) {
+  const m = s.measure;
+  const plan = m.plan.length ? m.plan : s.measurePlan;
   return (
     <div class="form">
       <p class="muted">
-        Stop the bot and stand on an open platform. The character works each
-        move so the planner learns its reach. Results are saved per class.
+        Stop the bot and stand mid-way along a long platform with another
+        one above it. The character works each move
+        {s.classActive ? ` ${s.classActive}` : " this class"} can use, and
+        the best result becomes that move's reach. Results are saved per
+        class.
       </p>
-      <dl class="kv">
-        <div><dt>Measured</dt><dd>{s.measured > 0 ? `${s.measured} moves` : "Nothing yet"}</dd></div>
-        {s.measureStat && <div><dt>Progress</dt><dd>{s.measureStat}</dd></div>}
-      </dl>
-      <div class="actions">
-        <button class="primary" disabled={s.botRunning}
-                onClick={() => send("measure|start")}>Measure moves</button>
-        <button onClick={() => send("measure|stop")}>Stop</button>
-      </div>
+      <ul class="rows moves">
+        {plan.map((mv) => {
+          const [text, tone] = moveStatus(s, mv);
+          return (
+            <li key={mv}>
+              <b>{MOVE_LABEL[mv] ?? mv}</b>
+              <span class={`pill ${tone}`}>{text}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {m.running
+        ? (
+          <button class="big danger" onClick={() => send("measure|stop")}>
+            <Icon name="stop" /> Stop measuring
+          </button>
+        )
+        : (
+          <button class="big go" disabled={s.botRunning || s.ws !== "on"}
+                  onClick={() => send("measure|start")}>
+            <Icon name="ruler" /> {allMeasured(s) ? "Measure again" : "Measure moves"}
+          </button>
+        )}
       {s.botRunning && <p class="hint warn">Stop the bot first.</p>}
+      <p class="hint">Switching away from the game also stops a measurement.</p>
     </div>
   );
 }

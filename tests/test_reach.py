@@ -20,6 +20,27 @@ class ReachModelTests(unittest.TestCase):
         self.assertEqual(r["up_flash"].rise, 26.0)
         self.assertEqual(r["rope_lift"].rise, 90.0)
 
+    def test_calibrate_sets_even_below_the_guess(self):
+        m = _model()
+        m.observe("flash", planned=(18, 0), observed=(0, 0), ok=False)
+        m.observe("flash", planned=(18, 0), observed=(0, 0), ok=False)
+        self.assertIn("flash", m.ceiling)
+        m.calibrate("flash", dx=12.0)
+        self.assertEqual(m.get("flash").dx, 12.0)       # lowered from 20
+        self.assertEqual(m.get("flash").rise, 4.0)      # untouched dim
+        self.assertNotIn("flash", m.ceiling)
+        self.assertIn("flash", m.measured)
+
+    def test_measured_moves_persist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "reach.json"
+            m = _model(path=path)
+            m.calibrate("up_side_flash", rise=15.0, tag="teleport_up")
+            m.save(force=True)
+            again = _model(path=path)
+            self.assertIn("teleport_up", again.measured)
+            self.assertEqual(again.get("up_side_flash").rise, 15.0)
+
     def test_fits_proven_exploratory_and_out(self):
         m = _model()
         self.assertTrue(m.fits("flash", 18, 0))

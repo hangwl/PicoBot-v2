@@ -133,3 +133,13 @@ fixed that — all 15 captured reads exact afterwards.
 - **Measuring the wrong moves** (2026-09-29): the measurer ran a fixed
   flash plan, so teleport classes measured flashes they never use and
   never measured teleport. The plan now follows the class kit.
+- **"Measured" counted growth, not measurements** (2026-09-29): the
+  count was moves whose reach grew >5% past the conservative guess, and
+  measuring only ever raised reach (`max`). A move that measured at or
+  below its guess changed nothing — the guess stayed, the planner kept
+  attempting moves the character can't make, and Setup said "not
+  measured". Measurements now calibrate (set) the envelope and are
+  recorded per move. The same review found the ledge check inverted:
+  rise is positive upward, so `rise > 8` rejected landing *higher* and
+  accepted falls — an overshoot onto a lower platform was recorded as an
+  inflated dx.

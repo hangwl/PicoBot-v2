@@ -203,6 +203,10 @@ main {
   padding: 6px 0; border-bottom: 1px solid var(--edge);
 }
 .rows li b { font-weight: 600; margin-right: auto; }
+.pill.ok { color: var(--ok); background: var(--ok-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); white-space: normal; }
+.pill.accent { color: var(--accent); background: var(--accent-bg); }
+.moves li { min-height: var(--tap); }
 
 /* -- Log ----------------------------------------------------------------- */
 .log { display: flex; flex-direction: column; gap: 10px; position: relative; }

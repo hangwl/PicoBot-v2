@@ -351,7 +351,6 @@ class BotHost:
             self.bot = None
             self.bus.emit("bot", "stopped")
             self._send_bot_state(False)
-            self._send_class()   # farming refines reach: refresh the count
 
     # -- Frames & events -------------------------------------------------------
     def _forward_event(self, event: dict) -> None:
@@ -890,6 +889,8 @@ class BotHost:
         elif msg == "measure|stop":
             if self.measurer:
                 self.measurer.stop()
+        elif msg == "measure|status":
+            self._send_measure()
         elif msg.startswith("dash|view|"):
             self.streamer.set_mode(msg.split("|", 2)[2])
         elif msg.startswith("dash|fps|"):
@@ -949,7 +950,10 @@ class BotHost:
 
     def _send_class(self) -> None:
         """Class profiles + patrol policy for the dashboard selectors."""
+        from .bot.measure import MoveMeasurer
+
         cfg = self.bot_config
+        plan = MoveMeasurer.plan_for(cfg)
         self.remote.broadcast("dash|" + json.dumps({
             "event": "class",
             "active": cfg.class_active,
@@ -963,11 +967,12 @@ class BotHost:
             },
             "policy": cfg.patrol_policy,
             "temp": cfg.patrol_weight_temp,
-            "measured": sum(
-                1 for m, e in self.reach.est.items()
-                if e.dx > self.reach.base[m].dx * 1.05
-                or e.rise > self.reach.base[m].rise * 1.05
-            ),
+            # Moves of this class's measurement plan that have been
+            # measured (not "grew past the guess" — a measurement may
+            # also lower it).
+            "measure_plan": list(plan),
+            "measured_moves": [m for m in plan if m in self.reach.measured],
+            "measured": sum(1 for m in plan if m in self.reach.measured),
         }))
 
     def _class_add(self, name: str, spec_json: str) -> None:
@@ -1043,6 +1048,7 @@ class BotHost:
         self._send_class()
         self._send_skills()
         self._send_config()
+        self._send_measure()    # the plan follows the kit
 
     def _patrol_policy_set(self, policy: str = "", temp=None) -> None:
         cfg = self.bot_config
@@ -1375,6 +1381,8 @@ class BotHost:
             self.bus.emit("error", "stop the bot before measuring moves")
             return
         if self.measurer and self.measurer.running():
+            self.bus.emit("measure", "already measuring")
+            self._send_measure()
             return
         feed = self._get_feed()
         if feed is None:
@@ -1400,14 +1408,31 @@ class BotHost:
             notify_callback=self.telegram.send_message,
             event_bus=self.bus,
         )
-        def on_event(kind: str, msg: str) -> None:
-            self.bus.emit(kind, msg)
-            if msg.startswith("done"):
+        def on_status(status: dict) -> None:
+            self._send_measure(status)
+            if not status["running"]:
                 self._send_class()   # the measured-moves count changed
 
-        self.measurer = MoveMeasurer(bot, on_event=on_event)
+        self.measurer = MoveMeasurer(
+            bot, on_event=lambda k, m: self.bus.emit(k, m), on_status=on_status,
+        )
         self.measurer.start()
-        self.bus.emit("measure", "measuring — watch the character work each move")
+
+    def _send_measure(self, status: Optional[dict] = None) -> None:
+        """measure event: {running, move, plan, results}."""
+        if status is None:
+            from .bot.measure import MoveMeasurer
+
+            status = (
+                self.measurer.status() if self.measurer is not None else {
+                    "running": False, "move": None,
+                    "plan": list(MoveMeasurer.plan_for(self.bot_config)),
+                    "results": {},
+                }
+            )
+        self.remote.broadcast(
+            "dash|" + json.dumps({"event": "measure", **status})
+        )
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="picobot.serve")

@@ -1108,21 +1108,44 @@ class HostCommandTests(unittest.TestCase):
 
     def test_class_switch_stops_a_running_measurement(self):
         self.host.bot_config.class_profiles = {"hero": {"travel": "flash"}}
-        measurer = Mock(running=Mock(return_value=True))
+        measurer = Mock(running=Mock(return_value=True), status=Mock(
+            return_value={"running": False, "move": None, "plan": [],
+                          "results": {}}))
         self.host.measurer = measurer
         self.host._class_use("hero")
         measurer.stop.assert_called_once()
 
-    def test_finished_measurement_refreshes_measured_count(self):
+    def test_measurement_status_is_broadcast_and_refreshes_count(self):
         self.host._feed = Mock()
         with patch("picobot.bot.SmartBot"),                 patch("picobot.bot.measure.MoveMeasurer") as mm:
+            mm.plan_for.return_value = ("jump",)
             self.host._measure_start()
-        on_event = mm.call_args.kwargs["on_event"]
+        on_status = mm.call_args.kwargs["on_status"]
         self.sent.clear()
-        on_event("measure", "measuring moves — keep the game focused")
+        on_status({"running": True, "move": "jump", "plan": ["jump"],
+                   "results": {}})
+        self.assertTrue(self._events("measure")[-1]["running"])
         self.assertEqual(self._events("class"), [])
-        on_event("measure", "done — reach saved. Measured: flash")
-        self.assertEqual(len(self._events("class")), 1)
+        self.host.reach.measured["jump"] = 1.0
+        on_status({"running": False, "move": None, "plan": ["jump"],
+                   "results": {"jump": {"dx": 12.0}}})
+        self.assertEqual(self._events("measure")[-1]["results"],
+                         {"jump": {"dx": 12.0}})
+        self.assertEqual(self._events("class")[-1]["measured"], 1)
+
+    def test_measure_status_when_idle_lists_the_class_plan(self):
+        self.host.bot_config.class_travel = "walk"
+        self.host._handle_command("measure|status")
+        st = self._events("measure")[-1]
+        self.assertFalse(st["running"])
+        self.assertEqual(st["plan"], ["jump", "rope_lift"])
+
+    def test_measure_start_while_measuring_says_so(self):
+        self.host.measurer = Mock(running=Mock(return_value=True), status=Mock(
+            return_value={"running": True, "move": "jump", "plan": ["jump"],
+                          "results": {}}))
+        self.host._measure_start()
+        self.assertTrue(any("already measuring" in m for m in self.sent))
 
     def test_profile_edits_leave_the_global_book_alone(self):
         with tempfile.TemporaryDirectory() as tmp:

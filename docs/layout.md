@@ -34,19 +34,28 @@ matter: the patrol plans its own route.
 
 The movement graph starts from conservative reach guesses. Press
 **Measure moves** (bot stopped, character on an open platform with the
-platforms drawn): the bot performs each move its class can use, in the
-safest direction, and records the real takeoff→landing into the class's
-reach file (`nav_reach_<profile>.json`):
+platforms drawn, ideally mid-way along a long platform with another one
+above it): the bot performs each move its class can use, in the safest
+direction, and **calibrates** that move to the best of its attempts —
+a measurement is ground truth, so it can also lower a guess that was too
+generous. Results go to the class's reach file
+(`nav_reach_<profile>.json`), which also records which moves have been
+measured:
 
 - flash classes — flash, double flash, jump, rope lift, up flash;
 - teleport classes — jump, sideways teleport, rope lift, up-teleport
-  (waiting out the teleport cooldown; both directions grow the one
-  teleport envelope);
+  (waiting out the teleport cooldown; the sideways one sets the teleport
+  envelope's reach, the upward one its height);
 - walk classes, or flash jump disabled — jump and rope lift.
 
-The Route overlay immediately shows the connections the new reach
-unlocks. Farming keeps refining the
-numbers (successes grow an envelope; two consecutive misses shrink it).
+Each move calibrates as soon as its attempts finish, so a stopped run
+keeps what it measured. An attempt is skipped — with the reason shown
+next to the move — when the player dot is lost, there's no room or no
+platform above, the key isn't bound, the character didn't move, or a
+sideways move changed level (fell off or caught a ledge). The Route
+overlay immediately shows the connections the new reach unlocks.
+Farming keeps refining the numbers (successes grow an envelope; two
+consecutive misses shrink it).
 
 ## Drawing layout (dashboard)
 

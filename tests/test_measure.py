@@ -171,7 +171,7 @@ class MoveMeasurerTests(unittest.TestCase):
         self._run(bot)
         self.assertEqual(
             {m.split(":")[0] for m in bot.moves}, {"rope_lift"})
-        self.assertEqual(bot.reach.get("jump").dx, 10)
+        self.assertEqual(bot.reach.get("jump").dx, 8)     # measured: lowered
         self.assertEqual(bot.reach.get("flash").dx, 30)   # untouched
 
     def test_flash_disabled_skips_flash_moves(self):
@@ -179,6 +179,41 @@ class MoveMeasurerTests(unittest.TestCase):
         bot.config.flash_jump_enabled = False
         self._run(bot)
         self.assertNotIn("flash", bot.moves)
+
+    def test_results_and_status_are_published(self):
+        bot = MeasureBot([FLOOR], (30, 100))
+        seen = []
+        m = MoveMeasurer(bot, on_status=seen.append)
+        m._loop()
+        final = seen[-1]
+        self.assertFalse(final["running"])
+        self.assertEqual(final["results"]["flash"], {"dx": 37})
+        self.assertIn("no platform above",
+                      final["results"]["rope_lift"]["skipped"])
+        self.assertIn("flash", bot.reach.measured)
+        self.assertNotIn("rope_lift", bot.reach.measured)
+
+    def test_stopped_run_keeps_finished_moves(self):
+        bot = MeasureBot([FLOOR], (30, 100))
+        m = MoveMeasurer(bot)
+        real = m._measure
+
+        def measure(move):
+            if move == "double_flash":
+                m._stop.set()            # stop arrives during the 2nd move
+            return real(move)
+
+        m._measure = measure
+        m._loop()
+        self.assertIn("flash", bot.reach.measured)
+        self.assertNotIn("double_flash", bot.reach.measured)
+        self.assertEqual(bot.reach.get("flash").dx, 37)
+
+    def test_fall_off_a_ledge_is_reported(self):
+        bot = MeasureBot([(0, 100, 60, 100), (0, 130, 200, 130)], (20, 100))
+        bot.carry["flash"] = 50                        # overshoots the ledge
+        _, got = self._run(bot)
+        self.assertTrue(any("fell off a ledge" in msg for _, msg in got))
 
     def test_no_platforms_warns(self):
         bot = MeasureBot([], (30, 100))

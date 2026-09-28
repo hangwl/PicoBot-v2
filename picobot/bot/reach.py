@@ -11,8 +11,11 @@ executed move reports where it took off and landed:
 - failure beyond it (an exploratory attempt) → a ceiling stops retrying.
 
 The planner may explore up to ``explore`` × the envelope (capped by the
-ceiling) at a cost penalty, so estimates grow from conservative starts
-or from a measurement run.
+ceiling) at a cost penalty, so estimates grow from conservative starts.
+
+A deliberate measurement run is ground truth instead: ``calibrate`` sets
+the envelope to what was measured — smaller than the guess included —
+and records which moves have been measured.
 """
 
 from __future__ import annotations
@@ -68,6 +71,8 @@ class ReachModel:
         self.explore = explore
         self.shrink = shrink
         self._fail_streak: Dict[str, int] = {}
+        # Measurement move name (e.g. "teleport_up") -> epoch seconds.
+        self.measured: Dict[str, float] = {}
         self.path = Path(path) if path else None
         self._dirty = False
         self._saved_at = 0.0
@@ -162,6 +167,40 @@ class ReachModel:
                         move, before[0], e.dx, before[1], e.rise)
         self.save()
 
+    def calibrate(
+        self,
+        move: str,
+        *,
+        dx: Optional[float] = None,
+        rise: Optional[float] = None,
+        tag: Optional[str] = None,
+    ) -> None:
+        """Set ``move``'s envelope to a measured full-power result (only
+        the given dimensions) and drop its failure ceiling. ``tag`` names
+        the measurement (defaults to ``move``)."""
+        if move not in self.est:
+            return
+        e = self.est[move]
+        before = (e.dx, e.rise)
+        if dx is not None:
+            e.dx = float(dx)
+        if rise is not None:
+            e.rise = float(rise)
+        c = self.ceiling.get(move)
+        if c is not None:
+            if dx is not None:
+                c.dx = float("inf")
+            if rise is not None:
+                c.rise = float("inf")
+            if c.dx == float("inf") and c.rise == float("inf"):
+                del self.ceiling[move]
+        self._fail_streak[move] = 0
+        self.measured[tag or move] = time.time()
+        self.version += 1
+        self._dirty = True
+        logger.info("reach %s calibrated: dx %.1f→%.1f rise %.1f→%.1f",
+                    move, before[0], e.dx, before[1], e.rise)
+
     # -- Persistence ----------------------------------------------------------------
     def load(self) -> None:
         if self.path is None or not self.path.exists():
@@ -178,6 +217,9 @@ class ReachModel:
         for k, v in (data.get("ceiling") or {}).items():
             if k in self.est:
                 self.ceiling[k] = Reach(inf(v.get("dx")), inf(v.get("rise")))
+        self.measured = {
+            str(k): float(v) for k, v in (data.get("measured") or {}).items()
+        }
         self.version += 1
 
     def save(self, force: bool = False) -> None:
@@ -197,6 +239,7 @@ class ReachModel:
             k: {kk: (None if vv == float("inf") else vv) for kk, vv in v.items()}
             for k, v in doc["ceiling"].items()
         }
+        doc["measured"] = dict(self.measured)
         try:
             write_text_atomic(self.path, json.dumps(doc, indent=2))
             self._dirty = False

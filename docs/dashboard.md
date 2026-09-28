@@ -52,7 +52,11 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     active); add or remove (confirmed) attacks, buffs, summons.
   - **Move keys** — jump / rope lift / flash keys and arrival radius; only
     edited fields are saved.
-  - **Measure moves**, **Patrol** (loop order + temperature),
+  - **Measure moves** — the class's moves with each one's status (not
+    measured / measuring / px result / skip reason) and one button that
+    is *Measure moves* when idle and *Stop measuring* while running.
+    While measuring, the top bar says so and Start bot is replaced.
+  - **Patrol** (loop order + temperature),
     **Connection** (Pico serial port, *Find the Pico* auto-probe that
     skips the open port, game window — locked while the bot runs).
 - **Log** — the event log with severity filters; while scrolled up it

@@ -19,6 +19,7 @@ type Tone = "ok" | "warn" | "off";
 
 export function botStatus(s: AppState): [string, Tone] {
   if (s.ws !== "on") return ["Offline", "off"];
+  if (s.measure.running) return ["Measuring", "warn"];
   if (!s.botRunning) return ["Stopped", "off"];
   if (s.hazard !== "none" || s.botState === "PAUSE") return ["Paused", "warn"];
   if (s.botState === "TRAVEL") return ["Traveling", "ok"];
@@ -81,6 +82,12 @@ export function RunButton({ s }: { s: AppState }) {
     return (
       <button class="big danger" onClick={() => send("bot|stop")}>
         <Icon name="stop" /> Stop bot
+      </button>
+    );
+  if (s.measure.running)
+    return (
+      <button class="big" onClick={() => go("setup/measure")}>
+        Measuring moves…
       </button>
     );
   return (

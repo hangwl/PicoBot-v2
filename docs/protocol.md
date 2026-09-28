@@ -37,7 +37,7 @@ and follows the same view.
 | `layout|save\|clear\|reset[|<name>]` | layout lifecycle |
 | `layout|plat\|anchor\|…[|<name>]` | drawn geometry (see below) |
 | `nav|show|on\|off` / `nav|preview|x,y` | graph overlay + route preview (minimap px) |
-| `measure|start` / `measure|stop` | move measurement (the moves the active class can use) |
+| `measure|start` / `measure|stop` / `measure|status` | move measurement (the moves the active class can use); `status` re-sends the `measure` event |
 | `host|serial\|<port\|auto>` / `host|window|<title>` | connection |
 | `key|down\|<k>` / `key|up\|<k>` | remote input pad (Pico HID): a real press and release — the dashboard sends them on touch and lift. `<k>` is a Pico `KEY_MAP` name. Keys a client still holds when it disconnects are released |
 | `config|get` | full config snapshot |
@@ -63,7 +63,8 @@ Text, `dash|` + JSON:
 | `evt` | `{kind, level, msg, t}` — log lines |
 | `history` | `{items: [evt…]}` — replay on connect |
 | `maps` | `{maps, active, detected, via, title, score, reading, platforms_n, anchors_n}` |
-| `class` | `{active, profiles: {name: {travel, air_attacks, teleport_key}}, policy, temp, measured}` — also re-sent when a measurement finishes or the bot stops (`measured` changes) |
+| `class` | `{active, profiles: {name: {travel, air_attacks, teleport_key}}, policy, temp, measured, measure_plan, measured_moves}` — `measure_plan` is the class's measurement moves, `measured_moves` those measured, `measured` their count; re-sent when a measurement ends |
+| `measure` | `{running, move, plan, results: {move: {dx} \| {rise} \| {skipped}}}` — on every change of a run, on `measure|status`, and on class switches |
 | `skills` | `{source, inherited, skills}` — the book the bot uses: `source` is the active profile or `global`; `inherited` = the profile has no kit of its own and uses the global book |
 | `config` | full `BotConfig` snapshot |
 | `host` | `{ports, windows, serial, window, serial_open}` |
