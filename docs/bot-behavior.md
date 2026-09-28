@@ -140,6 +140,12 @@ kit decides which moves exist and where attacks fire:
 - `air_attacks: false` — the attack tail fires **after landing**
   (mages can't attack suspended); `true` weaves mid-air as usual.
 - A teleport without a bound key falls back to `flash`.
+- **Per-profile skills:** a profile may carry its own `skills` dict —
+  the character's kit (attack, buffs, summons, movement). When active,
+  it **replaces** the global skill book; per-map overrides still merge
+  on top. The dashboard's Skills panel edits the active profile's kit
+  (seeded from the global book on first edit) and shows which book it's
+  editing.
 - Measure-moves covers teleport when a key is bound.
 
 ## Movement rule & attack weaving

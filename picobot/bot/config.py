@@ -152,6 +152,16 @@ class BotConfig:
                 cfg.teleport_key = str(k) if k else None
             if "teleport_cooldown" in profile:
                 cfg.teleport_cooldown = float(profile["teleport_cooldown"])
+            if isinstance(profile.get("skills"), dict) and profile["skills"]:
+                # The profile owns the character's kit: it replaces the
+                # global skill book (per-map overrides still merge on top).
+                from .skills import Skill
+
+                cfg.skills = {
+                    str(n): Skill.from_dict(str(n), spec)
+                    for n, spec in profile["skills"].items()
+                    if isinstance(spec, dict)
+                }
         if cfg.class_travel not in ("flash", "teleport", "walk"):
             cfg.class_travel = "flash"
         if cfg.class_travel == "teleport" and not cfg.teleport_key:

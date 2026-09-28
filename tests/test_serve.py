@@ -418,6 +418,37 @@ class HostCommandTests(unittest.TestCase):
                     if e["kind"] == "bot"]
             self.assertTrue(any("class: mage" in m for m in msgs))
 
+    def test_profile_skills_applied_on_class_use(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.bot_config.class_profiles = {
+                "mage": {"travel": "teleport", "teleport_key": "shift",
+                         "skills": {"blink": {"key": "shift",
+                                              "kind": "movement"}}},
+            }
+            self.host._class_use("mage")
+            self.assertEqual(
+                [s.key for s in self.host.bot_config.skills.values()],
+                ["shift"],
+            )
+
+    def test_skills_panel_edits_the_active_profile_kit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.bot_config.class_profiles = {
+                "mage": {"travel": "teleport", "teleport_key": "shift"},
+            }
+            self.host._class_use("mage")
+            self.host._handle_command(
+                'skills|set|{"name":"main","key":"a","kind":"attack"}')
+            profile = self.host.bot_config.class_profiles["mage"]
+            self.assertIn("main", profile["skills"])     # into the profile
+            self.assertEqual(
+                self.host.bot_config.skills["main"].key, "a")
+            saved = (self.host.config.bot or {}).get("class", {}) \
+                .get("profiles", {}).get("mage", {}).get("skills", {})
+            self.assertIn("main", saved)                # persisted
+
     def test_class_add_creates_persists_and_applies(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)

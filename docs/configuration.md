@@ -19,7 +19,9 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
       "profiles": {
         "default": {"travel": "flash"},
         "mage": {"travel": "teleport", "air_attacks": false,
-                 "teleport_key": "shift", "teleport_cooldown": 0.8}
+                 "teleport_key": "shift", "teleport_cooldown": 0.8,
+                 "skills": {"blink": {"key": "shift", "kind": "movement"},
+                            "main": {"key": "a", "kind": "attack"}}}
       }
     },
     "air_attacks": true,

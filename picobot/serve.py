@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .bot.skills import Skill
 from .config import AppConfig, load_config, save_config
 from .events import EventBus
 from .messaging import TelegramHandler
@@ -985,7 +986,7 @@ class BotHost:
         spec = {
             k: v for k, v in (raw or {}).items()
             if k in ("travel", "air_attacks", "teleport_key",
-                     "teleport_cooldown")
+                     "teleport_cooldown", "skills")
         }
         cfg.class_profiles = dict(cfg.class_profiles or {})
         cfg.class_profiles[name] = spec
@@ -1160,18 +1161,36 @@ class BotHost:
         self._send_config()
 
     # -- Skills editor -------------------------------------------------------------
+    def _skills_target(self):
+        """The skill book the Skills panel edits: the active profile's own
+        kit when one is active (seeded from the global book on first
+        edit), else the global book."""
+        cfg = self.bot_config
+        profile = (cfg.class_profiles or {}).get(cfg.class_active)
+        if profile is None:
+            return cfg.skills, "global"
+        if not isinstance(profile.get("skills"), dict):
+            # First edit under this profile: seed it with the effective
+            # global book so the character starts from what's configured.
+            profile["skills"] = {
+                n: s.to_dict() for n, s in cfg.skills.items()
+            }
+        return profile["skills"], cfg.class_active
+
     def _send_skills(self) -> None:
+        target, _ = self._skills_target()
         payload = {
             "event": "skills",
+            "source": "global" if target is self.bot_config.skills
+            else f"profile {self.bot_config.class_active}",
             "skills": {
-                n: s.to_dict() for n, s in self.bot_config.skills.items()
+                n: (s.to_dict() if isinstance(s, Skill) else dict(s))
+                for n, s in target.items()
             },
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
 
     def _skills_set(self, payload: str) -> None:
-        from .bot.skills import Skill
-
         try:
             spec = json.loads(payload)
             skill = Skill.from_dict(str(spec["name"]), spec)
@@ -1179,14 +1198,26 @@ class BotHost:
                 json.JSONDecodeError) as exc:
             self.bus.emit("error", f"invalid skill spec: {exc}")
             return
-        self.bot_config.skills[skill.name] = skill
+        target, _ = self._skills_target()
+        if target is self.bot_config.skills:
+            self.bot_config.skills[skill.name] = skill
+        else:
+            target[skill.name] = skill.to_dict()
+            self.bot_config.skills[skill.name] = skill   # live book too
         self._skills_commit()
         self.bus.emit(
             "skill", f"skill saved: {skill.name} ({skill.kind}, {skill.key})"
         )
 
     def _skills_del(self, name: str) -> None:
-        if not self.bot_config.skills.pop(name, None):
+        target, _ = self._skills_target()
+        gone = (
+            self.bot_config.skills.pop(name, None)
+            if target is self.bot_config.skills
+            else (target.pop(name, None),
+                  self.bot_config.skills.pop(name, None))[0]
+        )
+        if not gone:
             self.bus.emit("error", f"no such skill: {name}")
             return
         self._skills_commit()
@@ -1200,6 +1231,14 @@ class BotHost:
         bot_cfg["skills"] = {
             n: s.to_dict() for n, s in self.bot_config.skills.items()
         }
+        profile = (self.bot_config.class_profiles or {}).get(
+            self.bot_config.class_active)
+        if profile is not None and isinstance(profile.get("skills"), dict):
+            # The edit landed in the active profile's own kit — persist
+            # the class block too.
+            cls = dict(bot_cfg.get("class") or {})
+            cls["profiles"] = self.bot_config.class_profiles
+            bot_cfg["class"] = cls
         self.config.bot = bot_cfg
         save_config(self.config)
         bot = self.bot

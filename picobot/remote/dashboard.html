@@ -266,6 +266,7 @@
     </details>
     <details class="panel">
       <summary>Skills</summary>
+      <div style="margin-bottom:4px"><label id="skillSrc">editing: global skills</label></div>
       <div id="skillRows"></div>
       <div class="row" style="margin-top:8px">
         <input id="skName" placeholder="name" size="7">
@@ -485,6 +486,8 @@ function handleDash(p) {
       p.serial_open ? "on" : (p.serial ? "warn" : ""));
     chip("win", "win: " + (p.window || "–"));
   } else if (p.event === "skills") {
+    $("skillSrc").textContent = "editing: " + (p.source || "global skills") +
+      (p.source && p.source !== "global" ? "'s kit" : " skills");
     renderSkills(p.skills || {});
   } else if (p.event === "config") {
     const c = p.config || {};
