@@ -21,11 +21,10 @@ planner rebuilds with the new kit.
 
 ## The app
 
-The dashboard is a Preact + TypeScript app in `web/` (served from
-`web/dist`; the legacy single-file `dashboard.html` remains as a
-fallback when the build is absent). Rebuild with `cd web && npm run
-build`. The protocol is versioned via the `hello` handshake and
-documented in [protocol.md](protocol.md).
+The dashboard is a Preact + TypeScript app in `web/`, served from
+`web/dist` (committed — the host needs no Node at runtime). Rebuild
+with `cd web && npm run build`. The protocol is versioned via the
+`hello` handshake and documented in [protocol.md](protocol.md).
 
 ## Panels
 

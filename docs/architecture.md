@@ -16,7 +16,7 @@ web dashboard that exposes all of it.
                           └──────┬───────────────────┬───────────┘
                                  │ WS :8765          │ HTTP :8000
                                  ▼                   ▼
-                          remote/control.py      dashboard.html
+                          remote/control.py      web/ (Preact dashboard)
                           (hid|… relay)          (the UI)
 ```
 
@@ -83,7 +83,7 @@ previous frame skips the next one. Dashboard commands run in order on a
 `DashboardCommands` worker thread, never on the WS event loop, so slow
 commands can't stall `hid|…` relay. `ScreenGrabber` keeps one mss
 instance per thread.
-`remote/http.py` serves `dashboard.html`.
+`remote/http.py` serves the built dashboard app (`web/dist`).
 
 Threads: the WS server, the HTTP server, the frame streamer, and the bot
 task all run concurrently — all mutation of shared state funnels through
@@ -119,7 +119,7 @@ picobot/
 │   └── timing.py       # humanized delays
 ├── remote/
 │   ├── control.py      # WS server + hid|… relay + dashboard commands
-│   ├── dashboard.html  # web UI
+│   └── http.py         # serves web/dist
 │   ├── http.py         # embedded HTTP server
 │   └── streamer.py     # annotated frame feed (assemble_panel, annotate)
 ├── transport/

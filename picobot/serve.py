@@ -238,10 +238,6 @@ class BotHost:
         self.remote.start()
         self.http = EmbeddedHTTPServer(
             lambda: self.remote.ws_port, self.config.http_port,
-            search_paths=[
-                Path(__file__).resolve().parent / "remote" / "dashboard.html",
-                Path(__file__).resolve().parent.parent / "index.html",
-            ],
             static_dir=(
                 Path(__file__).resolve().parent.parent / "web" / "dist"
             ),

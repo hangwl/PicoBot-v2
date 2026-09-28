@@ -95,7 +95,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Move measurement | `bot/measure.py` |
 | Host + dashboard cmds | `serve.py`, `remote/control.py` |
 | Frame pipeline | `remote/streamer.py` (`assemble_panel`, `annotate`) |
-| Dashboard UI | `web/` (Preact app — build with `npm run build` in `web/`, served from `web/dist`; `remote/dashboard.html` is the legacy fallback) |
+| Dashboard UI | `web/` (Preact app — build with `npm run build` in `web/`, served from `web/dist`; protocol in `docs/protocol.md`) |
 | Debug frame capture | `vision/framelog.py` → `debug/frames/` |
 
 See `docs/` for the full picture: `architecture.md`, `map-detection.md`,

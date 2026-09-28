@@ -58,6 +58,7 @@ export interface AppState {
   via: string;
   title: string;
   score: number | null;
+  reading: boolean;
   platformsN: number;
   anchorsN: number;
   classActive: string;
@@ -84,7 +85,7 @@ export interface AppState {
   frame: { meta: FrameMeta; bitmap: ImageBitmap } | null;
   viewMode: "minimap" | "window" | "title";
   canvasMode: CanvasMode;
-  tab: "run" | "view" | "skills" | "log";
+  tab: "run" | "view" | "skills" | "log" | "pad";
 }
 
 const initial: AppState = {
@@ -96,6 +97,7 @@ const initial: AppState = {
   via: "",
   title: "",
   score: null,
+  reading: false,
   platformsN: 0,
   anchorsN: 0,
   classActive: "",
@@ -220,6 +222,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         via: (p.via as string) ?? "",
         title: (p.title as string) ?? "",
         score: (p.score as number | null) ?? null,
+        reading: Boolean(p.reading),
         platformsN: (p.platforms_n as number) ?? 0,
         anchorsN: (p.anchors_n as number) ?? 0,
       });

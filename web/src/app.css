@@ -69,9 +69,16 @@ canvas#view {
 .logline .t { color: var(--dim); margin-right: 6px; }
 .logline.warn { color: var(--warn); }
 .logline.bad { color: var(--bad); }
-.tabs { display: none; }
+#tabs { display: none; }
 @media (max-width: 720px) {
-  #tabs { display: flex; gap: 6px; padding: 6px 10px; position: sticky;
-    bottom: 0; background: var(--panel); border-top: 1px solid var(--edge); }
-  #status { flex-wrap: wrap; }
+  main { padding: 10px; }
+  #tabs {
+    display: flex; gap: 6px; padding: 6px 10px; position: sticky;
+    bottom: 0; background: var(--panel); border-top: 1px solid var(--edge);
+  }
+  #tabs button { flex: 1; }
+  main [data-tab] { display: none; }
+  main [data-tab].tab-on { display: block; }
+  .col { min-width: 100%; }
+  canvas#view { max-width: 100%; }
 }

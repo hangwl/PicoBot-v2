@@ -42,6 +42,51 @@ function StatusStrip({ s }: { s: AppState }) {
   );
 }
 
+function MapPanel({ s }: { s: AppState }) {
+  const [creating, setCreating] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  return (
+    <div class="panel">
+      <h3>Map</h3>
+      <div class="row">
+        <select aria-label="map" value={s.activeMap}
+                onChange={(e) => {
+                  const v = (e.target as HTMLSelectElement).value;
+                  setCreating(v === "__new");
+                  if (v !== "__new") send(`map|set|${v}`);
+                }}>
+          <option value="">(auto-detect)</option>
+          {s.maps.map((n) => <option key={n} value={n}>{n}</option>)}
+          <option value="__new">+ new map…</option>
+        </select>
+        {creating && (
+          <input ref={nameRef} aria-label="new map name"
+                 placeholder="new map name" size={12} />
+        )}
+      </div>
+      <div class="row" style={{ marginTop: "6px" }}>
+        <button onClick={() =>
+                   send(`layout|save|${s.activeMap || nameRef.current?.value.trim() || ""}`)}>
+          Save layout
+        </button>
+        <button onClick={() =>
+                   send(`layout|clear|${s.activeMap || nameRef.current?.value.trim() || ""}`)}>
+          Forget
+        </button>
+        <button onClick={() => send("layout|reset")}>Re-detect</button>
+      </div>
+      <div style={{ marginTop: "4px" }}>
+        <span>
+          detected: {s.detected || "–"}{s.via ? ` (${s.via})` : ""}
+          {s.title ? ` · "${s.title}"` : ""}
+          {s.score != null ? ` ${Math.round(s.score * 100)}%` : ""}
+          {s.reading ? " · reading title…" : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function SetupChecklist({ s, arm }: { s: AppState; arm: (m: CanvasMode) => void }) {
   const row = (
     ok: boolean,
@@ -215,6 +260,13 @@ function ViewCanvas({ s, arm }: { s: AppState; arm: (m: CanvasMode) => void }) {
         <button onClick={() => send("dash|view|minimap")}>Panel</button>
         <button onClick={() => send("dash|view|window")}>Window</button>
         <button onClick={() => send("dash|view|title")}>Title</button>
+        <select aria-label="stream fps" defaultValue="3"
+                onChange={(e) =>
+                  send(`dash|fps|${(e.target as HTMLSelectElement).value}`)}>
+          {[1, 2, 3, 5, 10, 15, 30].map((f) => (
+            <option key={f} value={f}>{f} fps</option>
+          ))}
+        </select>
       </div>
       <canvas
         ref={ref}
@@ -285,6 +337,27 @@ function EventLog({ s }: { s: AppState }) {
   );
 }
 
+const TABS: [string, string][] = [
+  ["run", "Run"],
+  ["view", "View"],
+  ["skills", "Skills"],
+  ["log", "Log"],
+  ["pad", "Pad"],
+];
+
+function TabBar({ s }: { s: AppState }) {
+  return (
+    <div id="tabs">
+      {TABS.map(([id, label]) => (
+        <button key={id} class={s.tab === id ? "armed" : ""}
+                onClick={() => set({ tab: id as AppState["tab"] })}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function App() {
   const s = useApp();
   useEffect(() => {
@@ -306,20 +379,33 @@ export function App() {
         <span class="chip">hazard: {s.hazard}</span>
       </header>
       <StatusStrip s={s} />
+      <TabBar s={s} />
       <main>
         <div class="col main">
-          <SetupChecklist s={s} arm={arm} />
-          <ClassPanel s={s} />
-          <BotControls />
-          <Measure s={s} />
-          <Connection s={s} />
-          <Movekeys s={s} />
-          <RemotePad />
+          <div data-tab="run" class={s.tab === "run" ? "tab-on" : ""}>
+            <MapPanel s={s} />
+            <SetupChecklist s={s} arm={arm} />
+            <ClassPanel s={s} />
+            <BotControls />
+            <Measure s={s} />
+            <Connection s={s} />
+            <Movekeys s={s} />
+          </div>
+          <div data-tab="pad" class={s.tab === "pad" ? "tab-on" : ""}>
+            <RemotePad />
+          </div>
         </div>
         <div class="col side">
-          <ViewCanvas s={s} arm={arm} />
-          <SkillsPanel s={s} />
-          <EventLog s={s} />
+          <div data-tab="view" class={s.tab === "view" ? "tab-on" : ""}>
+            <ViewCanvas s={s} arm={arm} />
+          </div>
+          <div data-tab="skills" class={s.tab === "skills" ? "tab-on" : ""}>
+            <SkillsPanel s={s} />
+            <Movekeys s={s} />
+          </div>
+          <div data-tab="log" class={s.tab === "log" ? "tab-on" : ""}>
+            <EventLog s={s} />
+          </div>
         </div>
       </main>
     </>
