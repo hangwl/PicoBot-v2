@@ -3,6 +3,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 export interface EvtItem {
+  id?: number;
   kind: string;
   level?: string;
   msg: string;
@@ -214,8 +215,11 @@ function onEvent(p: Record<string, any> & { event: string }) {
   }
 }
 
+let logSeq = 0;
+
 function pushLog(item: EvtItem) {
-  set({ logs: [...state.logs, item].slice(-300) });
+  const withId = { ...item, id: ++logSeq };
+  set({ logs: [...state.logs, withId].slice(-300) });
 }
 
 // -- Frame decoding ---------------------------------------------------------

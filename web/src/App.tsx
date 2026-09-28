@@ -58,21 +58,21 @@ function SetupChecklist({ s, arm }: { s: AppState; arm: (m: CanvasMode) => void 
       {row(s.measured > 0, "measured",
            s.measured > 0 ? `${s.measured} moves` : "no data",
            ["Measure", () => send("measure|start")])}
-      <label>identify → draw platforms → place anchors → measure → Start</label>
+      <span>identify → draw platforms → place anchors → measure → Start</span>
     </div>
   );
 }
 
 function NewClass({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
   const [travel, setTravel] = useState("flash");
   const [air, setAir] = useState(true);
-  const [tpKey, setTpKey] = useState("");
+  const tpKeyRef = useRef<HTMLInputElement>(null);
   return (
-    <div class="row" style="margin-top:6px">
-      <input placeholder="profile name" size={10}
-             onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-      <select value={travel}
+    <div class="row" style={{ marginTop: "6px" }}>
+      <input ref={nameRef} aria-label="profile name" placeholder="profile name"
+             size={10} />
+      <select aria-label="movement kit" value={travel}
               onChange={(e) => setTravel((e.target as HTMLSelectElement).value)}>
         <option value="flash">flash</option>
         <option value="teleport">teleport</option>
@@ -84,18 +84,20 @@ function NewClass({ onDone }: { onDone: () => void }) {
         air attacks
       </label>
       {travel === "teleport" && (
-        <input placeholder="tp key" size={6} value={tpKey}
-               onInput={(e) => setTpKey((e.target as HTMLInputElement).value)} />
+        <input ref={tpKeyRef} placeholder="tp key" aria-label="teleport key"
+               size={6} />
       )}
       <button class="primary"
               onClick={() => {
-                if (!name.trim()) return;
+                const name = nameRef.current?.value.trim() ?? "";
+                if (!name) return;
                 const spec: Record<string, unknown> = {
                   travel,
                   air_attacks: air,
                 };
-                if (travel === "teleport") spec.teleport_key = tpKey.trim();
-                send(`class|add|${name.trim()}|` + JSON.stringify(spec));
+                if (travel === "teleport")
+                  spec.teleport_key = tpKeyRef.current?.value.trim() ?? "";
+                send(`class|add|${name}|` + JSON.stringify(spec));
                 onDone();
               }}>
         Add
@@ -111,33 +113,33 @@ function ClassPanel({ s }: { s: AppState }) {
     <div class="panel">
       <h3>Class</h3>
       <div class="row">
-        <select value={s.classActive}
+        <select aria-label="class profile" value={s.classActive}
                 onChange={(e) =>
                   send(`class|use|${(e.target as HTMLSelectElement).value}`)}>
           {names.map((n) => (
             <option key={n} value={n}>{n}</option>
           ))}
         </select>
-        <label>{kitLabel(s.classActive, s.profiles[s.classActive])}</label>
+        <span>{kitLabel(s.classActive, s.profiles[s.classActive])}</span>
         <button onClick={() => setCreating(!creating)}>
           {creating ? "Cancel" : "+ new class…"}
         </button>
       </div>
       {creating && <NewClass onDone={() => setCreating(false)} />}
-      <div class="row" style="margin-top:6px">
-        <select value={s.policy}
+      <div class="row" style={{ marginTop: "6px" }}>
+        <select aria-label="patrol policy" value={s.policy}
                 onChange={(e) =>
                   send(`patrol|policy|${(e.target as HTMLSelectElement).value}`)}>
           <option value="weighted">weighted</option>
           <option value="greedy">greedy</option>
         </select>
-        <input type="number" step="0.1" min="0.05" style="width:64px"
-               value={s.temp}
-               onChange={(e) => {
-                 const v = parseFloat((e.target as HTMLInputElement).value);
-                 if (v >= 0.05) send(`patrol|temp|${v}`);
+        <input type="number" step="0.1" min="0.05" style={{ width: "64px" }}
+               aria-label="patrol weight temperature" value={s.temp}
+               onInput={(e) => {
+                 const v = Number.parseFloat((e.target as HTMLInputElement).value);
+                 if (!Number.isNaN(v) && v >= 0.05) send(`patrol|temp|${v}`);
                }} />
-        <label>patrol policy</label>
+        <span>patrol policy</span>
       </div>
     </div>
   );
@@ -235,7 +237,7 @@ function ViewCanvas({ s, arm }: { s: AppState; arm: (m: CanvasMode) => void }) {
           }
         }}
       />
-      <div class="row" style="margin-top:6px">
+      <div class="row" style={{ marginTop: "6px" }}>
         <button class={s.canvasMode === "plats" ? "armed" : ""}
                 onClick={() => arm("plats")}>
           Draw plats
@@ -260,11 +262,11 @@ function EventLog({ s }: { s: AppState }) {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [s.logs.length]);
   return (
-    <div class="panel" style="flex:1">
+    <div class="panel" style={{ flex: 1 }}>
       <h3>Events</h3>
       <div id="log" ref={ref}>
-        {s.logs.map((it, i) => (
-          <div key={i} class={`logline ${it.level ?? ""}`}>
+        {s.logs.map((it) => (
+          <div key={it.id ?? it.t ?? 0} class={`logline ${it.level ?? ""}`}>
             <span class="t">
               {it.t ? new Date(it.t * 1000).toLocaleTimeString() : ""}
             </span>
