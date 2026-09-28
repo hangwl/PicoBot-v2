@@ -110,6 +110,11 @@
   <span id="hazard" class="chip">hazard: none</span>
 </header>
 <div id="now">connecting…</div>
+<div id="status" class="row" style="padding:4px 14px; background:#101218; border-bottom:1px solid var(--edge); font-size:11px; color:var(--dim)">
+  <span id="stMap">map: –</span> ·
+  <span id="stClass">class: –</span> ·
+  <span id="stPolicy">policy: –</span>
+</div>
 <main>
   <div class="col" style="flex:1.2 1 360px">
     <div class="panel">
@@ -174,7 +179,31 @@
         <button id="startBot" class="primary">Start</button>
         <button id="stopBot" class="danger">Stop</button>
       </div>
+      <div class="row" style="margin-top:8px">
+        <select id="classSel" style="min-width:150px"
+          title="class profile: decides the movement kit (flash/teleport/walk), where attacks fire, and which moves the planner may use">
+          <option value="">(class)</option>
+        </select>
+        <label id="kitLbl" style="min-width:0">–</label>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <select id="policySel" title="loop ordering policy">
+          <option value="weighted">weighted</option>
+          <option value="greedy">greedy</option>
+        </select>
+        <input id="policyTemp" type="number" step="0.1" min="0.05" style="width:64px"
+          title="weighted roulette temperature: lower = more uniform, higher = more greedy">
+        <label>patrol policy</label>
+      </div>
     </div>
+    <details class="panel" open>
+      <summary>Setup checklist</summary>
+      <div class="row"><span id="ckMap" class="chip">map: –</span><label>title OCR identifies the map</label></div>
+      <div class="row"><span id="ckPlatsN" class="chip">platforms: –</span><button id="ckPlatsBtn">Draw plats</button></div>
+      <div class="row"><span id="ckAnchorsN" class="chip">anchors: –</span><button id="ckAnchorsBtn">Place anchors</button></div>
+      <div class="row"><span id="ckMeasureN" class="chip">measured: –</span><button id="ckMeasureBtn">Measure</button></div>
+      <div style="margin-top:4px"><label>identify → draw platforms → place anchors → measure moves → Start</label></div>
+    </details>
     <details class="panel" open>
       <summary>Measure moves</summary>
       <div class="row">
@@ -321,7 +350,7 @@ function connect() {
     wsRetry = 500;
     chip("ws", "ws: connected", "on");
     ["dash|subscribe|frames", "events|history", "bot|query", "config|get",
-     "skills|list", "host|state", "map|list"].forEach(m => ws.send(m));
+     "skills|list", "host|state", "map|list", "class|list"].forEach(m => ws.send(m));
   };
   ws.onclose = () => {
     chip("ws", `ws: reconnecting in ${Math.round(wsRetry / 1000)}s`, "bad");
@@ -415,6 +444,22 @@ function handleDash(p) {
       (p.title ? ` · title "${p.title}"` : "") +
       (p.score != null ? ` ${Math.round(p.score * 100)}%` : "") +
       (p.reading ? " · reading title…" : "");
+    setupState.plats = p.platforms_n || 0;
+    setupState.anchors = p.anchors_n || 0;
+    renderSetup();
+  } else if (p.event === "class") {
+    const sel = $("classSel"), cur = sel.value;
+    sel.innerHTML = Object.keys(p.profiles || {}).sort()
+      .map(n => `<option>${esc(n)}</option>`).join("");
+    sel.value = (p.profiles || {})[cur] ? cur : (p.active || "");
+    const kit = (p.profiles || {})[sel.value] || {};
+    $("kitLbl").textContent = kitText(sel.value, kit);
+    $("stClass").textContent = "class: " + kitText(sel.value, kit);
+    $("policySel").value = p.policy || "weighted";
+    $("policyTemp").value = p.temp != null ? p.temp : 1.0;
+    $("stPolicy").textContent = `policy: ${p.policy || "–"} (${p.temp ?? "–"})`;
+    setupState.measured = p.measured || 0;
+    renderSetup();
   } else if (p.event === "host") {
     fillSel($("portSel"), "(serial)",
       (p.ports || []).map(pt => [pt.device, pt.device + (pt.desc ? " · " + pt.desc : "")]),
@@ -557,7 +602,37 @@ $("vTitle").onclick = () => {
 };
 $("fpsSel").onchange = () => send("dash|fps|" + $("fpsSel").value);
 
-// The Map section is the single source of truth — every targeted action
+// --- Setup checklist + class/policy selectors --------------------------
+const setupState = { map: "", plats: 0, anchors: 0, measured: 0 };
+function kitText(name, kit) {
+  if (!name) return "–";
+  const t = kit.travel || "flash";
+  const key = t === "teleport" && kit.teleport_key ? ` (${kit.teleport_key})` : "";
+  return `${name} — ${t}${key}, ${kit.air_attacks === false ? "attacks on landing" : "air attacks"}`;
+}
+function renderSetup() {
+  const set = (id, ok, txt) => {
+    const el = $(id);
+    el.textContent = el.textContent.split(":")[0] + ": " + txt;
+    el.className = "chip " + (ok ? "on" : (ok === false ? "warn" : ""));
+  };
+  set("ckMap", !!setupState.map,
+      setupState.map ? `identified (${setupState.map})` : "not identified");
+  set("ckPlatsN", setupState.plats > 0, setupState.plats);
+  set("ckAnchorsN", setupState.anchors >= 2, setupState.anchors);
+  set("ckMeasureN", setupState.measured > 0,
+      setupState.measured > 0 ? setupState.measured + " moves" : "no data");
+}
+$("ckPlatsBtn").onclick = () => armPlats();
+$("ckAnchorsBtn").onclick = () => armAnchors();
+$("ckMeasureBtn").onclick = () => send("measure|start");
+$("policySel").onchange = () => send("patrol|policy|" + $("policySel").value);
+$("policyTemp").onchange = () => {
+  const v = parseFloat($("policyTemp").value);
+  if (v >= 0.05) send("patrol|temp|" + v);
+};
+
+// The Map section handlers — every targeted action
 // (walls, platforms, layout, calibration save) resolves through it.
 $("mapSel").onchange = () => {
   const v = $("mapSel").value;
@@ -698,6 +773,15 @@ $("winSel").onchange = e => { if (e.target.value) send("host|window|" + e.target
 $("portAuto").onclick = () => send("host|serial|auto");
 $("connRefresh").onclick = () => send("host|state");
 $("measureStart").onclick = () => send("measure|start");
+$("classSel").onchange = () => {
+  const v = $("classSel").value;
+  if (v) send("class|use|" + v);
+};
+$("policySel").onchange = () => send("patrol|policy|" + $("policySel").value);
+$("policyTemp").onchange = () => {
+  const v = parseFloat($("policyTemp").value);
+  if (v >= 0.05) send("patrol|temp|" + v);
+};
 $("measureStop").onclick = () => send("measure|stop");
 
 // Remote input pad: tap sends down + up (~90ms hold, human-ish).

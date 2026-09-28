@@ -397,6 +397,42 @@ class HostCommandTests(unittest.TestCase):
             )
             self.assertIsNone(MapStore(tmp).get("m1").walls)
 
+    def test_class_use_applies_profile_and_persists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.bot_config.class_profiles = {
+                "mage": {"travel": "teleport", "air_attacks": False,
+                         "teleport_key": "shift"},
+            }
+            self.host._class_use("mage")
+            cfg = self.host.bot_config
+            self.assertEqual(cfg.class_active, "mage")
+            self.assertEqual(cfg.class_travel, "teleport")
+            self.assertFalse(cfg.air_attacks)
+            self.assertEqual(cfg.teleport_key, "shift")
+            self.assertEqual(
+                (self.host.config.bot or {}).get("class", {}).get("active"),
+                "mage",
+            )
+            msgs = [e["msg"] for e in self.host.bus.history()
+                    if e["kind"] == "bot"]
+            self.assertTrue(any("class: mage" in m for m in msgs))
+
+    def test_class_use_unknown_profile_errors(self):
+        self.host._class_use("nope")
+        msgs = [
+            e["msg"] for e in self.host.bus.history() if e["kind"] == "error"
+        ]
+        self.assertTrue(any("no class profile" in m for m in msgs))
+
+    def test_patrol_policy_set_persists(self):
+        self.host._patrol_policy_set("greedy")
+        self.assertEqual(self.host.bot_config.patrol_policy, "greedy")
+        self.host._patrol_policy_set(temp="0.7")
+        self.assertEqual(self.host.bot_config.patrol_weight_temp, 0.7)
+        self.assertEqual(
+            (self.host.config.bot or {}).get("patrol_policy"), "greedy")
+
     def test_patrol_command_removed(self):
         # Patrol is the only multi-anchor mode now — the toggle is gone.
         self.assertFalse(

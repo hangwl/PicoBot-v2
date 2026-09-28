@@ -6,9 +6,22 @@ strings; pushes are `dash|{json}` text messages plus binary view frames.
 The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
 `ws_tls` is on.
 
+## Setup flow
+
+The left column walks the end-to-end setup as a checklist: **identify**
+the map (title OCR) → **draw platforms** → **place anchors** →
+**measure moves** → pick the **class profile** and **patrol policy** →
+**Start**. Each row shows its state (green = done) with a one-click
+jump to the tool. The status strip under the header shows the detected
+map, the active class kit, and the patrol policy at a glance. Switching
+the class profile applies **live** — the bot is stopped first (the kit
+decides which moves exist), the profile is persisted to config, and the
+planner rebuilds with the new kit.
+
 ## Panels
 
 - **Connection** — Pico DATA serial port (or *Auto* probe) and game
+  window title; persisted to `config.json`. — Pico DATA serial port (or *Auto* probe) and game
   window title; persisted to `config.json`.
 - **Map** — the single source of truth: selector pins a map
   (`active_map`), `auto-detect` defers to live identity, `+ new map…`
@@ -55,7 +68,8 @@ lose history; backlog entries render at their real timestamps.
 ## Protocol sketch
 
 ```
-client → host:  map|set|<name> | map|list | cal|start|mark|finish|<name>
+client → host:  map|set|<name> | map|list | class|list | class|use|<name>
+                patrol|policy|<weighted|greedy> | patrol|temp|<v>
                 layout|region|<minimap|title>|x,y,w,h
                 layout|plat|… | layout|anchor|… [ |<name>]
                 dash|view|<minimap|window|title> | dash|fps|<n>
@@ -65,5 +79,5 @@ client → host:  map|set|<name> | map|list | cal|start|mark|finish|<name>
                 layout|anchor|x,y | layout|anchor|del|x,y | layout|anchor|undo|clear  [|<name>]
 host → client:  binary frame: b"PBF1" | u32 BE json len | {"event":"frame","ox":…,"oy":…,"map":…} | JPEG
                 dash|{"event":"evt","kind":…,"level":…,"msg":…}
-                dash|{"event":"maps"|"skills"|"history"|…}
+                dash|{"event":"maps"|"class"|"skills"|"history"|…}
 ```

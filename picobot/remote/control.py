@@ -31,6 +31,7 @@ __all__ = [
 DASHBOARD_PREFIXES = (
     "bot|", "map|", "measure|", "dash|", "host|",
     "events|", "config|", "layout|", "skills|", "movekeys|", "nav|",
+    "class|", "patrol|",
 )
 
 

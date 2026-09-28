@@ -89,6 +89,14 @@ class _VisionFeed:
         self.screen.close()
 
 
+def _kit_summary(cfg) -> str:
+    """One-line class-kit summary for logs and the status strip."""
+    travel = cfg.class_travel
+    extra = f" ({cfg.teleport_key})" if travel == "teleport" else ""
+    attacks = "air attacks" if cfg.air_attacks else "attacks on landing"
+    return f"{travel}{extra}, {attacks}"
+
+
 def _offset_meta(snap: dict, dx: int, dy: int) -> None:
     """Shift region-space overlay coords by (dx, dy) — used when the
     frame image is the panel composite (title zone above the map) so
@@ -858,6 +866,14 @@ class BotHost:
     def _handle_command(self, msg: str) -> bool:
         if msg == "map|list":
             self._send_maps()
+        elif msg == "class|list":
+            self._send_class()
+        elif msg.startswith("class|use|"):
+            self._class_use(msg.split("|", 2)[2].strip())
+        elif msg.startswith("patrol|policy|"):
+            self._patrol_policy_set(msg.split("|", 2)[2])
+        elif msg.startswith("patrol|temp|"):
+            self._patrol_policy_set(temp=msg.split("|", 2)[2])
         elif msg.startswith("map|set|"):
             self._set_map(msg.split("|", 2)[2])
         elif msg == "measure|start":
@@ -908,6 +924,7 @@ class BotHost:
     def _send_maps(self) -> None:
         self._maps_sent_version = self.identity.version
         res = self.identity.current
+        entry = self._resolved_entry()
         payload = {
             "event": "maps",
             "maps": self.maps.names(),
@@ -917,8 +934,73 @@ class BotHost:
             "title": res.title,
             "score": res.score if res.title_map else None,
             "reading": self.identity.pending,
+            # Setup-checklist state for the resolved map.
+            "platforms_n": len(entry.platforms or []) if entry else 0,
+            "anchors_n": len(entry.rotation.anchors) if entry else 0,
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _send_class(self) -> None:
+        """Class profiles + patrol policy for the dashboard selectors."""
+        cfg = self.bot_config
+        self.remote.broadcast("dash|" + json.dumps({
+            "event": "class",
+            "active": cfg.class_active,
+            "profiles": {
+                name: {
+                    "travel": p.get("travel", "flash"),
+                    "air_attacks": bool(p.get("air_attacks", True)),
+                    "teleport_key": p.get("teleport_key"),
+                }
+                for name, p in (cfg.class_profiles or {}).items()
+            },
+            "policy": cfg.patrol_policy,
+            "temp": cfg.patrol_weight_temp,
+            "measured": sum(
+                1 for m, e in self.reach.est.items()
+                if e.dx > self.reach.base[m].dx * 1.05
+                or e.rise > self.reach.base[m].rise * 1.05
+            ),
+        }))
+
+    def _class_use(self, name: str) -> None:
+        """class|use|<name> — apply a class profile live (stops the bot
+        first: the kit decides which moves exist)."""
+        cfg = self.bot_config
+        if name not in (cfg.class_profiles or {}):
+            self.bus.emit("error", f"no class profile named {name!r}")
+            return
+        self.stop_bot()
+        cfg.class_active = name
+        cfg._apply_class({"active": name, "profiles": cfg.class_profiles},
+                         cfg)
+        bot_cfg = getattr(self.config, "bot", None) or {}
+        cls = dict(bot_cfg.get("class") or {})
+        cls["active"] = name
+        cls["profiles"] = cfg.class_profiles
+        bot_cfg["class"] = cls
+        self.config.bot = bot_cfg
+        save_config(self.config)
+        self.bus.emit("bot", f"class: {name} ({_kit_summary(cfg)})")
+        self._send_class()
+
+    def _patrol_policy_set(self, policy: str = "", temp=None) -> None:
+        cfg = self.bot_config
+        if policy in ("weighted", "greedy"):
+            cfg.patrol_policy = policy
+        if temp is not None:
+            cfg.patrol_weight_temp = max(0.05, float(temp))
+        bot_cfg = getattr(self.config, "bot", None) or {}
+        bot_cfg["patrol_policy"] = cfg.patrol_policy
+        bot_cfg["patrol_weight_temp"] = cfg.patrol_weight_temp
+        self.config.bot = bot_cfg
+        save_config(self.config)
+        self.bus.emit(
+            "bot",
+            f"patrol policy: {cfg.patrol_policy} "
+            f"(temp {cfg.patrol_weight_temp})",
+        )
+        self._send_class()
 
     def _set_map(self, name: str) -> None:
         pin = name or None
