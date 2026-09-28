@@ -18,12 +18,10 @@ class BotConfigTests(unittest.TestCase):
             "attack_keys": ["a", "s"],
             "stop_when_players_appear": False,
             "minimap_region": [10, 20, 100, 80],
-            "skill_gap_seconds": [0.2, 0.4],
         })
         self.assertEqual(cfg.attack_keys, ["a", "s"])
         self.assertFalse(cfg.stop_when_players_appear)
         self.assertEqual(cfg.minimap_region, (10, 20, 100, 80))
-        self.assertEqual(cfg.skill_gap_seconds, (0.2, 0.4))
 
     def test_class_profile_selects_kit(self):
         cfg = BotConfig.from_dict({"class": {
@@ -95,7 +93,6 @@ class BotConfigTests(unittest.TestCase):
     def test_rotation_and_map_options(self):
         cfg = BotConfig.from_dict({
             "rotation": {
-                "style": "pingpong",
                 "anchors": [{"pos": [0.2, 0.5]}, {"pos": [0.8, 0.5]}],
             },
             "travel_style": "flash",
@@ -105,7 +102,6 @@ class BotConfigTests(unittest.TestCase):
             "auto_select_map": False,
             "map_match_threshold": 12.5,
         })
-        self.assertEqual(cfg.rotation.style, "pingpong")
         self.assertEqual(len(cfg.rotation.anchors), 2)
         self.assertEqual(cfg.travel_style, "flash")
         self.assertEqual(cfg.flash_jump_key, "alt")

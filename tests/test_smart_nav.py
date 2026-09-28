@@ -219,7 +219,6 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot = SmartBot.__new__(SmartBot)
         bot._nav_cache = GraphCache()
         bot.config = BotConfig()
-        bot.config.dwell_weave = True
         bot.config.flash_jump_enabled = True
         bot.config.jump_key = "space"
         bot.config.weave_double_chance = 0.0
@@ -254,7 +253,6 @@ def _weave_bot(pos, bounds=(10, 90), anchor_xy=(0.25, 1.0 / 3.0)):
         bot._ckpt_ban = {}
         bot._travel_attack_at = 0.0
         bot._travel_target = None
-        bot._dwell_end = 0.0
         bot._arrive_pending = []
         bot.viz = {"player": None, "target": None}
         rot = Rotation(anchors=[Anchor("a0", *anchor_xy)])
@@ -402,20 +400,19 @@ class RoamFallbackTests(unittest.TestCase):
         bot = _weave_bot((50, 50))
         bot.player_pos = Mock(return_value=(50, 50))
         bot._weave_around = Mock()
-        bot._attack_cycle = Mock()
         bot.grind_once()
         bot.grind_once()
         self.assertEqual(bot._weave_around.call_count, 2)
         bot._weave_around.assert_called_with(50, 50)
-        bot._attack_cycle.assert_not_called()
         bot.player_pos.assert_called_once()           # origin fixed
 
-    def test_dwell_weave_off_keeps_stationary_attacks(self):
-        bot = _weave_bot((50, 50))
-        bot.config.dwell_weave = False
-        bot._attack_cycle = Mock()
+    def test_roam_weave_never_hands_off(self):
+        # No anchor to return to: the origin weave has no TRAVEL home.
+        bot = _weave_bot((50, 120), bounds=None)
+        bot._roam_origin = (50, 50)
         bot.grind_once()
-        bot._attack_cycle.assert_called_once()
+        self.assertIsNone(bot._travel_target)
+        self.assertEqual(bot.hid.presses, ["space", "space", "a"])
 
 
 class ArrivalSkillTests(unittest.TestCase):
@@ -468,7 +465,7 @@ class TravelKitTests(unittest.TestCase):
 
 
 class WeaveTests(unittest.TestCase):
-    """dwell_weave: hop across the anchor's platform, attack mid-air."""
+    """Single anchor: hop across its platform, attack mid-air."""
 
     def test_hop_weaves_attack_after_flash_jump(self):
         bot = _weave_bot((50, 50))
@@ -493,15 +490,43 @@ class WeaveTests(unittest.TestCase):
         bot._weave_attack()
         self.assertFalse(bot.skills.ready("burst"))  # cooldown now tracked
 
-    def test_stationary_attack_marks_cooldown(self):
-        # Regression: _attack_cycle pressed without mark_used, so any
-        # cooldown>0 attack stayed permanently "ready".
-        from picobot.bot.skills import Skill, SkillBook
+    def test_single_anchor_weaves_until_handoff(self):
+        # No timer: GRIND keeps weaving the anchor's platform.
         bot = _weave_bot((50, 50))
-        bot.config.dwell_weave = False
-        bot.skills = SkillBook({"burst": Skill("burst", "s", 30.0)})
-        bot._attack_cycle()
-        self.assertFalse(bot.skills.ready("burst"))
+        bot._patrol = Mock()
+        for _ in range(3):
+            bot.grind_tick()
+        self.assertFalse(bot.travel_due())
+        self.assertEqual(bot.hid.presses, ["space", "space", "a"] * 3)
+        bot._patrol.tick.assert_not_called()
+
+    def test_off_anchor_platform_hands_off_to_travel(self):
+        # Fell to another drawn platform: TRAVEL back, don't weave there.
+        bot = _weave_bot((50, 120))
+        bot._map.platforms = _plats(10, 90) + _plats(10, 190, y=120 / 150)
+        bot._weave_attack()
+        self.assertEqual(bot._travel_target, 0)
+        self.assertTrue(bot.travel_due())
+        self.assertEqual(bot.hid.presses, [])
+
+    def test_banned_home_halts_instead_of_retrying(self):
+        # A failed leg home bans the anchor; don't loop GRIND↔TRAVEL.
+        bot = _weave_bot((50, 120), bounds=None)
+        bot._ckpt_ban[0] = time.time() + 45
+        bot._weave_attack()
+        self.assertIsNone(bot._travel_target)
+        self.assertEqual(bot.hid.presses, [])
+        bot.sleep.assert_called_with(2.0)
+
+    def test_off_level_without_platforms_hands_off(self):
+        bot = _weave_bot((50, 120), bounds=None)
+        bot._weave_attack()
+        self.assertEqual(bot._travel_target, 0)
+
+    def test_begin_grind_has_no_timer(self):
+        bot = _weave_bot((50, 50))
+        bot.begin_grind()
+        self.assertFalse(bot.travel_due())
 
 
 class PatrolTests(unittest.TestCase):
@@ -553,17 +578,16 @@ class PatrolTests(unittest.TestCase):
         self.assertEqual(bot._route, [0])
 
     def test_level_change_hands_off_to_travel(self):
-        # Route head on another level → preset _travel_target and end
-        # the dwell so TRAVEL runs the recorded leg.
+        # Route head on another level → preset _travel_target so TRAVEL
+        # runs the recorded leg.
         rot = Rotation(
             anchors=[Anchor("a0", 0.25, 0.33), Anchor("a1", 0.75, 0.05)],
         )
         bot = self._bot((50, 50), rot)  # standing on a0 → route = [1]
-        bot._dwell_end = 9999.0
         bot._patrol_tick()
         self.assertEqual(bot._travel_target, 1)
         self.assertEqual(bot._route, [])
-        self.assertTrue(bot.dwell_done())
+        self.assertTrue(bot.travel_due())
 
     def _two_ledges(self, bot):
         # Same height, separated by a gap: 10–90 and 110–190 at y=50.
@@ -646,19 +670,17 @@ class PatrolTests(unittest.TestCase):
         bot._patrol_tick()
         self.assertEqual(bot.hid.presses, ["space", "space", "a"])
 
-    def test_dwell_dispatches_to_patrol(self):
+    def test_grind_dispatches_to_patrol(self):
         bot = self._bot((60, 50), self._rot())
         bot._patrol = Mock()
-        bot.dwell_tick()
+        bot.grind_tick()
         bot._patrol.tick.assert_called_once()
 
-    def test_dwell_is_open_ended_for_patrol(self):
-        # ≥2 anchors: dwell expires only via patrol handoff — mid-patrol
-        # dwell expiry would force attack-free walk legs.
+    def test_grind_is_open_ended_for_patrol(self):
+        # ≥2 anchors: GRIND leaves only via a patrol handoff.
         bot = self._bot((60, 50), self._rot())
-        with patch("random.random", return_value=0.5):  # no breather
-            bot.begin_dwell()
-        self.assertFalse(bot.dwell_done())
+        bot.begin_grind()
+        self.assertFalse(bot.travel_due())
 
 
 class TravelWeaveTests(unittest.TestCase):

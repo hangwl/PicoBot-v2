@@ -24,7 +24,6 @@ class PatrolBot(SimBot):
         self._arrive_pending = []
         self._weave_dir = self._weave_bounds = None
         self.weaves = 0
-        self.attacks = 0
         self._patrol_tick = Mock()
         self._run_leg = Mock(return_value=True)
 
@@ -45,9 +44,6 @@ class PatrolBot(SimBot):
 
     def _weave_attack(self):
         self.weaves += 1
-
-    def _attack_once(self):
-        self.attacks += 1
 
     def _arrival_skills(self, anchor, now):
         return []
@@ -74,7 +70,6 @@ class PatrolTests(unittest.TestCase):
                     if l.startswith("Checkpoint:")]
         self.assertGreaterEqual(len(arrivals), 5)          # looped more than once
         self.assertEqual(set(arrivals), {"a0", "a1", "a2"})
-        self.assertEqual(bot.attacks, 0)                   # never parked
         self.assertEqual(bot.weaves, 0)                    # no linger
         self.assertEqual(bot._patrol_tick.call_count, 0)
 
@@ -150,7 +145,7 @@ class PatrolTests(unittest.TestCase):
         bot._blind_wait = Mock()
         Patrol(bot).tick()
         bot._blind_wait.assert_called_once()
-        self.assertEqual((bot.attacks, bot.moves), (0, []))
+        self.assertEqual((bot.weaves, bot.moves), (0, []))
 
     def test_no_platforms_falls_back_to_straight_line_patrol(self):
         bot = PatrolBot([], (10, 40), [(20, 100), (180, 100)])
@@ -179,7 +174,7 @@ class PatrolTests(unittest.TestCase):
         p._last_pos = (60, 100)                     # last known position
         p.tick()
         bot.rope_exit.assert_called_once()
-        self.assertEqual(bot.attacks, 0)
+        self.assertEqual(bot.weaves, 0)
 
     def test_stable_off_graph_position_learns_a_rope(self):
         # Hanging on an (undrawn) game rope: stable + off-graph for >2s

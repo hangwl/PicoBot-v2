@@ -865,13 +865,11 @@ class HostCommandTests(unittest.TestCase):
         self.assertIsNone(bot_cfg["flash_jump"]["key"])
         self.save_mock.assert_called()
 
-    def test_movekeys_set_nav_radius_and_weave(self):
+    def test_movekeys_set_nav_radius(self):
         self.assertTrue(self.host._handle_command(
-            'movekeys|set|{"nav_threshold_px":6,"dwell_weave":false}'))
+            'movekeys|set|{"nav_threshold_px":6}'))
         self.assertEqual(self.host.bot_config.nav_threshold_px, 6)
-        self.assertFalse(self.host.bot_config.dwell_weave)
         self.assertEqual(self.host.config.bot["nav_threshold_px"], 6)
-        self.assertFalse(self.host.config.bot["dwell_weave"])
         self.host._handle_command(
             'movekeys|set|{"nav_threshold_px":99}')  # clamped
         self.assertEqual(self.host.bot_config.nav_threshold_px, 15)

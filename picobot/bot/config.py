@@ -38,9 +38,6 @@ class BotConfig:
     up_jump_skill_key: Optional[str] = None  # e.g. a rope-lift skill; None = use combo
     up_jump_skill_cooldown: float = 3.0     # rope lift re-cast delay
 
-    # -- Timing ----------------------------------------------------------------
-    skill_gap_seconds: Tuple[float, float] = (0.5, 1.0)  # base gap between attacks
-
     # -- Navigation ------------------------------------------------------------
     walk_band_px: int = 8                 # walk only this close to the target
     nav_threshold_px: int = 5             # minimap px tolerance for "arrived"
@@ -72,8 +69,7 @@ class BotConfig:
             return str(p.with_name(f"{p.stem}_{self.class_active}{p.suffix}"))
         return self.nav_reach_file
 
-    # -- Dwell weave -------------------------------------------------------------
-    dwell_weave: bool = True              # move + weave attacks at anchors
+    # -- Weave -------------------------------------------------------------------
     weave_double_chance: float = 0.4      # P(2 attacks) per flash weave, else 1
     weave_range_px: int = 24              # fallback half-width around the anchor
     weave_edge_margin_px: int = 4         # stay this far inside platform bounds
@@ -197,7 +193,7 @@ class BotConfig:
         cfg = cls()
         bools = (
             "stop_when_players_appear", "stop_when_rune_appears",
-            "pause_on_lie_detector", "dwell_weave", "name_ocr",
+            "pause_on_lie_detector", "name_ocr",
         )
         for name in bools:
             if name in data:
@@ -235,9 +231,6 @@ class BotConfig:
             cfg.up_jump_skill_key = str(v) if v else None
         if data.get("nav_reach_file"):
             cfg.nav_reach_file = str(data["nav_reach_file"])
-        if "skill_gap_seconds" in data:
-            lo, hi = data["skill_gap_seconds"]
-            cfg.skill_gap_seconds = (float(lo), float(hi))
         if "minimap_colors" in data:
             cfg.minimap_colors = MinimapColors.from_dict(data["minimap_colors"])
         if "minimap_region" in data and data["minimap_region"]:

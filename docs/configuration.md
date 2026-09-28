@@ -12,7 +12,6 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "jump_key": "alt",
     "up_jump_skill_key": null,
     "up_jump_skill_cooldown": 3.0,
-    "skill_gap_seconds": [0.5, 1.0],
     "walk_band_px": 8,
     "class": {
       "active": "default",
@@ -46,7 +45,6 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
     "flash_repress_seconds": 0.15,
     "combo_repress_seconds": 0.16,
     "vert_jump_interval": 0.9,
-    "dwell_weave": true,
     "weave_double_chance": 0.4,
     "weave_range_px": 24,
     "stop_when_players_appear": true,
@@ -123,8 +121,9 @@ fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
   relearn. See [bot-behavior.md](bot-behavior.md#moves--learned-reach-navgraphpy-reachpy-navigatorpy).
 - Removed keys (`stationary_mode`, `enable_random_wander`,
   `stationary_seconds`, `wander_seconds`, `wander_edge_margin_px`,
-  `linger_hops`, `wall_zone_px`, `wall_pad_px`, rotation
-  `wander_chance`/`rest_chance`) are ignored.
+  `linger_hops`, `wall_zone_px`, `wall_pad_px`, `dwell_weave`,
+  `skill_gap_seconds`, rotation `style`/`wander_chance`/`rest_chance`,
+  anchor `dwell`) are ignored.
 - `anchor_float_px` — how far placed anchors hover above the drawn
   platform line (matching the player icon).
 - `flash_repress_seconds` / `combo_repress_seconds` — mid-air re-press

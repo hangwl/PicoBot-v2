@@ -42,8 +42,10 @@ loop:
   platforms drawn but the player off all of them → wait with a throttled
   "not on any drawn platform" diagnostic (the legacy patrol would plan
   routes from an off-graph start and ban every anchor); one anchor →
-  weave on its platform; no anchors → weave around where grinding
-  started (`dwell_weave: false` attacks in place).
+  weave on its platform indefinitely (standing on another platform or
+  level hands the anchor to TRAVEL, or takes a break while a failed
+  leg has it banned); no anchors → weave around where
+  grinding started.
 - Platform matching is asymmetric: the player glyph floats above the
   drawn row, so a point matches its platform when it sits up to
   `snap_px` above the row (and up to 2px below) — stacked tiers stay
@@ -183,10 +185,9 @@ Bot-controlled movement looks like a player farming, not a macro:
   and up-then-side flashes all weave 1–2 attacks once the flash has
   triggered (`_after_flash`). Attacks never fire outside a flash move in
   the moving paths — with no player dot the bot waits instead of
-  attacking in place. (`dwell_weave: false` is the one stationary mode.)
-- Linger/roam weaving uses the same primitive, bouncing across the
-  platform; it never starts a hop that would land inside a (padded) wall
-  zone.
+  attacking in place. There is no stationary mode.
+- Single-anchor and roam weaving use the same primitive, bouncing
+  between the drawn platform's ends.
 - All gaps are log-normal (`timing.human_between`: clamped to the game's
   input windows, e.g. re-press 0.11–0.26s around 0.17s).
 
@@ -200,9 +201,8 @@ Registered skills have `key`, `kind`, `cooldown`:
   `wait_on_arrival` caps how long the bot waits for its cooldown.
 - Movement keys (jump, flash, rope-lift) register the same way.
 
-`dwell` bounds single-anchor parking; `position_jitter_px` adds entropy
-to hand-authored walk legs. There is no wander state or idle breather —
-the bot keeps moving.
+`position_jitter_px` adds entropy to hand-authored walk legs. There is
+no wander state, dwell timer or idle breather — the bot keeps moving.
 
 ## Boundaries (no wall zones)
 

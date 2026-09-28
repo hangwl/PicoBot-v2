@@ -97,7 +97,6 @@ class SmartBot(BotBase):
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0
         self._travel_target: Optional[int] = None
-        self._dwell_end = 0.0
         self._arrive_pending: List[Tuple[Skill, float]] = []
         self._minimap_warned = False
         self._last_up_skill = 0.0
@@ -309,6 +308,7 @@ class SmartBot(BotBase):
                 self.log(f"Map: {entry.name} ({res.via})")
             self.skills = SkillBook(merged)
             self._anchor_idx = 0
+            self._travel_target = None
             self._weave_dir = None
             self._weave_bounds = None
             self._route = []
@@ -1041,14 +1041,11 @@ class SmartBot(BotBase):
                     return False
         return self.unsafe_reason() is None
 
-    # -- Dwell ---------------------------------------------------------------------
-    def begin_dwell(self) -> None:
-        """Start a farming dwell at the current anchor (or legacy timer).
-
-        With ≥2 anchors the dwell is a checkpoint patrol — it runs until
-        the route hands off a cross-level checkpoint to TRAVEL, so
-        ``_dwell_end`` stays open-ended. Smaller rotations keep the
-        per-anchor dwell timer."""
+    # -- Grind ---------------------------------------------------------------------
+    def begin_grind(self) -> None:
+        """Enter GRIND at the current anchor: face it and queue its
+        arrival skills. Farming runs until a tick hands a target to
+        TRAVEL (``travel_due``)."""
         rot = self.effective_rotation()
         now = time.time()
         self._weave_dir = None
@@ -1059,13 +1056,8 @@ class SmartBot(BotBase):
             if anchor.face:
                 self.hid.press(anchor.face)
             self._arrive_pending = self._arrival_skills(anchor, now)
-            dwell = anchor.dwell_seconds()
-            self._dwell_end = (
-                float("inf") if len(rot.anchors) >= 2 else now + dwell
-            )
         else:
             self._arrive_pending = []
-            self._dwell_end = float("inf")
 
     def _arrival_skills(self, anchor, now: float) -> list:
         """(skill, deadline) pairs to fire at ``anchor``: its ``on_arrive``
@@ -1080,10 +1072,10 @@ class SmartBot(BotBase):
             if (s := self.skills.get(name)) is not None
         ]
 
-    def dwell_done(self) -> bool:
-        return time.time() >= self._dwell_end
+    def travel_due(self) -> bool:
+        return self._travel_target is not None
 
-    def dwell_tick(self) -> None:
+    def grind_tick(self) -> None:
         """One farming tick: arrival skills, buffs, then patrol/weave."""
         now = time.time()
         for skill, deadline in list(self._arrive_pending):
@@ -1099,10 +1091,8 @@ class SmartBot(BotBase):
                 self.sleep(human_between(0.3, 0.2, 0.45))
         if len(self.effective_rotation().anchors) >= 2:
             self.patrol.tick()
-        elif self.config.dwell_weave:
-            self._weave_attack()
         else:
-            self._attack_once()
+            self._weave_attack()
 
     def _weave_attack(self) -> None:
         """Move while farming: bounce across the anchor's platform and
@@ -1110,20 +1100,34 @@ class SmartBot(BotBase):
         jump again (the FJ re-press). Players don't stand still on a
         farm; neither should the bot. The hop is bounded inside one tick
         (keys released before return) so a hazard pause can't leave a
-        direction held."""
+        direction held. A player standing off the anchor's platform
+        hands the anchor to TRAVEL instead."""
         rot = self.effective_rotation()
         if not rot.anchors or self._anchor_idx >= len(rot.anchors):
             self.grind_once()
             return
         anchor = rot.anchors[self._anchor_idx]
-        self._weave_around(self._rx(anchor.x), self._ry(anchor.y))
+        self._weave_around(
+            self._rx(anchor.x), self._ry(anchor.y), home=self._anchor_idx
+        )
 
-    def _weave_around(self, ax: float, ay: float) -> None:
-        """One flash weave bouncing across the platform under (ax, ay)."""
+    def _weave_around(
+        self, ax: float, ay: float, home: Optional[int] = None
+    ) -> None:
+        """One flash weave bouncing across the platform under (ax, ay).
+        With ``home`` set, a player away from that platform queues a
+        TRAVEL back to anchor ``home`` rather than weaving — or, while a
+        failed leg has ``home`` banned, halts until the ban lapses."""
         cfg = self.config
         img = self.minimap_frame()
         pos = self.minimap.player_pos(img) if img is not None else None
         self.viz["player"] = pos
+        if home is not None and pos is not None and self._off_home(pos, (ax, ay)):
+            if self._ckpt_ban.get(home, 0.0) > time.time():
+                self._no_path_break()
+            else:
+                self._travel_target = home
+            return
         # Platform bounds: the drawn platform segment under the anchor,
         # cached per dwell; ±weave_range fallback when none is drawn.
         if self._weave_bounds is None:
@@ -1156,6 +1160,21 @@ class SmartBot(BotBase):
                 direction = "left" if room_l > room_r else "right"
         self._weave_dir = direction
         self._weave_hop(direction)
+
+    def _off_home(self, pos, goal) -> bool:
+        """``pos`` stands where a weave can't reach ``goal``: another
+        drawn platform, or — with none drawn — another level."""
+        if self._nav_graph() is not None:
+            return self._other_platform(pos, goal)
+        return abs(goal[1] - pos[1]) > max(8, self.config.nav_threshold_px * 2)
+
+    def _no_path_break(self) -> None:
+        """No path home: halt rather than weave off-plan."""
+        now = time.time()
+        if now - getattr(self, "_break_logged", 0.0) > 5.0:
+            self._break_logged = now
+            self.log("No planned path home — taking a break")
+        self.sleep(2.0)
 
     def _weave_hop(self, direction: str) -> None:
         self._weave_move(direction)
@@ -1205,15 +1224,12 @@ class SmartBot(BotBase):
 
         Every tick attacks — arrival bookkeeping and cross-level handoffs
         no longer burn a hop. Checkpoints on another level set
-        ``_travel_target`` and end the dwell so TRAVEL runs the leg; a
+        ``_travel_target`` so TRAVEL runs the leg; a
         head that can't be reached in ~20s is skipped (and briefly
         banned) so a bad checkpoint can't stall the loop forever."""
         rot = self.effective_rotation()
         if len(rot.anchors) < 2:
-            if self.config.dwell_weave:
-                self._weave_attack()
-            else:
-                self._attack_once()
+            self._weave_attack()
             return
         cfg = self.config
         img = self.minimap_frame()
@@ -1242,7 +1258,6 @@ class SmartBot(BotBase):
                 self._route.pop(0)
                 self._ckpt_idx = None
                 self._travel_target = idx
-                self._dwell_end = now
                 return
             if abs(tx - pos[0]) > cfg.nav_threshold_px:
                 break  # not there yet — head for it below
@@ -1290,9 +1305,8 @@ class SmartBot(BotBase):
 
         Registered attack skills fire while the bot walks/hops between
         checkpoints — nothing registered means nothing fires. The ~0.4s
-        gate keeps a 0-cooldown key from becoming a 20Hz spam loop, and
-        unlike ``_attack_once`` the not-ready path doesn't sleep (the
-        nav loop owns the pacing here).
+        gate keeps a 0-cooldown key from becoming a 20Hz spam loop; the
+        not-ready path doesn't sleep (the nav loop owns the pacing).
         """
         now = time.time()
         if now < self._travel_attack_at:
@@ -1300,16 +1314,6 @@ class SmartBot(BotBase):
         skill = self._pick_attack()
         if skill is not None and self._use_skill(skill):
             self._travel_attack_at = now + human_between(0.43, 0.33, 0.6)
-
-    def _attack_once(self) -> None:
-        """Stationary single attack tick (legacy dwell path)."""
-        skill = self._pick_attack()
-        if skill is None:
-            self.sleep(0.2)
-            return
-        if self._use_skill(skill):
-            lo, hi = self.config.skill_gap_seconds
-            self.sleep(human_between((lo + hi) / 2, lo * 0.8, hi * 1.5, 0.35))
 
     # -- Attacks & skills -----------------------------------------------------------
     def _use_skill(self, skill: Skill) -> bool:
@@ -1329,22 +1333,10 @@ class SmartBot(BotBase):
         cooldown_ready = [s for s in ready if s.cooldown > 0]
         return random.choice(cooldown_ready or ready)
 
-    def _attack_cycle(self) -> None:
-        for buff in self.skills.due_buffs():
-            if not self.should_continue():
-                break
-            if self._use_skill(buff):
-                self.sleep(human_between(0.6, 0.4, 0.9))
-        self._attack_once()
-
     def grind_once(self) -> None:
         """No-rotation tick: due buffs, then keep moving — weave-hop
-        around where grinding started (``dwell_weave: false`` attacks in
-        place)."""
+        around where grinding started."""
         if not self.is_window_focused() or not self.should_continue():
-            return
-        if not self.config.dwell_weave:
-            self._attack_cycle()
             return
         for buff in self.skills.due_buffs():
             if self._use_skill(buff):

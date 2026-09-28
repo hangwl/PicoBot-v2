@@ -1,4 +1,3 @@
-import time
 import unittest
 from unittest import mock
 
@@ -27,9 +26,8 @@ class FakeBot:
         self._focused = True
         self._rune = False
         self._players = False
-        self._dwell_end = 0.0
         self.grind_calls = 0
-        self.dwell_ticks = 0
+        self.grind_ticks = 0
         self.notifications = []
 
     # BotBase-compatible surface
@@ -66,21 +64,21 @@ class FakeBot:
     def notify(self, msg):
         self.notifications.append(msg)
 
-    # Rotation surface (no rotation configured -> legacy path)
+    # Rotation surface (no rotation configured -> roam weave)
     def rotation_active(self):
         return False
 
     def effective_rotation(self):
         return self.config.rotation
 
-    def begin_dwell(self):
-        self._dwell_end = float("inf")
+    def begin_grind(self):
+        pass
 
-    def dwell_done(self):
-        return time.time() >= self._dwell_end
+    def travel_due(self):
+        return False
 
-    def dwell_tick(self):
-        self.dwell_ticks += 1
+    def grind_tick(self):
+        self.grind_ticks += 1
         self._continue = False
 
     def begin_travel(self):
@@ -145,7 +143,6 @@ class MachineTests(unittest.TestCase):
     def test_grind_without_rotation_never_leaves_grind(self):
         # No WANDER state any more: without a rotation GRIND keeps going.
         bot = FakeBot()
-        bot._dwell_end = 0.0
         machine = Machine(bot)
         machine.current_state = Grind(bot)
         self.assertFalse(machine.switch())

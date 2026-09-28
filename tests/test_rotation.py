@@ -61,51 +61,25 @@ class StepParseTests(unittest.TestCase):
 class AnchorTests(unittest.TestCase):
     def test_from_dict(self):
         a = Anchor.from_dict({
-            "pos": [0.3, 0.5], "dwell": [4, 9],
+            "pos": [0.3, 0.5], "dwell": [4, 9],  # old maps: ignored
             "on_arrive": ["fountain"], "face": "left",
         }, 0)
         self.assertEqual((a.x, a.y), (0.3, 0.5))
-        self.assertEqual(a.dwell, (4.0, 9.0))
+        self.assertNotIn("dwell", a.to_dict())
         self.assertEqual(a.on_arrive, ("fountain",))
         self.assertEqual(a.face, "left")
 
     def test_requires_pos(self):
         with self.assertRaises(ValueError):
-            Anchor.from_dict({"dwell": [1, 2]})
-
-    def test_dwell_seconds_in_range(self):
-        a = Anchor("x", 0.5, 0.5, dwell=(5.0, 9.0))
-        for _ in range(50):
-            self.assertGreaterEqual(a.dwell_seconds(), 5.0)
-            self.assertLessEqual(a.dwell_seconds(), 9.0)
+            Anchor.from_dict({"name": "x"})
 
 
 class RotationTests(unittest.TestCase):
-    def _rotation(self, style="loop"):
+    def _rotation(self):
         return Rotation.from_dict({
-            "style": style,
             "anchors": [{"pos": [0.1, 0.5]}, {"pos": [0.5, 0.5]},
                         {"pos": [0.9, 0.5]}],
         })
-
-    def test_loop_wraps(self):
-        rot = self._rotation("loop")
-        self.assertEqual(rot.next_index(0), (1, 1))
-        self.assertEqual(rot.next_index(2), (0, 1))
-
-    def test_pingpong_reverses(self):
-        rot = self._rotation("pingpong")
-        self.assertEqual(rot.next_index(0, 1), (1, 1))
-        idx, direction = rot.next_index(2, 1)
-        self.assertEqual((idx, direction), (1, -1))
-        idx, direction = rot.next_index(0, -1)
-        self.assertEqual((idx, direction), (1, 1))
-
-    def test_shuffle_never_stays(self):
-        rot = self._rotation("shuffle")
-        for _ in range(20):
-            idx, _ = rot.next_index(1, 1)
-            self.assertNotEqual(idx, 1)
 
     def test_default_leg_walks_to_anchor(self):
         rot = self._rotation()
@@ -134,14 +108,14 @@ class RotationTests(unittest.TestCase):
 
     def test_rotation_round_trip(self):
         rot = Rotation.from_dict({
-            "style": "pingpong",
+            "style": "pingpong",  # old maps: ignored
             "position_jitter_px": 6,
             "anchors": [{"name": "a", "pos": [0.1, 0.5],
                          "on_arrive": ["f"], "face": "left"}],
             "legs": [{"from": 0, "to": 0, "steps": [{"wait": 1}]}],
         })
         rot2 = Rotation.from_dict(rot.to_dict())
-        self.assertEqual(rot2.style, "pingpong")
+        self.assertNotIn("style", rot.to_dict())
         self.assertEqual(rot2.position_jitter_px, 6)
         self.assertEqual(rot2.anchors[0].on_arrive, ("f",))
         self.assertIn((0, 0), rot2.legs)

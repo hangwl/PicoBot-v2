@@ -12,12 +12,10 @@ region) so a rotation survives resolution/window-size changes; values
 Config shape (inside ``"rotation"`` in config.json or a map file)::
 
     {
-      "style": "loop",              // legacy — traversal order is planned
-                                    // as a checkpoint route, not by style
       "position_jitter_px": 4,      // aim near the anchor, never exactly on it
       "travel_style": "mixed",      // walk | flash | mixed (default leg style)
       "anchors": [
-        {"name": "west", "pos": [0.31, 0.55], "dwell": [8, 14],
+        {"name": "west", "pos": [0.31, 0.55],
          "on_arrive": ["fountain"], "face": "left"}
       ],
       "legs": [
@@ -32,13 +30,11 @@ Config shape (inside ``"rotation"`` in config.json or a map file)::
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 Coord = Tuple[float, float]
 
-ROTATION_STYLES = ("loop", "pingpong", "shuffle")
 TRAVEL_STYLES = ("walk", "flash", "mixed")
 CLIMB_DIRS = ("up", "down")
 
@@ -114,7 +110,6 @@ class Anchor:
     name: str
     x: float
     y: float
-    dwell: Tuple[float, float] = (8.0, 14.0)  # stay bound (1-anchor maps)
     on_arrive: Tuple[str, ...] = ()           # skill names to fire on arrival
     face: Optional[str] = None                # left | right tap after arriving
 
@@ -123,9 +118,6 @@ class Anchor:
         pos = data.get("pos")
         if not pos or len(pos) != 2:
             raise ValueError(f"anchor #{index}: 'pos' must be [x, y]")
-        dwell = data.get("dwell", [8, 14])
-        if len(dwell) != 2:
-            raise ValueError(f"anchor #{index}: 'dwell' must be [lo, hi]")
         face = data.get("face")
         if face is not None and face not in ("left", "right"):
             raise ValueError(f"anchor #{index}: 'face' must be left|right")
@@ -133,20 +125,12 @@ class Anchor:
             name=str(data.get("name", f"anchor_{index}")),
             x=float(pos[0]),
             y=float(pos[1]),
-            dwell=(float(dwell[0]), float(dwell[1])),
             on_arrive=tuple(str(s) for s in data.get("on_arrive", ())),
             face=face,
         )
 
-    def dwell_seconds(self) -> float:
-        lo, hi = self.dwell
-        if hi <= lo:
-            return lo
-        return min(hi, max(lo, random.lognormvariate(0.0, 0.25) * (lo + hi) / 2))
-
     def to_dict(self) -> dict:
-        out = {"name": self.name, "pos": [self.x, self.y],
-               "dwell": list(self.dwell)}
+        out = {"name": self.name, "pos": [self.x, self.y]}
         if self.on_arrive:
             out["on_arrive"] = list(self.on_arrive)
         if self.face:
@@ -160,26 +144,8 @@ class Rotation:
 
     anchors: List[Anchor] = field(default_factory=list)
     legs: Dict[Tuple[int, int], List[Step]] = field(default_factory=dict)
-    style: str = "loop"
     position_jitter_px: int = 4
     travel_style: str = "mixed"
-
-    # -- Traversal -----------------------------------------------------------
-    def next_index(self, current: int, direction: int = 1) -> Tuple[int, int]:
-        """Next anchor index and (possibly flipped) pingpong direction."""
-        n = len(self.anchors)
-        if n <= 1:
-            return current, direction
-        if self.style == "shuffle":
-            choices = [i for i in range(n) if i != current]
-            return random.choice(choices), direction
-        if self.style == "pingpong":
-            nxt = current + direction
-            if nxt < 0 or nxt >= n:
-                direction = -direction
-                nxt = current + direction
-            return nxt, direction
-        return (current + 1) % n, direction
 
     def leg_steps(self, from_idx: int, to_idx: int) -> List[Step]:
         """Steps for a leg; defaults to a direct walk to the anchor.
@@ -251,23 +217,18 @@ class Rotation:
             if not (0 <= f < len(anchors) and 0 <= t < len(anchors)):
                 raise ValueError(f"leg ({f},{t}) out of range")
             legs[(f, t)] = [Step.from_dict(s) for s in leg.get("steps") or []]
-        style = str(data.get("style", "loop"))
-        if style not in ROTATION_STYLES:
-            raise ValueError(f"rotation style must be one of {ROTATION_STYLES}")
         travel_style = str(data.get("travel_style", "mixed"))
         if travel_style not in TRAVEL_STYLES:
             raise ValueError(f"travel_style must be one of {TRAVEL_STYLES}")
         return cls(
             anchors=anchors,
             legs=legs,
-            style=style,
             position_jitter_px=int(data.get("position_jitter_px", 4)),
             travel_style=travel_style,
         )
 
     def to_dict(self) -> dict:
         return {
-            "style": self.style,
             "position_jitter_px": self.position_jitter_px,
             "travel_style": self.travel_style,
             "anchors": [a.to_dict() for a in self.anchors],
@@ -282,7 +243,6 @@ __all__ = [
     "Anchor",
     "Rotation",
     "Step",
-    "ROTATION_STYLES",
     "TRAVEL_STYLES",
     "resolve_coord",
 ]

@@ -103,3 +103,11 @@ fixed that — all 15 captured reads exact afterwards.
 - **Dwell-parking between anchors** replaced by planned checkpoint
   routes with attack weaving during travel — parking looked robotic and
   blind travel legs wasted time.
+- **Single-anchor dwell timer and stationary attacks removed**
+  (2026-09-29). One-anchor maps kept an 8–14s timer that handed off to
+  TRAVEL — to the same anchor — and `dwell_weave: false` attacked in
+  place. The timer's only real job was recovery after falling off the
+  platform; a position check (another drawn platform, or another level
+  with none drawn) now queues TRAVEL home directly, so GRIND leaves only
+  on a plan handoff. Rotation `style` (loop/pingpong/shuffle) was dead
+  too — order comes from the patrol planner.
