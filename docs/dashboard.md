@@ -4,7 +4,10 @@ Served at `http://localhost:8000` (Tailscale `http://<host>.ts.net:8000`
 for remote). Single-page WebSocket UI — commands are `|`-delimited
 strings; pushes are `dash|{json}` text messages plus binary view frames.
 The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
-`ws_tls` is on.
+`ws_tls` is on. A heartbeat catches links that die without closing (a
+sleeping phone, a network switch): 12s of silence — or no answer within
+3s of coming back to the foreground — drops the socket and reconnects,
+with the top bar showing *Reconnecting*.
 
 ## The app
 

@@ -18,7 +18,8 @@ import {
 type Tone = "ok" | "warn" | "off";
 
 export function botStatus(s: AppState): [string, Tone] {
-  if (s.ws !== "on") return ["Offline", "off"];
+  if (s.ws === "connecting") return ["Connecting", "off"];
+  if (s.ws !== "on") return ["Reconnecting", "off"];
   if (s.measure.running) return ["Measuring", "warn"];
   if (!s.botRunning) return ["Stopped", "off"];
   if (s.hazard !== "none" || s.botState === "PAUSE") return ["Paused", "warn"];

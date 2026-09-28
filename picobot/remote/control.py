@@ -8,6 +8,7 @@ import logging
 import queue
 import ssl
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -220,6 +221,8 @@ class AsyncWebsocketBridge:
 
 class RemoteControlServer:
     """Runs a WebSocket server in background threads and relays commands to Pico."""
+
+    FRAME_STALL_S = 10.0
 
     def __init__(
         self,
@@ -453,18 +456,33 @@ class RemoteControlServer:
         """Send a binary frame to clients subscribed via
         ``dash|subscribe|frames``. A client whose previous frame is still
         in flight skips this one — slow links drop frames instead of
-        queueing them ahead of control messages."""
+        queueing them ahead of control messages. A frame stuck for
+        ``FRAME_STALL_S`` (a frozen tab that stopped reading) closes that
+        connection so the client reconnects instead of starving."""
         loop = self.bridge._loop if self.bridge else None
         if loop is None:
             return
+        now = time.monotonic()
         with self.clients_lock:
             for client in list(self.frame_clients):
                 prev = self._frame_inflight.get(client)
-                if prev is not None and not prev.done():
+                if prev is not None and not prev[0].done():
+                    if now - prev[1] > self.FRAME_STALL_S:
+                        self.frame_clients.discard(client)
+                        self._frame_inflight.pop(client, None)
+                        self._log("WS: frame send stuck — closing that client")
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                client.close(code=1011, reason="frame send stalled"),
+                                loop,
+                            )
+                        except Exception:
+                            pass
                     continue
                 try:
-                    self._frame_inflight[client] = asyncio.run_coroutine_threadsafe(
-                        client.send(data), loop
+                    self._frame_inflight[client] = (
+                        asyncio.run_coroutine_threadsafe(client.send(data), loop),
+                        now,
                     )
                 except Exception:
                     pass

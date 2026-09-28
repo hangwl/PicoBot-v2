@@ -274,10 +274,18 @@ class FrameStreamer:
         interval: float = 0.35,
         quality: int = 70,
         active: Optional[Callable[[], bool]] = None,
+        on_stall: Optional[Callable[[str], None]] = None,
+        stall_after: float = 5.0,
     ) -> None:
         self.provider = provider
         # Skip capture/encode entirely while nobody is watching.
         self.active = active
+        # Called (from this thread) once captures have failed for
+        # ``stall_after`` seconds straight, then again while they keep
+        # failing — the owner rebuilds whatever went stale.
+        self.on_stall = on_stall
+        self.stall_after = stall_after
+        self._failing_since: Optional[float] = None
         self.send = send
         self.interval = interval
         self.quality = quality
@@ -307,32 +315,53 @@ class FrameStreamer:
     def _loop(self) -> None:
         while not self._stop.is_set():
             started = time.time()
-            if self.active is not None and not self.active():
-                self._stop.wait(max(0.05, self.interval))
-                continue
             try:
-                snap = self.provider(self.mode) or {}
-                img = snap.get("img")
-                if img is not None:
-                    frame = annotate(img, snap)
-                    payload = {
-                        "event": "frame",
-                        "mode": self.mode,
-                        "w": int(frame.shape[1]),
-                        "h": int(frame.shape[0]),
-                    }
-                    for key in (
-                        "state", "map", "map_via", "map_conf", "map_title",
-                        "hazard", "player",
-                        "layout", "no_rotation", "ox", "oy",
-                    ):
-                        if snap.get(key) is not None:
-                            payload[key] = snap[key]
-                    self.send(pack_frame(payload, encode_jpeg(frame, self.quality)))
-            except Exception:
+                self._tick()
+            except Exception as exc:
+                # Nothing may end this thread: a dead streamer never revives.
                 logger.debug("frame stream failed", exc_info=True)
+                self._failed(repr(exc))
             elapsed = time.time() - started
             self._stop.wait(max(0.05, self.interval - elapsed))
+
+    def _failed(self, why: str) -> None:
+        now = time.monotonic()
+        if self._failing_since is None:
+            self._failing_since = now
+        elif now - self._failing_since >= self.stall_after:
+            self._failing_since = now          # re-arm: fire again later
+            if self.on_stall is not None:
+                try:
+                    self.on_stall(why)
+                except Exception:
+                    logger.warning("stream stall handler failed", exc_info=True)
+
+    def _tick(self) -> None:
+        if self.active is not None and not self.active():
+            self._failing_since = None
+            return
+        snap = self.provider(self.mode)
+        if snap is None:
+            self._failed("no capture")
+            return
+        self._failing_since = None
+        img = snap.get("img")
+        if img is not None:
+            frame = annotate(img, snap)
+            payload = {
+                "event": "frame",
+                "mode": self.mode,
+                "w": int(frame.shape[1]),
+                "h": int(frame.shape[0]),
+            }
+            for key in (
+                "state", "map", "map_via", "map_conf", "map_title",
+                "hazard", "player",
+                "layout", "no_rotation", "ox", "oy",
+            ):
+                if snap.get(key) is not None:
+                    payload[key] = snap[key]
+            self.send(pack_frame(payload, encode_jpeg(frame, self.quality)))
 
 
 __all__ = [

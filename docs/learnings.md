@@ -143,3 +143,16 @@ fixed that — all 15 captured reads exact afterwards.
   rise is positive upward, so `rise > 8` rejected landing *higher* and
   accepted falls — an overshoot onto a lower platform was recorded as an
   inflated dx.
+- **Live view dying for good** (2026-09-29): every stage had a way to
+  stall permanently with nothing to restart it. `GameWindow` kept the
+  handle it found at startup, so a restarted game broke every capture
+  until the host restarted; `ScreenGrabber` reused an mss instance whose
+  device context had gone bad (lock screen, sleep, UAC, display change);
+  the streamer's viewer check sat outside its `try`; a frame send a
+  frozen tab never drained starved that client while text still flowed;
+  and the page had no heartbeat, so a half-open socket after sleep or a
+  network switch looked "live" forever. Now the window is re-found by
+  title, a failed grab replaces the instance, the streamer never exits
+  and rebuilds the feed after 5s of failures (with a visible warning),
+  stuck sends close the client after 10s, and the page pings and
+  reconnects after 12s of silence.

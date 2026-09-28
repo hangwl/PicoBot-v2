@@ -7,34 +7,75 @@ module remains importable (and testable) on non-Windows platforms.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+import time
+from typing import Callable, Optional, Tuple
+
+
+def _win32_is_window(hwnd: int) -> bool:
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.user32.IsWindow(hwnd))
+    except Exception:
+        return True    # no win32 (tests / other OS): trust the handle
 
 
 class GameWindow:
-    """Locates and describes the target game window by its title."""
+    """Locates and describes the target game window by its title.
 
-    def __init__(self, title: str) -> None:
-        import pygetwindow as gw  # Windows-only dependency, imported lazily
+    The handle is re-found by title when the game is restarted — a dead
+    handle would otherwise break every capture until the host restarts.
+    """
+
+    RELOOKUP_S = 1.0
+
+    def __init__(
+        self,
+        title: str,
+        *,
+        gw=None,
+        is_window: Callable[[int], bool] = _win32_is_window,
+    ) -> None:
+        if gw is None:
+            import pygetwindow as gw  # Windows-only dependency, imported lazily
 
         self._gw = gw
+        self._is_window = is_window
         self.title = title
-        self._window = None
-        for window in gw.getWindowsWithTitle(title):
-            if window.title.strip() == title.strip():
-                self._window = window
-                break
-        if self._window is None:
-            matches = gw.getWindowsWithTitle(title)
-            if matches:
-                self._window = matches[0]
+        self._last_lookup = 0.0
+        self._window = self._find()
         if self._window is None:
             raise RuntimeError(f"Window not found: {title!r}")
+
+    def _find(self):
+        matches = self._gw.getWindowsWithTitle(self.title)
+        for window in matches:
+            if window.title.strip() == self.title.strip():
+                return window
+        return matches[0] if matches else None
+
+    @property
+    def _live(self):
+        """The window, re-found by title if its handle died."""
+        w = self._window
+        hwnd = int(getattr(w, "_hWnd", 0) or 0)
+        if w is not None and (not hwnd or self._is_window(hwnd)):
+            return w
+        now = time.monotonic()
+        if now - self._last_lookup < self.RELOOKUP_S:
+            raise RuntimeError(f"game window gone: {self.title!r}")
+        self._last_lookup = now
+        found = self._find()
+        if found is None:
+            raise RuntimeError(f"game window gone: {self.title!r}")
+        self._window = found
+        return found
 
     # -- Geometry -------------------------------------------------------------
     def rect(self) -> Tuple[int, int, int, int]:
         """(left, top, right, bottom) in virtual-desktop coordinates —
         the OUTER rect, including the OS title bar and borders."""
-        w = self._window
+        w = self._live
         return int(w.left), int(w.top), int(w.right), int(w.bottom)
 
     def client_rect(self) -> Tuple[int, int, int, int]:
@@ -46,7 +87,7 @@ class GameWindow:
             import ctypes
             from ctypes import wintypes
 
-            hwnd = int(getattr(self._window, "_hWnd", 0))
+            hwnd = int(getattr(self._live, "_hWnd", 0))
             if not hwnd:
                 raise RuntimeError("no hwnd")
             rc = wintypes.RECT()
@@ -82,11 +123,11 @@ class GameWindow:
 
     @property
     def width(self) -> int:
-        return int(self._window.width)
+        return int(self._live.width)
 
     @property
     def height(self) -> int:
-        return int(self._window.height)
+        return int(self._live.height)
 
     # -- Focus ----------------------------------------------------------------
     @property
@@ -98,7 +139,7 @@ class GameWindow:
 
     def activate(self) -> None:
         try:
-            self._window.activate()
+            self._live.activate()
         except Exception:
             # pygetwindow raises on already-minimized/failed activation; the
             # caller treats a subsequent is_active check as ground truth.

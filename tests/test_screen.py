@@ -50,6 +50,20 @@ class ScreenGrabberTests(unittest.TestCase):
         self.assertTrue(all(m.closed for m in made))
         self.assertIsNone(grab.capture((0, 0, 2, 2)))
 
+    def test_failed_grab_replaces_the_instance(self):
+        made = []
+
+        class Broken(_FakeMss):
+            def grab(self, mon):
+                raise RuntimeError("gdi32.GetDIBits() failed")
+
+        factories = [lambda: Broken(made), lambda: _FakeMss(made)]
+        grab = ScreenGrabber(factory=lambda: factories.pop(0)())
+        self.assertIsNone(grab.capture((0, 0, 2, 2)))
+        self.assertTrue(made[0].closed)
+        img = grab.capture((0, 0, 2, 2))            # fresh instance works
+        self.assertEqual(img.shape, (2, 2, 3))
+
     def test_empty_region(self):
         grab = ScreenGrabber(factory=lambda: _FakeMss([]))
         self.assertIsNone(grab.capture((0, 0, 0, 5)))

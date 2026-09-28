@@ -215,6 +215,7 @@ class BotHost:
             self.remote.broadcast_frame,
             interval=1.0 / max(1.0, float(self.config.view_fps)),
             active=self.remote.has_frame_clients,
+            on_stall=self._stream_stalled,
         )
         self.bus.subscribe(self._forward_event)
 
@@ -356,6 +357,35 @@ class BotHost:
     def _forward_event(self, event: dict) -> None:
         payload = {"event": "evt", **event}
         self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _drop_feed(self) -> None:
+        """Close the vision feed; the next _get_feed builds a fresh one."""
+        with self._feed_lock:
+            if self._feed is not None:
+                try:
+                    self._feed.close()
+                except Exception:
+                    pass
+                self._feed = None
+
+    def _stream_stalled(self, why: str) -> None:
+        """Captures have failed for seconds straight (streamer thread).
+        Rebuild the feed — new window lookup, capture handles, monitor —
+        unless a bot or measurement is running on it."""
+        busy = self.is_bot_running() or (
+            self.measurer is not None and self.measurer.running()
+        )
+        now = time.monotonic()
+        if now - getattr(self, "_stall_warned", -1e9) >= 30.0:
+            self._stall_warned = now
+            self.bus.emit(
+                "warn",
+                f"live view: capture failing ({why})"
+                + ("" if busy else " — rebuilding the vision feed"),
+                level="warn",
+            )
+        if not busy:
+            self._drop_feed()
 
     def _get_feed(self) -> Optional[_VisionFeed]:
         with self._feed_lock:
@@ -1181,13 +1211,7 @@ class BotHost:
         self.window_title = title
         self.config.default_target_window = title
         save_config(self.config)
-        with self._feed_lock:
-            if self._feed is not None:
-                try:
-                    self._feed.close()
-                except Exception:
-                    pass
-                self._feed = None
+        self._drop_feed()
         self.bus.emit("host", f"window: {title}")
         self._send_host_state()
 

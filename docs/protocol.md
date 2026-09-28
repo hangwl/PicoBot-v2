@@ -20,7 +20,7 @@ and follows the same view.
 
 | Message | Meaning |
 |---|---|
-| `ping|<nonce>` | heartbeat — the host echoes `pong|<nonce>` |
+| `ping|<nonce>` | heartbeat — the host echoes `pong|<nonce>`. The dashboard pings every 5s and treats 12s without *any* message as a dead link (drops the socket, reconnects); it also probes on returning to the foreground |
 | `bot|start` / `bot|stop` / `bot|query` | bot lifecycle; `query` replies with a `bot` event |
 | `map|list` | re-send the maps payload |
 | `map|set|<name>` | pin a map ("" = auto-detect) |
@@ -78,3 +78,8 @@ ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
 view shifted by `ox`/`oy`, in the Window view shifted to where the
 minimap sits in the client area, and left out of the Title view.
 Frames are only captured while at least one client is subscribed.
+A client whose previous frame is still unsent after 10s is closed
+(code 1011) so it reconnects instead of silently starving. If captures
+fail for 5s straight, the host logs a warning and rebuilds the vision
+feed (fresh window lookup, capture handles, map monitor) unless a bot or
+measurement is running on it.

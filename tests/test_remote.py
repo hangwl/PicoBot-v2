@@ -2,6 +2,8 @@ import asyncio
 import threading
 import time
 import unittest
+
+import numpy as np
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
@@ -36,6 +38,10 @@ class _Client:
     def __init__(self, gate=None):
         self.sent = []
         self.gate = gate
+        self.closed = None
+
+    async def close(self, code=1000, reason=""):
+        self.closed = (code, reason)
 
     async def send(self, data):
         if self.gate is not None:
@@ -127,6 +133,17 @@ class FrameBroadcastTests(unittest.TestCase):
         time.sleep(0.1)
         self.assertEqual(slow.sent, [b"f0", b"f5"])
 
+    def test_stuck_frame_send_closes_the_client(self):
+        stuck = _Client(threading.Event())          # never reads
+        self._subscribe(stuck)
+        self.srv.FRAME_STALL_S = 0.05
+        self.srv.broadcast_frame(b"f0")
+        time.sleep(0.1)
+        self.srv.broadcast_frame(b"f1")
+        time.sleep(0.1)
+        self.assertEqual(stuck.closed[0], 1011)
+        self.assertNotIn(stuck, self.srv.frame_clients)
+
     def test_disconnect_unsubscribes(self):
         c = _Client()
         self._subscribe(c)
@@ -208,6 +225,56 @@ class StreamerIdleTests(unittest.TestCase):
         time.sleep(0.1)
         st.stop()
         provider.assert_not_called()
+
+
+class StreamerWatchdogTests(unittest.TestCase):
+    def _run(self, st, seconds=0.3):
+        st.start()
+        time.sleep(seconds)
+        st.stop()
+
+    def test_persistent_failure_reports_a_stall(self):
+        from picobot.remote.streamer import FrameStreamer
+
+        stalls = []
+        st = FrameStreamer(Mock(side_effect=RuntimeError("window gone")), Mock(),
+                           interval=0.01, on_stall=stalls.append,
+                           stall_after=0.05)
+        self._run(st)
+        self.assertTrue(stalls)
+        self.assertIn("window gone", stalls[0])
+
+    def test_no_capture_counts_as_failure_but_no_image_does_not(self):
+        from picobot.remote.streamer import FrameStreamer
+
+        stalls = []
+        st = FrameStreamer(Mock(return_value={"state": "IDLE"}), Mock(),
+                           interval=0.01, on_stall=stalls.append,
+                           stall_after=0.05)
+        self._run(st)
+        self.assertEqual(stalls, [])               # panel not located: normal
+        st = FrameStreamer(Mock(return_value=None), Mock(), interval=0.01,
+                           on_stall=stalls.append, stall_after=0.05)
+        self._run(st)
+        self.assertTrue(stalls)
+
+    def test_nothing_kills_the_thread(self):
+        from picobot.remote.streamer import FrameStreamer
+
+        calls = {"n": 0}
+
+        def active():
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("boom")
+            return True
+
+        send = Mock()
+        img = np.zeros((4, 4, 3), dtype=np.uint8)
+        st = FrameStreamer(Mock(return_value={"img": img}), send,
+                           interval=0.01, active=active)
+        self._run(st, 0.2)
+        send.assert_called()                       # recovered after raising
 
 
 if __name__ == "__main__":

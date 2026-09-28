@@ -24,7 +24,9 @@ class ScreenGrabber:
     """Captures BGR screenshots of a region of the virtual desktop.
 
     Safe to share across threads: mss handles are thread-bound on
-    Windows, so each calling thread lazily gets its own instance.
+    Windows, so each calling thread lazily gets its own instance. A failed
+    grab discards that instance — after a lock screen, sleep, UAC prompt
+    or display change its device context can stay broken for good.
     """
 
     def __init__(self, factory: Callable[[], object] = _new_mss) -> None:
@@ -44,6 +46,17 @@ class ScreenGrabber:
             with self._lock:
                 self._all.append(sct)
         return sct
+
+    def _discard(self, sct) -> None:
+        """Drop this thread's instance; the next capture makes a new one."""
+        self._local.sct = None
+        with self._lock:
+            if sct in self._all:
+                self._all.remove(sct)
+        try:
+            sct.close()
+        except Exception:
+            pass
 
     def close(self) -> None:
         with self._lock:
@@ -68,6 +81,7 @@ class ScreenGrabber:
                 {"left": left, "top": top, "width": width, "height": height}
             )
         except Exception:
+            self._discard(sct)
             return None
         # mss returns BGRA; drop the alpha channel.
         return np.asarray(shot)[:, :, :3]

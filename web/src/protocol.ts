@@ -251,13 +251,75 @@ export function setView(mode: ViewMode) {
   set({ viewMode: mode, canvasMode: mode === "minimap" ? state.canvasMode : "none" });
 }
 
+// Heartbeat: a sleeping phone or a network switch can leave the socket
+// half-open — no close ever arrives, so the page would sit "live" on a
+// dead link forever. Anything received counts as life; silence past
+// STALE_MS drops the socket and reconnects.
+const PING_MS = 5000;
+const STALE_MS = 12000;
+let lastRx = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, retry);
+  retry = Math.min(retry * 2, 10000);
+}
+
+/** Abandon `sock` now (without waiting for a close that may never come)
+ *  and reconnect. */
+function drop(sock: WebSocket) {
+  sock.onopen = sock.onclose = sock.onmessage = sock.onerror = null;
+  try {
+    sock.close();
+  } catch {
+    /* already closed */
+  }
+  if (ws !== sock) return;
+  ws = null;
+  set({ ws: "off", botState: "–" });
+  retry = 500;
+  scheduleReconnect();
+}
+
+function checkAlive() {
+  const sock = ws;
+  if (!sock || sock.readyState !== WebSocket.OPEN) return;
+  if (performance.now() - lastRx > STALE_MS) {
+    drop(sock);
+    return;
+  }
+  sock.send(`ping|${Date.now()}`);
+}
+
+/** After a wake-up, don't wait for the next beat: ping and give the host
+ *  a few seconds to answer. */
+function probe() {
+  const sock = ws;
+  if (!sock || sock.readyState !== WebSocket.OPEN) return;
+  const sent = performance.now();
+  sock.send(`ping|${Date.now()}`);
+  setTimeout(() => {
+    if (ws === sock && lastRx < sent) drop(sock);
+  }, 3000);
+}
+
+setInterval(checkAlive, PING_MS);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") probe();
+});
+window.addEventListener("online", probe);
+
 export function connect() {
   if (ws) return;
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${scheme}://${location.hostname}:${wsPort()}`);
-  ws.binaryType = "arraybuffer";
-  ws.onopen = () => {
+  const sock = new WebSocket(`${scheme}://${location.hostname}:${wsPort()}`);
+  ws = sock;
+  sock.binaryType = "arraybuffer";
+  sock.onopen = () => {
+    if (ws !== sock) return;
     retry = 500;
+    lastRx = performance.now();
     set({ ws: "on" });
     for (const m of [
       "dash|subscribe|frames",
@@ -272,15 +334,17 @@ export function connect() {
     ])
       send(m);
   };
-  ws.onclose = () => {
-    set({ ws: "off", botState: "–" });
+  sock.onclose = () => {
+    if (ws !== sock) return;
     ws = null;
-    setTimeout(connect, retry);
-    retry = Math.min(retry * 2, 10000);
+    set({ ws: "off", botState: "–" });
+    scheduleReconnect();
   };
-  ws.onmessage = (e) => {
+  sock.onmessage = (e) => {
+    if (ws !== sock) return;
+    lastRx = performance.now();
     if (typeof e.data === "string") {
-      if (!e.data.startsWith("dash|")) return;
+      if (!e.data.startsWith("dash|")) return;   // pong|… and the like
       try {
         onEvent(JSON.parse(e.data.slice(5)));
       } catch {
