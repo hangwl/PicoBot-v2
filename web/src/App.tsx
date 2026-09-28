@@ -7,6 +7,13 @@ import {
   send,
   useApp,
 } from "./protocol";
+import {
+  Connection,
+  Measure,
+  Movekeys,
+  RemotePad,
+  SkillsPanel,
+} from "./panels";
 import "./app.css";
 
 function kitLabel(
@@ -304,9 +311,14 @@ export function App() {
           <SetupChecklist s={s} arm={arm} />
           <ClassPanel s={s} />
           <BotControls />
+          <Measure s={s} />
+          <Connection s={s} />
+          <Movekeys s={s} />
+          <RemotePad />
         </div>
         <div class="col side">
           <ViewCanvas s={s} arm={arm} />
+          <SkillsPanel s={s} />
           <EventLog s={s} />
         </div>
       </main>

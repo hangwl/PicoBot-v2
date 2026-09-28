@@ -44,6 +44,11 @@ export interface FrameMeta {
 
 export type CanvasMode = "none" | "plats" | "anchors" | "route";
 
+export interface HostPort {
+  device: string;
+  desc?: string;
+}
+
 export interface AppState {
   protocol: number | null;
   ws: "connecting" | "on" | "off";
@@ -62,6 +67,17 @@ export interface AppState {
   measured: number;
   skillSource: string;
   skills: Record<string, SkillSpec>;
+  ports: HostPort[];
+  windows: string[];
+  serial: string;
+  serialOpen: boolean;
+  window: string;
+  jumpKey: string;
+  ropeKey: string;
+  flashKey: string;
+  flashOn: boolean;
+  navR: number;
+  measureStat: string;
   botState: string;
   hazard: string;
   logs: EvtItem[];
@@ -89,6 +105,17 @@ const initial: AppState = {
   measured: 0,
   skillSource: "global",
   skills: {},
+  ports: [],
+  windows: [],
+  serial: "",
+  serialOpen: false,
+  window: "",
+  jumpKey: "",
+  ropeKey: "",
+  flashKey: "",
+  flashOn: true,
+  navR: 5,
+  measureStat: "",
   botState: "–",
   hazard: "none",
   logs: [],
@@ -179,6 +206,8 @@ function onEvent(p: Record<string, any> & { event: string }) {
     case "evt":
       pushLog(p as unknown as EvtItem);
       if (p.kind === "bot") set({ botState: String(p.msg) });
+      if (p.kind === "measure" && !String(p.msg).startsWith("measurement"))
+        set({ measureStat: String(p.msg) });
       return;
     case "history":
       set({ logs: (p.items as EvtItem[]) ?? [] });
@@ -208,6 +237,26 @@ function onEvent(p: Record<string, any> & { event: string }) {
       set({
         skillSource: (p.source as string) ?? "global",
         skills: (p.skills as Record<string, SkillSpec>) ?? {},
+      });
+      return;
+    case "config": {
+      const c = (p.config ?? {}) as Record<string, any>;
+      set({
+        jumpKey: (c.jump_key as string) ?? "",
+        ropeKey: (c.up_jump_skill_key as string) ?? "",
+        flashKey: (c.flash_jump_key as string) ?? "",
+        flashOn: c.flash_jump_enabled !== false,
+        navR: (c.nav_threshold_px as number) ?? 5,
+      });
+      return;
+    }
+    case "host":
+      set({
+        ports: (p.ports as HostPort[]) ?? [],
+        windows: (p.windows as string[]) ?? [],
+        serial: (p.serial as string) ?? "",
+        window: (p.window as string) ?? "",
+        serialOpen: Boolean(p.serial_open),
       });
       return;
     default:
