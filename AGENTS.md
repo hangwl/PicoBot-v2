@@ -81,6 +81,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 |---|---|
 | Bot loop / FSM | `picobot/bot/smart_bot.py`, `bot/states/` |
 | Pathfinding | `bot/navgraph.py` (graph + Dijkstra), `bot/navigator.py` (execution), `bot/reach.py` (learned reach), `bot/patrol.py` (continuous loop) |
+| Ropes/ladders | drawn like platforms (`MapEntry.ropes`) → `climb_up` (jump-grab: direction + up held through the jump) / `climb_down` edges; no direct rope release — failed climbs exit via direction + jump (`rope_exit`) |
 | Map-change monitor + identity | `bot/monitor.py`, `bot/identity.py`, `vision/transition.py` |
 | Map store + identity | `bot/maps.py`, `vision/minimap.py`, `vision/mapname.py` |
 | Move measurement | `bot/measure.py` |

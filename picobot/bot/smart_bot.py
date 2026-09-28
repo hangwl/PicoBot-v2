@@ -754,6 +754,93 @@ class SmartBot(BotBase):
             self.viz["target"] = None
         return False
 
+    def rope_exit(self, direction: str) -> None:
+        """Leap off a rope: hold a direction and jump — there is no single
+        button that releases from a rope. Used to recover from accidental
+        or failed climbs; the character lands wherever gravity takes it."""
+        self.hid.key_down(direction)
+        try:
+            self.hid.press(self.config.jump_key)
+            self.sleep(human_between(0.55, 0.4, 0.75))
+        finally:
+            self.hid.key_up(direction)
+
+    def rope_up(
+        self,
+        until_y: float,
+        *,
+        direction: Optional[str] = None,
+        timeout: float = 12.0,
+    ) -> bool:
+        """Jump-grab a rope and climb it: hold ``direction`` (toward the
+        rope) and **up** through the jump, latch on contact, then climb
+        until y crosses ``until_y`` (the top platform's row; holding up
+        there mounts it). Fails on a missed grab, stall, lost dot, or
+        hazard — the caller recovers with ``rope_exit``."""
+        target = self._ry(until_y)
+        self.log(f"Rope grab {'→ ' + direction if direction else ''}→ y≈{target}")
+        deadline = time.time() + timeout
+        self.hid.key_down("up")
+        if direction:
+            self.hid.key_down(direction)
+        try:
+            self.hid.press(self.config.jump_key)
+            self.sleep(human_between(0.12, 0.08, 0.18))
+            grabbed = False
+            last_y = None
+            still = 0
+            lost = 0
+            while (
+                self.should_continue()
+                and self.is_window_focused()
+                and time.time() < deadline
+            ):
+                img = self.minimap_frame()
+                if img is None:
+                    self.sleep(0.3)
+                    continue
+                reason = self._img_hazard(img)
+                if reason:
+                    self.log(f"Rope grab aborted: {reason}")
+                    return False
+                pos = self.minimap.player_pos(img)
+                if pos is None:
+                    lost += 1
+                    if lost >= 10:
+                        self.log("Rope grab aborted: position lost")
+                        return False
+                    self.sleep(0.15)
+                    continue
+                lost = 0
+                y = pos[1]
+                if y <= target + 2:
+                    return True
+                if last_y is not None:
+                    if y < last_y:
+                        grabbed = True          # climbing (or jump arc)
+                        still = 0
+                    elif y == last_y:
+                        still += 1              # latched and holding, or landed
+                    else:
+                        still = 0               # falling — keep waiting
+                        if grabbed and y > target + 30:
+                            self.log("Rope grab failed: fell off")
+                            return False
+                last_y = y
+                if not grabbed and time.time() - (deadline - timeout) > 2.5:
+                    self.log("Rope grab failed: never latched")
+                    return False
+                if still >= 10:
+                    self.log("Rope grab failed: stalled")
+                    return False
+                self.sleep(0.15)
+            self.log("Rope grab failed: timed out")
+            return False
+        finally:
+            self.hid.key_up("up")
+            if direction:
+                self.hid.key_up(direction)
+
     def climb(
         self,
         direction: str,

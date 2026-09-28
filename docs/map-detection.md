@@ -23,6 +23,7 @@ Why not pixel fingerprints: see [learnings.md](learnings.md).
   "rotation": { "anchors": [...], "legs": [...] },
   "skills": { ... },
   "platforms": [[x0, y0, x1, y1], ...],
+  "ropes": [[x0, y0, x1, y1], ...],
   "walls": {"left": 0.05, "right": 0.95}
 }
 ```

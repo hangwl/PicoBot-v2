@@ -30,6 +30,23 @@ from .skills import Skill
 logger = logging.getLogger(__name__)
 
 
+def _segs(raw) -> Optional[list]:
+    """Normalized [[x0,y0,x1,y1], ...] from raw JSON, or None."""
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for s in raw:
+        if not isinstance(s, (list, tuple)) or len(s) != 4:
+            continue
+        try:
+            seg = [float(v) for v in s]
+        except (TypeError, ValueError):
+            continue
+        if all(0.0 <= v <= 1.5 for v in seg):
+            out.append(seg)
+    return out or None
+
+
 @dataclass
 class MapEntry:
     name: str
@@ -48,6 +65,9 @@ class MapEntry:
     # fragile on translucent minimaps, so platforms are drawn on the
     # dashboard (drag along each line on the minimap view).
     platforms: Optional[list] = None
+    # Hand-drawn rope/ladder segments, normalized [[x0,y0,x1,y1], ...] —
+    # climbable connections between platforms (drawn like platforms).
+    ropes: Optional[list] = None
     path: Optional[Path] = None
 
     def to_dict(self) -> dict:
@@ -63,6 +83,7 @@ class MapEntry:
                 [list(s) for s in self.platforms]
                 if self.platforms else None
             ),
+            "ropes": [list(s) for s in self.ropes] if self.ropes else None,
             "rotation": self.rotation.to_dict(),
             "skills": {n: s.to_dict() for n, s in self.skills.items()},
         }
@@ -91,20 +112,7 @@ class MapEntry:
                 if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.5:
                     walls[side] = float(v)
             walls = walls or None
-        platforms = None
-        raw_plats = data.get("platforms")
-        if isinstance(raw_plats, list):
-            platforms = []
-            for s in raw_plats:
-                if not isinstance(s, (list, tuple)) or len(s) != 4:
-                    continue
-                try:
-                    seg = [float(v) for v in s]
-                except (TypeError, ValueError):
-                    continue
-                if all(0.0 <= v <= 1.5 for v in seg):
-                    platforms.append(seg)
-            platforms = platforms or None
+        platforms = _segs(data.get("platforms"))
         return cls(
             name=str(data["name"]),
             rotation=Rotation.from_dict(data.get("rotation")),
@@ -114,6 +122,7 @@ class MapEntry:
             minimap_region=region,
             walls=walls,
             platforms=platforms,
+            ropes=_segs(data.get("ropes")),
             path=path,
         )
 

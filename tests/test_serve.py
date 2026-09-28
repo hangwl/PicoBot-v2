@@ -163,9 +163,11 @@ class PanelAssemblyTests(unittest.TestCase):
             "target": (120, 50),
             "rune": (60, 30),
         }
+        snap["ropes"] = [(10, 60, 12, 20)]
         _offset_meta(snap, 7, 52)
         self.assertEqual(snap["walls"], {"left": 27, "right": 187})
         self.assertEqual(snap["platforms"], [(17, 112, 107, 112)])
+        self.assertEqual(snap["ropes"], [(17, 112, 19, 72)])
         self.assertEqual(snap["anchors"], [(47, 102)])
         self.assertEqual(snap["player"], (87, 102))
         self.assertEqual(snap["target"], (127, 102))
@@ -494,6 +496,28 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|plat|50,50,51,51|m1")
             self.assertIsNone(MapStore(tmp).get("m1").platforms)
 
+    def test_rope_draw_undo_clear(self):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.maps.save(MapEntry(name="m1"))
+            self.host._handle_command("layout|rope|98,100,102,40|m1")
+            self.host._handle_command("layout|rope|50,100,52,60|m1")
+            entry = MapStore(tmp).get("m1")
+            self.assertEqual(len(entry.ropes), 2)
+            self.assertEqual(
+                entry.ropes[0], [0.49, 0.6667, 0.51, 0.2667])  # rounded 4dp
+            self.host._handle_command("layout|rope|undo|m1")
+            self.assertEqual(len(MapStore(tmp).get("m1").ropes), 1)
+            self.host._handle_command("layout|rope|clear|m1")
+            self.assertIsNone(MapStore(tmp).get("m1").ropes)
+        meta = self.host._map_meta()
+        self.assertIsNone(meta["ropes"])
+
     def test_map_meta_reports_graph_platforms(self):
         # The overlay shows the graph's clipped platforms — wall/floor
         # zones eat platform ends and the user must see it.
@@ -510,6 +534,19 @@ class HostCommandTests(unittest.TestCase):
             self.host.maps.save(entry)
             meta = self.host._map_meta()
         self.assertEqual(meta["platforms"], [(23.0, 37.5, 100.0, 37.5)])
+
+    def test_map_meta_reports_ropes(self):
+        entry = MapEntry(name="m1", platforms=[[0.0, 0.5, 1.0, 0.5]],
+                         ropes=[[0.49, 2/3, 0.51, 4/15]])
+        feed = Mock()
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        self.host._resolved_entry = Mock(return_value=entry)
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.maps.save(entry)
+            meta = self.host._map_meta()
+        self.assertEqual(meta["ropes"], [(98, 100, 102, 40)])
 
     def _region_feed(self):
         feed = Mock()

@@ -26,6 +26,9 @@ The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
     `ox`/`oy` minimap offset that the client subtracts.
   - **Title** — the raw segmented band as OCR sees it (verification).
   - **Window** — the full client area (used for Draw minimap/title).
+  - **Draw ropes** — drag along each rope/ladder (bottom end on the
+    lower platform, top end on the upper); Undo / Clear. Drawn ropes
+    become climb edges in the planner (brown lines on the overlay).
   - **Place anchors** — click to add a patrol checkpoint (snaps to the
     drawn platform), shift-click to remove the nearest; Undo / Clear.
   - **Route** — overlays the movement graph (greens: up flash / up-side
@@ -57,7 +60,7 @@ lose history; backlog entries render at their real timestamps.
 ```
 client → host:  map|set|<name> | map|list | cal|start|mark|finish|<name>
                 layout|region|<minimap|title>|x,y,w,h
-                layout|plat|x0,y0,x1,y1[|<name>] | layout|wall|left|right|clear[|<name>]
+                layout|plat|… | layout|rope|… | layout|wall|left|right|clear[|<name>]
                 dash|view|<minimap|window|title> | dash|fps|<n>
                 skills|set|{json} | hid|… | host|window|<title> | host|serial|…
                 dash|subscribe|frames            (opt in to view frames)

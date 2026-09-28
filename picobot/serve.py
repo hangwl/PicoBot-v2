@@ -98,11 +98,12 @@ def _offset_meta(snap: dict, dx: int, dy: int) -> None:
     walls = snap.get("walls")
     if walls:
         snap["walls"] = {k: v + dx for k, v in walls.items()}
-    if snap.get("platforms"):
-        snap["platforms"] = [
-            (a + dx, b + dy, c + dx, d + dy)
-            for a, b, c, d in snap["platforms"]
-        ]
+    for key in ("platforms", "ropes"):
+        if snap.get(key):
+            snap[key] = [
+                (a + dx, b + dy, c + dx, d + dy)
+                for a, b, c, d in snap[key]
+            ]
     if snap.get("anchors"):
         snap["anchors"] = [(x + dx, y + dy) for x, y in snap["anchors"]]
     for key in ("nav_edges", "nav_plan", "nav_route"):
@@ -380,9 +381,15 @@ class BotHost:
             v = float(v)
             return int(round(v * span)) if 0.0 <= v <= 1.0 else int(round(v))
 
-        walls = anchors = platforms = None
+        walls = anchors = platforms = ropes = None
         if entry is not None and entry.rotation.anchors and w and h:
             anchors = [(px(a.x, w), px(a.y, h)) for a in entry.rotation.anchors]
+        if entry is not None and entry.ropes and w and h:
+            ropes = [
+                (round(s[0] * w), round(s[1] * h),
+                 round(s[2] * w), round(s[3] * h))
+                for s in entry.ropes
+            ]
         if entry is not None and entry.walls and w:
             walls = {
                 side: px(v, w)
@@ -432,6 +439,7 @@ class BotHost:
             "walls": walls,
             "wall_pad": self.bot_config.wall_pad_px if walls else None,
             "anchors": anchors,
+            "ropes": ropes,
         }
 
     def _nav_graph(self, entry, region):
@@ -740,14 +748,9 @@ class BotHost:
         note = "" if snapped is not None else " (no drawn platform under it)"
         self.bus.emit("map", f"{entry.name}: anchor a{n} placed{note}")
 
-    def _layout_platform(self, msg: str) -> None:
-        """layout|plat|x0,y0,x1,y1|undo|clear[|<name>] — drawn platforms.
-
-        Each drag on the Minimap view appends a segment (minimap px here,
-        stored normalized). Platforms are hand-drawn — the authoritative
-        walkable geometry for anchor snapping and weave bounds
-        placement, since auto-detecting translucent minimap lines proved
-        too fragile.
+    def _layout_segments(self, msg: str, field: str, label: str) -> None:
+        """layout|<field>|x0,y0,x1,y1|undo|clear[|<name>] — drawn platform
+        or rope segments (minimap px here, stored normalized).
         """
         parts = msg.split("|", 3)
         if len(parts) < 3:
@@ -757,23 +760,23 @@ class BotHost:
         if entry is None:
             self.bus.emit("error", err)
             return
-        plats = list(entry.platforms or [])
+        segs = list(getattr(entry, field) or [])
         if payload == "undo":
-            if not plats:
-                self.bus.emit("map", f"{entry.name}: no platforms to undo")
+            if not segs:
+                self.bus.emit("map", f"{entry.name}: no {label} to undo")
                 return
-            plats.pop()
-            entry.platforms = plats or None
+            segs.pop()
+            setattr(entry, field, segs or None)
             self._save_entry(entry)
             self.bus.emit(
                 "map",
-                f"{entry.name}: undid platform ({len(plats)} left)",
+                f"{entry.name}: undid {label} ({len(segs)} left)",
             )
             return
         if payload == "clear":
-            entry.platforms = None
+            setattr(entry, field, None)
             self._save_entry(entry)
-            self.bus.emit("map", f"platforms cleared for {entry.name}")
+            self.bus.emit("map", f"{label} cleared for {entry.name}")
             return
         try:
             seg = [float(v) for v in payload.split(",")]
@@ -789,20 +792,26 @@ class BotHost:
         if img is None and feed is not None:
             img = feed.minimap_img()
         if img is None:
-            self.bus.emit("error", "no minimap frame — can't draw platforms")
+            self.bus.emit("error", f"no minimap frame — can't draw {label}")
             return
         h, w = img.shape[:2]
         if not all(0 <= v for v in seg) or seg[0] > w or seg[2] > w \
                 or seg[1] > h or seg[3] > h:
-            self.bus.emit("error", "platform drag is off the minimap")
+            self.bus.emit("error", f"{label} drag is off the minimap")
             return
-        plats.append([
+        segs.append([
             round(seg[0] / w, 4), round(seg[1] / h, 4),
             round(seg[2] / w, 4), round(seg[3] / h, 4),
         ])
-        entry.platforms = plats
+        setattr(entry, field, segs)
         self._save_entry(entry)
-        self.bus.emit("map", f"{entry.name}: platform {len(plats)} drawn")
+        self.bus.emit("map", f"{entry.name}: {label} {len(segs)} drawn")
+
+    def _layout_platform(self, msg: str) -> None:
+        self._layout_segments(msg, "platforms", "platform")
+
+    def _layout_rope(self, msg: str) -> None:
+        self._layout_segments(msg, "ropes", "rope")
 
     def _platforms_px(self, entry) -> list:
         """A map's drawn platform segments converted to minimap px."""
@@ -942,6 +951,8 @@ class BotHost:
             self._layout_anchor(msg)
         elif msg.startswith("layout|plat|"):
             self._layout_platform(msg)
+        elif msg.startswith("layout|rope|"):
+            self._layout_rope(msg)
         elif msg == "layout|reset":
             self._layout_reset()
         elif msg.startswith("layout|region|"):

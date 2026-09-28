@@ -53,6 +53,12 @@ truth, no per-section map names.
   `minimap_name_region` when auto segmentation fails on a client.
 - **Draw plats** — drag a segment along each platform line on the Panel
   view; stays armed for successive drags. **Undo** pops, **Clear** wipes.
+- **Draw ropes** — drag along each rope/ladder: top end on the platform
+  it hangs from, bottom end where it hangs (usually in mid-air). Ropes
+  give the planner climb edges: the bot **jump-grabs** (holds direction
+  + up and jumps) from any platform within reach below the rope's bottom
+  end, climbs to the top, and descends by grabbing at the top and
+  dropping off the rope's end.
   Platforms are the *authoritative* walkable geometry: anchor snapping,
   nav target projection (~8px snap radius) and weave bounds consult
   them.
@@ -78,10 +84,10 @@ truth, no per-section map names.
 ## Legs (hand-authored, optional)
 
 The movement graph covers platform moves (walks, flashes, up/double
-flashes, rope lift, drops) — see
+flashes, rope lift, drops) and drawn ropes — see
 [bot-behavior.md](bot-behavior.md#moves--learned-reach-navgraphpy-reachpy-navigatorpy).
-Author a `legs` entry manually only for moves the graph can't express
-yet — e.g., a rope or ladder climb:
+Author a `legs` entry manually only for exotic moves the graph can't
+express:
 
 ```json
 "legs": [{"from": 0, "to": 1, "steps": [

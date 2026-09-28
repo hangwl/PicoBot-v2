@@ -141,6 +141,17 @@ class Navigator:
             bot._up_side_flash(direction)
         elif kind == "down_jump":
             bot.down_jump()
+        elif kind == "climb_up":
+            direction = None
+            if abs(leg.x1 - leg.x0) > 2:
+                direction = "right" if leg.x1 > leg.x0 else "left"
+            if not bot.rope_up(leg.y1, direction=direction):
+                self._rope_fallback(leg)
+                return "failed"
+        elif kind == "climb_down":
+            if not bot.climb("down", leg.y1, x=leg.x0):
+                self._rope_fallback(leg)
+                return "failed"
         elif kind == "drop":
             self._hold_until(
                 direction, lambda p: p[1] > leg.y0 + self.graph.snap_px, 1.5,
@@ -158,6 +169,17 @@ class Navigator:
                 ok=ok,
             )
         return "ok" if ok else "failed"
+
+    def _rope_fallback(self, leg: Leg) -> None:
+        """Mid-rope exit after a failed climb: hold a direction and jump —
+        there is no direct release from a rope."""
+        near = min(
+            self.graph.platforms,
+            key=lambda p: min(abs(p.x0 - leg.x0), abs(p.x1 - leg.x0)),
+        )
+        cx = min((abs(near.x0 - leg.x0), near.x0),
+                 (abs(near.x1 - leg.x0), near.x1))[1]
+        self.bot.rope_exit("right" if cx > leg.x0 else "left")
 
     def _on_platform(self, pos: Point, want) -> bool:
         """Tolerant landing check: the drawn row may sit a few px off the

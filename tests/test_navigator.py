@@ -93,6 +93,35 @@ class SimBot:
         self.rope_cd = 3.0
         return True
 
+    def rope_up(self, until_y, direction=None, timeout=12.0):
+        self.moves.append("rope_up")
+        if getattr(self, "fail_rope", False):
+            return False
+        if direction:
+            self.pos = (self.pos[0] + (6 if direction == "right" else -6),
+                        self.pos[1])
+        for p in self.g.platforms:
+            if p.spans(self.pos[0]) and abs(p.y_at(self.pos[0]) - until_y) <= 2:
+                self.pos = (self.pos[0], p.y_at(self.pos[0]))
+                return True
+        return False
+
+    def rope_exit(self, direction):
+        self.moves.append("rope_exit")
+        self.pos = (self.pos[0] + (10 if direction == "right" else -10),
+                    self.pos[1] + 20)
+
+    def climb(self, direction, until_y, x=None, timeout=10.0):
+        if x is not None:
+            p = self.g.platforms[self.g.locate(*self.pos)]
+            self.pos = (min(p.x1, max(p.x0, x)), self.pos[1])
+        for p in self.g.platforms:
+            if p.spans(self.pos[0]) and abs(p.y_at(self.pos[0]) - until_y) <= 2:
+                self.pos = (self.pos[0], p.y_at(self.pos[0]))
+                self.moves.append(f"climb_{direction}")
+                return True
+        return False
+
     def _up_flash(self, direction=None):
         self.moves.append("up_flash")
         self._air((6 if direction == "right" else -6) if direction else 0, self.up)
@@ -242,6 +271,19 @@ class NavigatorTests(unittest.TestCase):
         self.assertFalse(self._nav(bot).go((170, 84), max_failures=1, max_steps=3))
         self.assertLess(time.monotonic() - t0, 8)      # failed fast
         self.assertIn("right", bot.ups)                # direction released
+
+    def test_failed_rope_grab_exits_the_rope(self):
+        # The graph plans a rope climb the sim can't complete (no platform
+        # at the grab column): the grab fails, the bot leaps off (direction
+        # + jump) instead of hanging there.
+        bot = SimBot([FLOOR, (80, 40, 120, 40)], (20, 100))
+        from picobot.bot.navgraph import NavGraph as _G
+
+        bot.g = _G([FLOOR, (80, 40, 120, 40)], bot.g.reach,
+                   ropes=[(98, 80, 102, 40)])
+        bot.fail_rope = True
+        self.assertFalse(self._nav(bot).go((100, 40), max_failures=1, max_steps=2))
+        self.assertIn("rope_exit", bot.moves)
 
     def test_rope_fires_without_precise_stop(self):
         # The takeoff is approached to within walk_band, then the rope

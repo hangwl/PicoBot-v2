@@ -100,6 +100,8 @@ NAV_COLORS = {                                  # BGR
     "up_flash": (80, 220, 80),      # green
     "up_side_flash": (140, 255, 140),  # light green
     "rope_lift": (40, 160, 40),     # dark green
+    "climb_up": (50, 150, 50),      # olive green
+    "climb_down": (90, 90, 40),     # dark olive
 }
 
 
@@ -122,6 +124,8 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
             _line(out, walls["right"] - pad, 0, walls["right"] - pad, h - 1, soft)
     for seg in meta.get("platforms") or []:
         _line(out, *seg, (255, 200, 40))                  # cyan platforms
+    for seg in meta.get("ropes") or []:
+        _line(out, *seg, (40, 90, 160))                   # brown ropes
     for kind, *seg in meta.get("nav_edges") or []:
         _line(out, *seg, NAV_COLORS.get(kind, (200, 200, 200)))
     for kind, *seg in meta.get("nav_plan") or []:

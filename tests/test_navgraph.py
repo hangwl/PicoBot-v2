@@ -143,6 +143,40 @@ class NavGraphTests(unittest.TestCase):
         g = graph_for(entry, (0, 0, 200, 100), reach(), pad=3)
         self.assertEqual(g.platforms[0].x0, 23)
 
+    def test_drawn_rope_links_two_platforms(self):
+        # A rope from the floor (y=100) to a platform 60px up — beyond
+        # any flash, reachable only by climbing.
+        tall = (80, 40, 120, 40)
+        g = NavGraph([FLOOR, tall], reach(),
+                     ropes=[(98, 100, 102, 40)])
+        self.assertEqual(
+            kinds(g.route((50, 100), (100, 40))), ["climb_up"])
+        # Descending may prefer a drop — the climb edge just has to exist.
+        self.assertTrue(
+            any(l.kind == "climb_down" for l in g.transfer_legs()))
+
+    def test_hanging_rope_boards_by_jump_grab(self):
+        # The rope hangs from the tall platform; its bottom end is 20px
+        # above the floor — reachable by a jump-grab, not by standing.
+        g = NavGraph([FLOOR, (80, 40, 120, 40)], reach(),
+                     ropes=[(98, 80, 102, 40)])
+        ups = [l for l in g.transfer_legs() if l.kind == "climb_up"]
+        self.assertTrue(ups)
+        self.assertEqual({l.y0 for l in ups}, {100.0})   # from the floor
+        self.assertTrue(
+            any(l.kind == "climb_down" for l in g.transfer_legs()))
+
+    def test_rope_out_of_jump_grab_reach_has_no_boards(self):
+        # Bottom end 30px above the only platform — beyond jump-grab reach.
+        g = NavGraph([FLOOR, (80, 40, 120, 40)], reach(),
+                     ropes=[(98, 70, 102, 40)])
+        self.assertFalse(any(l.kind == "climb_up" for l in g.transfer_legs()))
+        self.assertIsNone(g.route((50, 100), (100, 40)))
+
+    def test_rope_needs_platforms_at_both_ends(self):
+        g = NavGraph([FLOOR], reach(), ropes=[(98, 100, 102, 40)])
+        self.assertEqual(g.transfer_legs(), [])      # nothing to climb to
+
     def test_graph_for_scales_normalized_platforms(self):
         entry = MapEntry(name="m", platforms=[[0.0, 0.5, 1.0, 0.5]])
         g = graph_for(entry, (7, 68, 200, 100), reach())
