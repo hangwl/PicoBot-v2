@@ -10,6 +10,7 @@ installed the repo's own venv interpreter works:
 ```bash
 .venv/bin/python -m picobot          # run the host
 .venv/bin/python -m pytest tests/ -x -q   # the suite (~300 tests, ~1s)
+cd web && npm install && npm run build    # rebuild the dashboard app (web/dist)
 ```
 
 ## Test layout

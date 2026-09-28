@@ -58,6 +58,9 @@ class BotConfig:
     patrol_policy: str = "weighted"       # weighted | greedy — loop ordering
     patrol_weight_temp: float = 1.0       # roulette temperature (1 = 1/cost)
     nav_reach_file: str = "nav_reach.json"
+    anchor_float_px: float = 4.0           # anchors hover this far above the platform line
+    flash_repress_seconds: float = 0.15    # jump -> flash re-press gap
+    combo_repress_seconds: float = 0.16    # gap between chained flashes
 
     def reach_path(self) -> str:
         """Per-character reach file: nav_reach.json, or
@@ -68,9 +71,6 @@ class BotConfig:
             p = Path(self.nav_reach_file)
             return str(p.with_name(f"{p.stem}_{self.class_active}{p.suffix}"))
         return self.nav_reach_file
-    anchor_float_px: float = 4.0           # anchors hover this far above the platform line
-    flash_repress_seconds: float = 0.15    # jump -> flash re-press gap
-    combo_repress_seconds: float = 0.16    # gap between chained flashes
 
     # -- Dwell weave -------------------------------------------------------------
     dwell_weave: bool = True              # move + weave attacks at anchors

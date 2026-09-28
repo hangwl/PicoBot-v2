@@ -186,6 +186,13 @@ class AsyncWebsocketBridge:
 
     async def _handle_client(self, websocket, path: str | None = None) -> None:
         try:
+            # Protocol handshake: the client can verify compatibility.
+            try:
+                await websocket.send(
+                    "dash|" + json.dumps({"event": "hello", "protocol": 1})
+                )
+            except Exception:
+                pass
             if self.on_client_connected:
                 try:
                     self.on_client_connected(websocket)

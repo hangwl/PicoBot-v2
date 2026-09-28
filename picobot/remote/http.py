@@ -21,6 +21,7 @@ class EmbeddedHTTPServer:
         *,
         search_paths: Iterable[Path] | None = None,
         ws_scheme: str = "ws",
+        static_dir: Path | None = None,
     ) -> None:
         self._ws_port_provider = ws_port_provider
         self.ws_scheme = ws_scheme
@@ -36,6 +37,9 @@ class EmbeddedHTTPServer:
             base_dir / "index.html",
         ]
         self._search_paths = list(search_paths) if search_paths else default_paths
+        # Built dashboard app (web/dist) — served when present, else the
+        # legacy single-file dashboard.
+        self.static_dir = Path(static_dir).resolve() if static_dir else None
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -72,13 +76,34 @@ class EmbeddedHTTPServer:
         except Exception:
             return 8765
 
+    _MIME = {
+        ".html": "text/html; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".json": "application/json",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".ico": "image/x-icon",
+        ".woff2": "font/woff2",
+    }
+
     def _build_handler(self, ws_port: int):
         server = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 try:
-                    if getattr(self, "path", "/") != "/":
+                    path = (getattr(self, "path", "/") or "/").split("?")[0]
+                    if server.static_dir is not None:
+                        served = server._serve_static(path)
+                        if served is not None:
+                            ctype, data = served
+                            self.send_response(200)
+                            self.send_header("Content-Type", ctype)
+                            self.end_headers()
+                            self.wfile.write(data)
+                            return
+                    if path != "/":
                         self.send_response(404)
                         self.send_header("Content-Type", "text/plain; charset=utf-8")
                         self.end_headers()
@@ -96,6 +121,30 @@ class EmbeddedHTTPServer:
                 return
 
         return Handler
+
+    def _serve_static(self, path: str):
+        """Serve the built app from web/dist: '/' → index.html (SPA),
+        '/assets/<file>' → the hashed bundle. None when dist is absent
+        (the legacy single-file dashboard is served instead)."""
+        if self.static_dir is None:
+            return None
+        index = self.static_dir / "index.html"
+        if not index.exists():
+            return None
+        if path in ("/", "/index.html"):
+            file = index
+        elif path.startswith("/assets/") and ".." not in path:
+            file = (self.static_dir / path.lstrip("/")).resolve()
+            if not str(file).startswith(str(self.static_dir)) or not file.is_file():
+                return None
+        else:
+            return ("text/html; charset=utf-8",
+                    index.read_bytes())              # SPA fallback
+        try:
+            data = file.read_bytes()
+        except OSError:
+            return None
+        return (self._MIME.get(file.suffix, "application/octet-stream"), data)
 
     def _read_index(self, ws_port: int) -> str:
         fallback = (

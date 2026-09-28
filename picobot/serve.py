@@ -242,6 +242,9 @@ class BotHost:
                 Path(__file__).resolve().parent / "remote" / "dashboard.html",
                 Path(__file__).resolve().parent.parent / "index.html",
             ],
+            static_dir=(
+                Path(__file__).resolve().parent.parent / "web" / "dist"
+            ),
             ws_scheme="wss" if self.remote.ssl_context else "ws",
         )
         self.http.start()

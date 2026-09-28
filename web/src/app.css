@@ -1,0 +1,77 @@
+/* Shared UI bits: the dark theme matches the legacy dashboard. */
+:root {
+  --bg: #0b0d12;
+  --panel: #14161c;
+  --edge: #23262e;
+  --dim: #8b93a7;
+  --fg: #e8ebf2;
+  --warn: #d9a13b;
+  --bad: #ff5d5d;
+  --ok: #4cd964;
+  --accent: #28c8ff;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 13px/1.45 system-ui, sans-serif;
+}
+header {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 8px 14px; background: #14161c; border-bottom: 1px solid var(--edge);
+}
+#status {
+  display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 14px;
+  background: #101218; border-bottom: 1px solid var(--edge);
+  font-size: 11px; color: var(--dim);
+}
+main {
+  display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 14px;
+  max-width: 1180px; margin: 0 auto;
+}
+.col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.col.main { flex: 1.2 1 360px; }
+.col.side { flex: 1.4 1 340px; }
+.panel {
+  background: var(--panel); border: 1px solid var(--edge);
+  border-radius: 8px; padding: 10px 12px;
+}
+.panel h3, .panel summary {
+  margin: 0 0 8px; font-size: 12px; color: var(--dim);
+  text-transform: uppercase; letter-spacing: .08em; cursor: pointer;
+}
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.row + .row { margin-top: 6px; }
+label { color: var(--dim); font-size: 11px; }
+button, select, input {
+  background: #1c1f27; color: var(--fg); border: 1px solid var(--edge);
+  border-radius: 6px; padding: 5px 9px; font-size: 12px; min-height: 30px;
+}
+button.primary { border-color: var(--ok); color: var(--ok); }
+button.danger { border-color: var(--bad); color: var(--bad); }
+button.armed { border-color: var(--warn); color: var(--warn); }
+.chip {
+  padding: 2px 8px; border-radius: 10px; background: #1c1f22;
+  font-size: 11px; color: var(--dim);
+}
+.chip.on { color: var(--ok); border-color: var(--ok); }
+.chip.warn { color: var(--warn); }
+canvas#view {
+  display: block; width: 100%; max-width: 560px; height: auto;
+  background: #000; border-radius: 4px; image-rendering: pixelated;
+  touch-action: none;
+}
+#log {
+  height: 320px; overflow-y: auto; font: 11px/1.5 ui-monospace, monospace;
+  background: #0e1015; border: 1px solid var(--edge); border-radius: 4px;
+  padding: 6px 8px; white-space: pre-wrap;
+}
+.logline .t { color: var(--dim); margin-right: 6px; }
+.logline.warn { color: var(--warn); }
+.logline.bad { color: var(--bad); }
+.tabs { display: none; }
+@media (max-width: 720px) {
+  #tabs { display: flex; gap: 6px; padding: 6px 10px; position: sticky;
+    bottom: 0; background: var(--panel); border-top: 1px solid var(--edge); }
+  #status { flex-wrap: wrap; }
+}
