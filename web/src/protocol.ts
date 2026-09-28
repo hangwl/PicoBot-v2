@@ -158,6 +158,10 @@ export function subscribe(l: () => void) {
   };
 }
 
+export function getState(): AppState {
+  return state;
+}
+
 export function useApp(): AppState {
   const [, force] = useState(0);
   useEffect(() => subscribe(() => force((n) => n + 1)), []);

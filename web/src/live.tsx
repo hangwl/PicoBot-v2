@@ -1,6 +1,8 @@
 // Everyday screens: status bar, live view, run control, pad, log.
+import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Icon, type IconName } from "./icons";
+import { PICO_KEYS, isPicoKey, keyDown, keyUp, useHeld } from "./keys";
 import {
   type AppState,
   type CanvasMode,
@@ -260,20 +262,69 @@ function DrawTools({ s, suffix }: { s: AppState; suffix: string }) {
 }
 
 // -- Remote pad ----------------------------------------------------------------
-function press(key: string) {
-  if (!key || key.includes("|")) return;
-  // If the link drops before the key-up, the host releases the key.
-  if (!send(`key|down|${key}`)) return;
-  setTimeout(() => send(`key|up|${key}`), 90 + Math.random() * 60);
+/** A key that is down exactly while a finger (or mouse, or Space/Enter
+ *  on the focused button) holds it. */
+function HoldKey({ name, label, class: cls, children }: {
+  name: string;
+  label?: string;
+  class?: string;
+  children?: ComponentChildren;
+}) {
+  // Pointer -> the key it pressed, so a renamed key still releases the
+  // one that went down.
+  const pointers = useRef(new Map<number, string>());
+  const down = useHeld(name);
+  const hold = (id: number) => {
+    if (keyDown(name)) pointers.current.set(id, name);
+  };
+  const lift = (id: number) => {
+    const k = pointers.current.get(id);
+    if (k === undefined) return;
+    pointers.current.delete(id);
+    keyUp(k);
+  };
+  return (
+    <button type="button" class={cls} aria-label={label ?? name}
+            aria-pressed={down} disabled={!isPicoKey(name)}
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              e.preventDefault();
+              hold(e.pointerId);
+              try {
+                // Keeps the release even if the finger slides off the key.
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              } catch {
+                /* pointer already gone — pointerup/cancel still lift it */
+              }
+            }}
+            onPointerUp={(e) => lift(e.pointerId)}
+            onPointerCancel={(e) => lift(e.pointerId)}
+            onLostPointerCapture={(e) => lift(e.pointerId)}
+            onKeyDown={(e) => {
+              if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+                e.preventDefault();
+                hold(-1);
+              }
+            }}
+            onKeyUp={(e) => {
+              if (e.key === " " || e.key === "Enter") lift(-1);
+            }}
+            onBlur={() => lift(-1)}
+            onContextMenu={(e) => e.preventDefault()}>
+      {children ?? name}
+    </button>
+  );
 }
 
 export function Pad({ s }: { s: AppState }) {
   const [custom, setCustom] = useState("");
-  const keys = [...new Set([s.jumpKey || "alt", "ctrl", "shift", "enter"])];
+  const name = custom.trim().toLowerCase();
+  const quick = [...new Set([s.jumpKey || "alt", "ctrl", "shift", "enter"])]
+    .filter(isPicoKey);
   const arrow = (dir: string, rot: number) => (
-    <button class={`arrow ${dir}`} aria-label={dir} onClick={() => press(dir)}>
+    <HoldKey name={dir} class={`arrow ${dir}`}>
       <span style={{ transform: `rotate(${rot}deg)` }}><Icon name="arrowUp" size={24} /></span>
-    </button>
+    </HoldKey>
   );
   return (
     <section class="pad">
@@ -284,18 +335,24 @@ export function Pad({ s }: { s: AppState }) {
         {arrow("right", 90)}
       </div>
       <div class="keys">
-        {keys.map((k) => (
-          <button key={k} onClick={() => press(k)}>{k}</button>
-        ))}
+        {quick.map((k) => <HoldKey key={k} name={k} />)}
       </div>
-      <form class="custom" onSubmit={(e) => {
-        e.preventDefault();
-        press(custom.trim());
-      }}>
-        <input aria-label="key name" placeholder="Any key, like npc" value={custom}
+      <div class="custom">
+        <input aria-label="key name" placeholder="Key name, like f or page up"
+               list="pico-keys" value={custom} autoCapitalize="off"
+               autoCorrect="off" spellcheck={false}
                onInput={(e) => setCustom((e.target as HTMLInputElement).value)} />
-        <button type="submit" disabled={!custom.trim()}>Press</button>
-      </form>
+        <datalist id="pico-keys">
+          {PICO_KEYS.map((k) => <option key={k} value={k} />)}
+        </datalist>
+        <HoldKey name={name} label={`hold ${name || "key"}`}>
+          {name && isPicoKey(name) ? name : "Hold"}
+        </HoldKey>
+      </div>
+      {name && !isPicoKey(name) && (
+        <p class="hint warn">The Pico has no key called "{custom.trim()}".</p>
+      )}
+      <p class="hint">Keys stay down while you hold them.</p>
     </section>
   );
 }

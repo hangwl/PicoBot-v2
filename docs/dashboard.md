@@ -31,7 +31,11 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
   size, last skill cast) and one large Start/Stop button.
 - **Control** — rune solving on one screen: hazard banner, a compact
   view, the arrow pad, quick keys (jump key, ctrl, shift, enter) and a
-  free-form key field. A new hazard (rune, another player, verification
+  key-name field (limited to the Pico's `KEY_MAP` names). Keys mirror the
+  finger: `key|down` on touch, `key|up` on lift, so a tap is a tap, a
+  hold is a hold, and several fingers chord (hold left, tap jump). Held
+  keys are released when the page is hidden or loses focus; the host
+  releases a disconnected client's keys. A new hazard (rune, another player, verification
   prompt) jumps here from any screen and vibrates the phone where the
   browser allows it; the bot resumes by itself once it clears. The Control
   tab carries a red badge while a hazard is active.
