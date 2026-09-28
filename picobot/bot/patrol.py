@@ -39,6 +39,8 @@ class Patrol:
         self._break_logged = 0.0
         self._blind_since = None
         self._last_pos: Optional[Point] = None
+        self._stuck_since: Optional[float] = None
+        self._stuck_pos: Optional[Point] = None
 
     # -- Tick -------------------------------------------------------------------------
     def tick(self) -> None:
@@ -61,14 +63,8 @@ class Patrol:
                 graph0 = bot._nav_graph()
                 last = getattr(self, "_last_pos", None)
                 if graph0 is not None and graph0.platforms and last:
-                    near = min(
-                        graph0.platforms,
-                        key=lambda p: min(abs(p.x0 - last[0]),
-                                          abs(p.x1 - last[0])),
-                    )
-                    cx = min((abs(near.x0 - last[0]), near.x0),
-                             (abs(near.x1 - last[0]), near.x1))[1]
-                    bot.rope_exit("right" if cx > last[0] else "left")
+                    self._learn_rope(graph0, last)
+                    bot.rope_exit(self._exit_direction(graph0, last))
             bot._blind_wait()
             return
         self._blind_since = None
@@ -78,9 +74,10 @@ class Patrol:
             bot._patrol_tick()
             return
         if graph.locate(*pos) is None:
-            # Platforms exist but the player isn't on any of them (mid-move,
-            # or a wall zone ate the platform under them). Planning from an
-            # off-graph start would ban every anchor.
+            # Platforms exist but the player isn't on any of them: either
+            # mid-move, inside a wall zone, or hanging on an (undrawn)
+            # game rope. Planning from an off-graph start would ban every
+            # anchor.
             now = time.time()
             reason = self._off_graph_reason(graph, pos)
             if now - getattr(self, "_off_graph_logged", 0.0) > 5.0:
@@ -97,6 +94,18 @@ class Patrol:
                          (abs(pos[0] - near.x1), near.x1))[1]
                 bot.move_to_point(int(tx), pos[1], style="mixed", flat=True)
             else:
+                # Stable and off-graph: the bot is hanging on an (undrawn)
+                # game rope. Learn the spot, then leap off.
+                now = time.monotonic()
+                sp = self._stuck_pos
+                if (sp is None or abs(pos[0] - sp[0]) > 3
+                        or abs(pos[1] - sp[1]) > 3):
+                    self._stuck_since = now
+                    self._stuck_pos = pos
+                elif now - self._stuck_since > 2.0:
+                    self._stuck_since = now
+                    self._learn_rope(graph, pos)
+                    bot.rope_exit(self._exit_direction(graph, pos))
                 bot._blind_wait()
             return
         if self._nav is None or self._nav.graph is not graph:
@@ -153,6 +162,45 @@ class Patrol:
                 self._ban(graph, pos, idx, "unreachable after retries")
             else:
                 self._splice(graph, pos, idx)
+
+    def _learn_rope(self, graph, pos: Point) -> None:
+        """Record a rope-stuck position, connected to the platform above
+        it. Learned ropes are graph edges like drawn ones — and
+        ``rope_penalty`` keeps them a last resort."""
+        bot = self.bot
+        entry = bot._current_map_entry()
+        if entry is None:
+            return
+        above = graph.above(pos[0], pos[1])
+        if above is None:
+            return
+        p = graph.platforms[above]
+        region = bot.minimap.region
+        if not region:
+            return
+        w, h = region[2], region[3]
+        top = p.y_at(min(p.x1, max(p.x0, pos[0])))
+        seg = [round(pos[0] / w, 4), round(pos[1] / h, 4),
+               round(pos[0] / w, 4), round(top / h, 4)]
+        for r in entry.ropes or []:
+            if abs(r[0] * w - pos[0]) < 6 and abs(r[1] * h - pos[1]) < 8:
+                return                          # already learned
+        entry.ropes = (entry.ropes or []) + [seg]
+        bot.maps.save(entry)
+        bot.log(f"Learned a rope at ({pos[0]:.0f}, {pos[1]:.0f}) — "
+                "climbs there are a last resort")
+        bot.event("map", f"rope learned at ({pos[0]:.0f}, {pos[1]:.0f})")
+
+    def _exit_direction(self, graph, pos: Point) -> str:
+        """Direction of the nearest graph platform from ``pos`` — the way
+        to leap when exiting a rope."""
+        near = min(
+            graph.platforms,
+            key=lambda p: min(abs(p.x0 - pos[0]), abs(p.x1 - pos[0])),
+        )
+        cx = min((abs(near.x0 - pos[0]), near.x0),
+                 (abs(near.x1 - pos[0]), near.x1))[1]
+        return "right" if cx > pos[0] else "left"
 
     def _off_graph_reason(self, graph, pos: Point) -> str:
         """Why the player's position isn't on the graph — name a covering

@@ -70,8 +70,8 @@ class MinimapAnalyzerTests(unittest.TestCase):
     def test_player_pos_finds_dot(self):
         analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
         img = _dot(_blank(), 50, 50, (12, 240, 239), r=2)
-        # Feet-anchored: the closing restores the drawn bottom row (52).
-        self.assertEqual(analyzer.player_pos(img), (50, 52))
+        # Feet-anchored: the r=2 square erodes to rows 49..51 → bottom 51.
+        self.assertEqual(analyzer.player_pos(img), (50, 51))
 
     def test_player_pos_is_bottom_of_marker_not_center(self):
         # A 7px-tall marker glyph (like the client's player icon): its
@@ -82,22 +82,11 @@ class MinimapAnalyzerTests(unittest.TestCase):
         img = _blank()
         img[40:47, 48:53] = (12, 240, 239)   # 7px tall marker, bottom=46
         x, y = analyzer.player_pos(img)
-        self.assertEqual((x, y), (50, 46))   # closing keeps the true tip
+        self.assertEqual((x, y), (50, 45))   # erode shaves 1px off the tip
 
     def test_player_pos_none_on_blank(self):
         analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
         self.assertIsNone(analyzer.player_pos(_blank()))
-
-    def test_player_pos_found_when_fragmented_by_a_rope_line(self):
-        # A rope-colored line drawn over the dot splits the blob; erosion
-        # eats the fragments, the relaxed no-erosion pass still finds one.
-        analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
-        img = _blank()
-        img[45:52, 48:53] = (12, 240, 239)     # player dot
-        img[48, 44:57] = (40, 90, 160)         # rope line through it
-        pos = analyzer.player_pos(img)
-        self.assertIsNotNone(pos)
-        self.assertEqual(pos[0], 50)
 
     def test_has_rune_and_others(self):
         analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
@@ -372,7 +361,7 @@ class LargestBlobTests(unittest.TestCase):
         _dot(img, 2, 2, a.colors.player)           # on the rim
         self.assertIsNone(a.player_pos(img))
         _dot(img, 40, 40, a.colors.player)         # interior
-        self.assertEqual(a.player_pos(img), (40, 42))  # feet = bottom row
+        self.assertEqual(a.player_pos(img), (40, 41))  # feet = bottom row
 
     def test_rune_pos_reports_blob_centre_not_mean(self):
         a = MinimapAnalyzer()

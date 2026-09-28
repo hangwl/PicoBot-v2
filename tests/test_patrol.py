@@ -179,6 +179,34 @@ class PatrolTests(unittest.TestCase):
         bot.rope_exit.assert_called_once()
         self.assertEqual(bot.attacks, 0)
 
+    def test_stable_off_graph_position_learns_a_rope(self):
+        # Hanging on an (undrawn) game rope: stable + off-graph for >2s
+        # records a rope segment up to the platform above, persisted into
+        # the map file, and leaps off.
+        import tempfile
+
+        from picobot.bot.maps import MapEntry, MapStore
+
+        bot = PatrolBot([FLOOR, (40, 40, 160, 40)], (60, 60),
+                        [(20, 100), (180, 100)])
+        bot._map = MapEntry(name="m")
+        bot._current_map_entry = lambda: bot._map
+        with tempfile.TemporaryDirectory() as tmp:
+            bot.maps = MapStore(tmp)
+            bot.maps.save(bot._map)
+            bot.rope_exit = Mock()
+            bot._blind_wait = Mock()
+            p = Patrol(bot)
+            p._stuck_since = time.monotonic() - 3.0
+            p._stuck_pos = (60, 60)
+            p.tick()
+            bot.rope_exit.assert_called_once()
+            saved = MapStore(tmp).get("m")
+            self.assertEqual(len(saved.ropes), 1)
+            self.assertEqual(saved.ropes[0][0], 0.3)      # stuck x
+            self.assertEqual(saved.ropes[0][3], round(40 / 150, 4))
+        self.assertTrue(any("Learned a rope" in l for l in bot.log_lines))
+
     def test_anchor_off_platform_is_banned_with_message(self):
         bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (95, 20)])
         p = Patrol(bot, rng=random.Random(0))

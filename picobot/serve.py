@@ -813,8 +813,6 @@ class BotHost:
     def _layout_platform(self, msg: str) -> None:
         self._layout_segments(msg, "platforms", "platform")
 
-    def _layout_rope(self, msg: str) -> None:
-        self._layout_segments(msg, "ropes", "rope")
 
     def _platforms_px(self, entry) -> list:
         """A map's drawn platform segments converted to minimap px."""
@@ -954,8 +952,6 @@ class BotHost:
             self._layout_anchor(msg)
         elif msg.startswith("layout|plat|"):
             self._layout_platform(msg)
-        elif msg.startswith("layout|rope|"):
-            self._layout_rope(msg)
         elif msg == "layout|reset":
             self._layout_reset()
         elif msg.startswith("layout|region|"):

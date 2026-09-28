@@ -45,8 +45,8 @@ anchors keep working.
 
 ## Moves & learned reach (`navgraph.py`, `reach.py`, `navigator.py`)
 
-The movement graph links drawn platforms (plus drawn **ropes**) with
-every move whose **reach** covers the gap:
+The movement graph links drawn platforms (plus **learned** ropes — see
+below) with every move whose **reach** covers the gap:
 
 | Move | Input | Use |
 |---|---|---|
@@ -56,7 +56,7 @@ every move whose **reach** covers the gap:
 | `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
 | `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column; preferred while ready |
 | `down_jump` / `drop` | down + jump; walk off an end | lower platforms |
-| `climb_up` | **jump-grab** a drawn rope (hold direction + up, jump), climb, mount the top platform | boards from any platform within jump reach below the rope's bottom end |
+| `climb_up` | **jump-grab** a learned rope (hold direction + up, jump), climb, mount the top platform | boards from any platform within jump reach below the rope's bottom end |
 | `climb_down` | grab at the top (hold down), descend past the rope's bottom end, land below | lands on the nearest platform under the rope's end |
 
 There is no direct release from a rope: after any failed climb the bot
@@ -69,6 +69,17 @@ Rope climbs cost `rope_penalty` (default 5s) on top of climb time —
 **ropes are a last resort**: platforms are normally reachable via jumps,
 rope lift, or (future) teleport. Set `rope_penalty: 0` to let the
 planner use them freely.
+
+## Learning ropes from stuck events
+
+Ropes are not drawn. When the bot is off every drawn platform at a
+stable position for over 2 seconds — the signature of hanging on an
+(undrawn) game rope — it records a rope segment from that spot up to the
+platform above (persisted in the map file, drawn brown on the overlay),
+leaps off, and replans. Learned climbs carry the same `rope_penalty`, so
+they're used only when nothing else connects. The same learning fires
+when the player dot stays invisible for ~2.5s (a fragmented glyph over a
+rope line).
 
 - Reach = sideways `dx` and upward `rise` in minimap px. Starting values
   are realistic guesses (`nav_*` config keys); the **Measure moves**

@@ -164,12 +164,6 @@
         <label>platforms are hand-drawn — the bot's walkable geometry (uses Map selection)</label>
       </div>
       <div class="row" style="margin-top:8px">
-        <button id="drawRopes" title="arm, then drag along each rope/ladder on the Minimap view — bottom end on the lower platform, top end on the upper one; click again to stop">Draw ropes</button>
-        <button id="ropeUndo" title="remove the last drawn rope">Undo</button>
-        <button id="ropeClear" title="remove all ropes for this map">Clear</button>
-        <label>ropes/ladders connect platforms for climbs (uses Map selection)</label>
-      </div>
-      <div class="row" style="margin-top:8px">
         <button id="placeAnchors" title="arm, then click the Panel view to place a patrol anchor (floats above the drawn platform like the player icon); shift-click removes the nearest — click again to stop">Place anchors</button>
         <button id="anchorUndo" title="remove the last placed anchor">Undo</button>
         <button id="anchorClear" title="remove all anchors for this map">Clear</button>
@@ -560,7 +554,6 @@ $("vWin").onclick = () => {
   if (platMode) armPlats();
   if (routeMode) armRoute();
   if (anchorMode) armAnchors();
-  if (ropeMode) armRope();
   send("dash|view|window");
 };
 $("vTitle").onclick = () => {
@@ -592,23 +585,10 @@ $("wallClear").onclick = () => send("layout|wall|clear" + layTarget());
 
 // --- Drag-to-draw platforms on the Minimap view ------------------------
 let platMode = false, platStart = null;
-let routeMode = false, anchorMode = false, ropeMode = false;
-function armRope() {
-  ropeMode = !ropeMode;
-  if (ropeMode && platMode) armPlats();
-  if (ropeMode && anchorMode) armAnchors();
-  if (ropeMode && routeMode) armRoute();
-  if (ropeMode) send("dash|view|minimap");
-  $("drawRopes").className = ropeMode ? "armed" : "";
-}
-$("drawRopes").onclick = () => armRope();
-$("ropeUndo").onclick = () => send("layout|rope|undo" + layTarget());
-$("ropeClear").onclick = () => send("layout|rope|clear" + layTarget());
 function armAnchors() {
   anchorMode = !anchorMode;
   if (anchorMode && platMode) armPlats();
   if (anchorMode && routeMode) armRoute();
-  if (anchorMode && ropeMode) armRope();
   if (anchorMode) send("dash|view|minimap");
   $("placeAnchors").className = anchorMode ? "armed" : "";
 }
@@ -619,7 +599,6 @@ function armRoute() {
   routeMode = !routeMode;
   if (routeMode && platMode) armPlats();
   if (routeMode && anchorMode) armAnchors();
-  if (routeMode && ropeMode) armRope();
   if (routeMode) send("dash|view|minimap");
   send("nav|show|" + (routeMode ? "on" : "off"));
   $("navRoute").className = routeMode ? "armed" : "";
@@ -630,7 +609,6 @@ function armPlats() {
   platStart = null;
   if (platMode && routeMode) armRoute();
   if (platMode && anchorMode) armAnchors();
-  if (platMode && ropeMode) armRope();
   if (platMode) send("dash|view|minimap");
   $("drawPlats").className = platMode ? "armed" : "";
 }
@@ -660,7 +638,7 @@ const viewXY = e => {
   ];
 };
 viewEl.addEventListener("pointerdown", e => {
-  if (platMode || ropeMode) {
+  if (platMode) {
     platStart = viewXY(e);
     viewEl.setPointerCapture(e.pointerId);
     return;
@@ -670,7 +648,7 @@ viewEl.addEventListener("pointerdown", e => {
   viewEl.setPointerCapture(e.pointerId);
 });
 viewEl.addEventListener("pointermove", e => {
-  if ((platMode || ropeMode) && platStart && lastImg) {
+  if (platMode && platStart && lastImg) {
     const ctx = viewEl.getContext("2d");
     ctx.drawImage(lastImg, 0, 0);
     const [x, y] = viewXY(e);
@@ -691,14 +669,6 @@ viewEl.addEventListener("pointermove", e => {
   ctx.strokeRect(drawStart[0], drawStart[1], x - drawStart[0], y - drawStart[1]);
 });
 viewEl.addEventListener("pointerup", e => {
-  if (ropeMode) {
-    if (platStart) {
-      const [x, y] = viewXY(e);
-      send(`layout|rope|${Math.round(platStart[0] - viewOX)},${Math.round(platStart[1] - viewOY)},${Math.round(x - viewOX)},${Math.round(y - viewOY)}` + layTarget());
-      platStart = null;
-    }
-    return;  // stays armed — draw the next rope
-  }
   if (anchorMode) {
     const [x, y] = viewXY(e);
     const xy = `${Math.round(x - viewOX)},${Math.round(y - viewOY)}`;

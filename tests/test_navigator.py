@@ -69,6 +69,9 @@ class SimBot:
     def log(self, m):
         self.log_lines.append(m)
 
+    def event(self, *a):
+        pass
+
     def sleep(self, dt):
         self.slept += dt
         self.rope_cd = max(0.0, self.rope_cd - dt)
