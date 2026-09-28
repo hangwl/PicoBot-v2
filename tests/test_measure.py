@@ -19,14 +19,20 @@ class MeasureBot:
             "jump": Reach(10, 4), "flash": Reach(30, 4),
             "double_flash": Reach(48, 4), "up_flash": Reach(6, 12),
             "up_side_flash": Reach(30, 20), "rope_lift": Reach(3, 15),
+            "teleport": Reach(25, 12),
         }))
         self.pos = pos
         self.carry = {"flash": 37, "double_flash": 45, "jump": 10,
-                      "up_flash": 22, "rope_lift": 22}
+                      "up_flash": 22, "rope_lift": 22, "teleport": 44}
+        self.tp_wait = [0.0]
+        self.slept = []
         self.moves = []
         self.focus = True
         self.held = None
-        self.config = SimpleNamespace(nav_threshold_px=4, jump_key="space")
+        self.config = SimpleNamespace(nav_threshold_px=4, jump_key="space",
+                                      class_travel="flash",
+                                      flash_jump_enabled=True,
+                                      teleport_key=None)
         self.reach = self.g.reach
         self.minimap = SimpleNamespace(player_pos=lambda img: self.pos)
         self.hid = SimpleNamespace(
@@ -49,12 +55,27 @@ class MeasureBot:
         return self.focus
 
     def sleep(self, dt):
+        self.slept.append(dt)
         return False
+
+    def teleport_remaining(self):
+        if not self.config.teleport_key:
+            return float("inf")
+        return self.tp_wait.pop(0) if self.tp_wait else 0.0
+
+    def teleport(self, direction=None):
+        self.moves.append(f"teleport:{direction}")
+        if direction == "up":
+            self._air(0, 22)
+        else:
+            self._air(self.carry["teleport"] * (1 if direction == "right" else -1), 0)
+        return True
 
     def minimap_frame(self):
         return object()
 
     def _flash_hop(self):
+        self.moves.append("flash")
         self._air(self.carry["flash"] * self._sign(), 2)
 
     def _double_flash(self):
@@ -122,6 +143,42 @@ class MoveMeasurerTests(unittest.TestCase):
         bot.focus = False
         _, got = self._run(bot)
         self.assertTrue(any("stopped" in m for _, m in got))
+
+    def test_teleport_class_measures_teleport_not_flashes(self):
+        bot = MeasureBot([FLOOR, LEDGE, TOP], (30, 100))
+        bot.config.class_travel = "teleport"
+        bot.config.teleport_key = "shift"
+        self._run(bot)
+        self.assertNotIn("flash", bot.moves)
+        self.assertNotIn("up_flash", bot.moves)
+        self.assertIn("teleport:right", bot.moves)
+        self.assertIn("teleport:up", bot.moves)
+        tp = bot.reach.get("teleport")
+        self.assertEqual((tp.dx, tp.rise), (44, 22))   # both grew from 25/12
+
+    def test_teleport_waits_out_the_cooldown(self):
+        bot = MeasureBot([FLOOR], (30, 100))
+        bot.config.class_travel = "teleport"
+        bot.config.teleport_key = "shift"
+        bot.tp_wait = [0.8]
+        self._run(bot)
+        self.assertTrue(any(abs(d - 0.85) < 1e-9 for d in bot.slept))
+        self.assertIn("teleport:right", bot.moves)
+
+    def test_walk_class_measures_only_jump_and_rope_lift(self):
+        bot = MeasureBot([FLOOR, LEDGE], (30, 100))
+        bot.config.class_travel = "walk"
+        self._run(bot)
+        self.assertEqual(
+            {m.split(":")[0] for m in bot.moves}, {"rope_lift"})
+        self.assertEqual(bot.reach.get("jump").dx, 10)
+        self.assertEqual(bot.reach.get("flash").dx, 30)   # untouched
+
+    def test_flash_disabled_skips_flash_moves(self):
+        bot = MeasureBot([FLOOR], (30, 100))
+        bot.config.flash_jump_enabled = False
+        self._run(bot)
+        self.assertNotIn("flash", bot.moves)
 
     def test_no_platforms_warns(self):
         bot = MeasureBot([], (30, 100))

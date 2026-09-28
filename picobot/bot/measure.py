@@ -24,10 +24,24 @@ Point = Tuple[float, float]
 class MoveMeasurer:
     """Execute each move type a few times and grow the reach envelopes."""
 
-    # Rope lift before up_flash: both need a platform above, and each
-    # climb ends standing on the next tier.
-    PLAN = ("flash", "double_flash", "jump", "rope_lift", "up_flash")
-    ROOM = {"flash": 34.0, "double_flash": 64.0, "jump": 16.0}
+    # Rope lift before the upward move: both need a platform above, and
+    # each climb ends standing on the next tier.
+    FLASH_PLAN = ("flash", "double_flash", "jump", "rope_lift", "up_flash")
+    TELEPORT_PLAN = ("jump", "teleport", "rope_lift", "teleport_up")
+    WALK_PLAN = ("jump", "rope_lift")
+    VERTICAL = ("up_flash", "rope_lift", "teleport_up")
+    ROOM = {"flash": 34.0, "double_flash": 64.0, "jump": 16.0, "teleport": 40.0}
+
+    @classmethod
+    def plan_for(cls, config) -> Tuple[str, ...]:
+        """The moves this class's planner can use — only those are worth
+        measuring (a mage never flash-jumps; its teleport matters)."""
+        travel = getattr(config, "class_travel", "flash")
+        if travel == "teleport" and getattr(config, "teleport_key", None):
+            return cls.TELEPORT_PLAN
+        if travel == "flash" and getattr(config, "flash_jump_enabled", True):
+            return cls.FLASH_PLAN
+        return cls.WALK_PLAN
 
     def __init__(self, bot, on_event: Optional[Callable[[str, str], None]] = None,
                  reps: int = 2) -> None:
@@ -68,8 +82,8 @@ class MoveMeasurer:
                 return
             self._emit("measure", "measuring moves — keep the game focused")
             measured, skipped = [], {}
-            for move in self.PLAN:
-                n = self.reps if move not in ("up_flash", "rope_lift") else 1
+            for move in self.plan_for(bot.config):
+                n = self.reps if move not in self.VERTICAL else 1
                 for _ in range(n):
                     if self._stop.is_set() or not bot.is_window_focused():
                         self._emit("measure", "measurement stopped")
@@ -95,10 +109,13 @@ class MoveMeasurer:
         """One attempt; False when the move can't be attempted here."""
         bot = self.bot
         graph = bot._nav_graph()
+        vertical = move in self.VERTICAL
+        teleport = move in ("teleport", "teleport_up")
+        if teleport and not self._teleport_ready(move):
+            return False
         start = self._settle()
         if start is None:
             return False
-        vertical = move in ("up_flash", "rope_lift")
         if vertical:
             if graph.above(start[0], start[1]) is None:
                 self._emit("measure", f"{move}: skipped — no platform above the player")
@@ -125,10 +142,18 @@ class MoveMeasurer:
         if move == "rope_lift" and not bot.rope_lift():
             self._emit("measure", "rope_lift: skipped — skill key not bound")
             return False
-        if direction:
-            bot.hid.key_down(direction)
+        if move == "teleport_up":
+            direction = "up"
+        # teleport() holds its own direction around the key press.
+        held = direction if not teleport else None
+        if held:
+            bot.hid.key_down(held)
         try:
-            if move == "flash":
+            if teleport:
+                if not bot.teleport(direction):
+                    self._emit("measure", f"{move}: skipped — teleport not ready")
+                    return False
+            elif move == "flash":
                 bot._flash_hop()
             elif move == "double_flash":
                 bot._double_flash()
@@ -137,11 +162,9 @@ class MoveMeasurer:
                 bot.sleep(0.5)
             elif move == "up_flash":
                 bot._up_flash(None)
-            elif move == "teleport":
-                bot.teleport(direction)
         finally:
-            if direction:
-                bot.hid.key_up(direction)
+            if held:
+                bot.hid.key_up(held)
         land = self._settle(timeout=1.2)
         if land is None or land == start:
             self._emit("measure", f"{move}: skipped — the character didn't move")
@@ -150,8 +173,9 @@ class MoveMeasurer:
         rise = start[1] - land[1]
         if not vertical and rise > 8:      # drifted off a ledge — unusable
             return False
+        # Both teleport directions grow the one (dx, rise) envelope.
         bot.reach.observe(
-            move, planned=(0.0, 0.0),
+            "teleport" if teleport else move, planned=(0.0, 0.0),
             observed=(0.0 if vertical else dx, rise if vertical else 0.0),
             ok=True,
         )
@@ -160,6 +184,17 @@ class MoveMeasurer:
             f"{move}: dx {dx:.0f}px rise {rise:.0f}px"
             + (f" ({direction})" if direction else ""),
         )
+        return True
+
+    def _teleport_ready(self, move: str) -> bool:
+        """Wait out the teleport cooldown; False when no key is bound."""
+        bot = self.bot
+        wait = bot.teleport_remaining()
+        if wait == float("inf"):
+            self._emit("measure", f"{move}: skipped — teleport key not bound")
+            return False
+        if wait > 0 and bot.sleep(wait + 0.05):
+            return False
         return True
 
     # -- Perception --------------------------------------------------------------------
