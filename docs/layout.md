@@ -115,6 +115,12 @@ truth, no per-section map names.
   right away), and **Undo platform** reverts it. Nothing moves on its
   own. Samples live in host memory and reset when a platform is
   redrawn.
+- **Align platform to feet** (Control pad, and the Map page) does the
+  same from one reading, without waiting for samples: stand still on a
+  platform and tap it. The host takes three dot reads 0.1 s apart (all
+  within 1px, else "stand still"), picks the drawn line spanning the
+  feet whose row is nearest and within 10px, and shifts it onto the
+  feet — slope kept, anchors and fit samples following, undoable.
 - Ropes are **not drawn** — they're learned: when the bot hangs stable
   at a spot that is on no drawn platform for over 2 seconds (confirmed by
   a Down probe), it records a rope segment from that spot up to the

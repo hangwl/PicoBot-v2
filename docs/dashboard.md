@@ -50,7 +50,9 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
   size, last skill cast) and one large Start/Stop button.
 - **Control** — rune solving on one screen: hazard banner, a compact
   view, the arrow pad, quick keys (jump key, ctrl, shift, enter) and a
-  key-name field (limited to the Pico's `KEY_MAP` names). Keys mirror the
+  key-name field (limited to the Pico's `KEY_MAP` names), and **Align
+  platform to feet** when the map has platforms (walk onto a platform with
+  the pad, tap it; the host's reply shows under it). Keys mirror the
   finger: `key|down` on touch, `key|up` on lift, so a tap is a tap, a
   hold is a hold, and several fingers chord (hold left, tap jump). Held
   keys are released when the page is hidden or loses focus; the host
@@ -64,7 +66,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
   - **Map and layout** — pin a map, `Auto-detect` (live identity), or
     `New map…` (names the next layout save and pins it); detected map,
     how it was resolved, the accepted title and score; Save layout /
-    Re-detect / Forget (confirmed); Tidy platforms / Undo platform; and
+    Re-detect / Forget (confirmed); Tidy platforms / Undo platform /
+    Align platform to feet; and
     the **platform fit** list — per platform, whether the feet settle on
     its line or it was drawn too high / too low, with **Move to feet**
     on flagged rows. Layout actions show the host's reply under the

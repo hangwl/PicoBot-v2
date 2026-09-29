@@ -923,6 +923,9 @@ class BotHost:
         if msg.startswith("layout|plat|feet|"):
             self._platform_to_feet(msg)
             return
+        if msg == "layout|plat|here" or msg.startswith("layout|plat|here|"):
+            self._platform_here(msg)
+            return
         self._layout_segments(msg, "platforms", "platform")
 
     def _map_title(self, msg: str) -> None:
@@ -1038,7 +1041,87 @@ class BotHost:
         if size is None:
             self.bus.emit("error", "no minimap frame — can't move the platform")
             return
+        self._shift_platform(entry, segs, idx, dy, *size, "onto the feet")
+
+    # Platform under the feet for "align here": this close to its line.
+    HERE_REACH_PX = 10.0
+    FEET_READS = 3
+    FEET_READ_GAP = 0.1
+
+    def _standing_feet(self):
+        """The player's feet when standing still (a few reads within
+        1px), else None."""
+        feed = self._get_feed()
+        mm = self.bot.minimap if self.bot is not None else (
+            feed.minimap if feed is not None else None)
+        if mm is None:
+            return None
+        got = []
+        for i in range(self.FEET_READS):
+            if i:
+                time.sleep(self.FEET_READ_GAP)
+            img = self._minimap_frame_img()
+            pos = mm.player_pos(img) if img is not None else None
+            if pos is None:
+                return None
+            got.append(pos)
+        xs, ys = [p[0] for p in got], [p[1] for p in got]
+        if max(xs) - min(xs) > 1 or max(ys) - min(ys) > 1:
+            return None
+        return sorted(xs)[len(xs) // 2], sorted(ys)[len(ys) // 2]
+
+    def _platform_here(self, msg: str) -> None:
+        """layout|plat|here[|<name>] — move the drawn line under the
+        player onto their feet, measured now. Anchors follow; undoable."""
+        parts = msg.split("|")
+        name = parts[3].strip() if len(parts) > 3 else ""
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        segs = list(entry.platforms or [])
+        if not segs:
+            self.bus.emit("error", f"{entry.name} has no drawn platforms")
+            return
+        size = self._minimap_size()
+        feet = self._standing_feet() if size is not None else None
+        if feet is None:
+            self.bus.emit(
+                "error",
+                "couldn't read a steady position — stand still on the "
+                "platform and try again",
+            )
+            return
         w, h = size
+        fx, fy = feet
+        best = None
+        for i, s in enumerate(segs):
+            x0, y0, x1, y1 = s[0] * w, s[1] * h, s[2] * w, s[3] * h
+            if x1 < x0:
+                x0, y0, x1, y1 = x1, y1, x0, y0
+            if not x0 - 3 <= fx <= x1 + 3:
+                continue
+            t = 0.0 if x1 == x0 else min(1.0, max(0.0, (fx - x0) / (x1 - x0)))
+            dy = fy - (y0 + t * (y1 - y0))
+            if abs(dy) <= self.HERE_REACH_PX and (best is None or abs(dy) < abs(best[1])):
+                best = (i, dy)
+        if best is None:
+            self.bus.emit(
+                "error",
+                f"no drawn platform within {self.HERE_REACH_PX:.0f}px of your "
+                f"feet (x {fx}, y {fy})",
+            )
+            return
+        idx, dy = best
+        if abs(dy) < 0.5:
+            self.bus.emit("map", f"{entry.name}: that platform already sits at your feet")
+            return
+        self._shift_platform(entry, segs, idx, dy, w, h, "onto your feet")
+
+    def _shift_platform(self, entry, segs, idx: int, dy: float, w: int, h: int,
+                        why: str) -> None:
+        """Move one drawn line ``dy`` px (down +), carrying its anchors and
+        fit samples; undoable like any platform edit."""
         old = segs[idx]
         new = [old[0], round(old[1] + dy / h, 4), old[2], round(old[3] + dy / h, 4)]
         moved_to = list(segs)
@@ -1055,7 +1138,7 @@ class BotHost:
         self.bus.emit(
             "map",
             f"{entry.name}: moved the platform at y {row:.0f} "
-            f"{'down' if dy > 0 else 'up'} {abs(dy):.1f}px onto the feet"
+            f"{'down' if dy > 0 else 'up'} {abs(dy):.1f}px {why}"
             + (f"; {len(moved)} anchor(s) followed" if moved else ""),
         )
         self._send_maps()

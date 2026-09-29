@@ -375,7 +375,30 @@ export function Pad({ s }: { s: AppState }) {
         <p class="hint warn">The Pico has no key called "{custom.trim()}".</p>
       )}
       <p class="hint">Keys stay down while you hold them.</p>
+      {s.platformsN > 0 && <AlignHere s={s} />}
     </section>
+  );
+}
+
+/** Snap the drawn platform under the character onto its feet. */
+export function AlignHere({ s }: { s: AppState }) {
+  const [askedAfter, setAskedAfter] = useState<number | null>(null);
+  const reply = askedAfter === null ? undefined : s.logs.find(
+    (it) => (it.id ?? 0) > askedAfter && (it.kind === "map" || it.kind === "error"),
+  );
+  const target = s.activeMap;
+  return (
+    <div class="align">
+      <button disabled={s.ws !== "on"} onClick={() => {
+        setAskedAfter(s.logs.length ? s.logs[s.logs.length - 1].id ?? 0 : 0);
+        send(target ? `layout|plat|here|${target}` : "layout|plat|here");
+      }}>
+        Align platform to feet
+      </button>
+      <p class={`hint ${reply?.kind === "error" ? "warn" : ""}`} role="status">
+        {reply?.msg ?? "Stand still on a platform, then tap to move its drawn line onto your feet."}
+      </p>
+    </div>
   );
 }
 

@@ -215,6 +215,8 @@ main {
 }
 .sweep .bar i { display: block; height: 100%; background: var(--accent); }
 .sweep .pill { font-variant-numeric: tabular-nums; }
+.align { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.align button { min-height: var(--tap); }
 button.small { min-height: 36px; padding: 0 10px; font-size: 14px; }
 
 /* -- Log ----------------------------------------------------------------- */

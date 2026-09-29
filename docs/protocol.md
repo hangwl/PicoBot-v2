@@ -56,6 +56,9 @@ resolves through map identity (title-OCR verified).
   overlaps (new drags are tidied automatically)
 - `layout|rope|del|<x0,y0,x1,y1>[|<name>]` — remove one learned rope
   (the `maps` event's rope `key`); `layout|rope|clear|undo[|<name>]`
+- `layout|plat|here[|<name>]` — move the drawn line under the standing
+  player (nearest row within 10px at their x) onto their feet; anchors
+  follow; refused while the dot moves or with no line near
 - `layout|plat|feet|<x0,y0,x1,y1>[|<name>]` — move that stored line (the
   platform-fit row's `key`) by its median feet offset; anchors follow;
   refused with too few samples or when the line changed since

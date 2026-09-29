@@ -730,6 +730,53 @@ class HostCommandTests(unittest.TestCase):
             self.assertAlmostEqual(self._plats_px(tmp)[0][1], 40.0, delta=0.1)
             self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 36.0, delta=0.2)
 
+    def _stand(self, *positions):
+        self.host.FEET_READ_GAP = 0.0
+        seq = list(positions) or [None]
+        self.host._feed.minimap.player_pos = Mock(
+            side_effect=lambda img: seq.pop(0) if len(seq) > 1 else seq[0])
+
+    def test_align_here_moves_the_line_under_the_feet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            seg = [0.1, 40 / 150, 0.9, 40 / 150]
+            other = [0.1, 60 / 150, 0.9, 60 / 150]
+            self._with_anchors(tmp, [seg, other], [("a0", 60, 36)])
+            self._stand((80, 47), (80, 47), (81, 47))   # 7px below y40
+            self.host._handle_command("layout|plat|here|m1")
+            rows = sorted(p[1] for p in self._plats_px(tmp))
+            self.assertEqual(rows, [47.0, 60.0])       # nearest line only
+            self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 43.0, delta=0.2)
+            self.assertTrue(any("onto your feet" in m for m in self.sent))
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertEqual(sorted(p[1] for p in self._plats_px(tmp)), [40.0, 60.0])
+
+    def test_align_here_refuses_while_moving_or_far_from_a_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            seg = [0.1, 40 / 150, 0.9, 40 / 150]
+            self._with_anchors(tmp, [seg], [])
+            self._stand((80, 44), (80, 40), (80, 36))    # airborne
+            self.host._handle_command("layout|plat|here|m1")
+            self._stand((80, 70))                        # 30px below
+            self.host._handle_command("layout|plat|here|m1")
+            self._stand((190, 40))                       # past its end
+            self.host._handle_command("layout|plat|here|m1")
+            self.assertEqual(self._plats_px(tmp)[0][1], 40.0)
+            msgs = " ".join(self.sent)
+            self.assertIn("steady position", msgs)
+            self.assertIn("no drawn platform within 10px", msgs)
+
+    def test_align_here_on_a_fitting_line_changes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            seg = [0.1, 40 / 150, 0.9, 40 / 150]
+            self._with_anchors(tmp, [seg], [])
+            self._stand((80, 40))
+            self.host._handle_command("layout|plat|here|m1")
+            self.assertFalse(self.host._layout_undo.get(("m1", "platforms")))
+            self.assertTrue(any("already sits at your feet" in m for m in self.sent))
+
     def test_move_to_feet_refuses_without_enough_samples_or_a_stale_key(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

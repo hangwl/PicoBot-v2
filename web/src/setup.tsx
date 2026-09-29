@@ -313,6 +313,10 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
                   disabled={creating || bad}>
             Undo platform
           </button>
+          <button onClick={() => layoutAct(`layout|plat|here|${target}`)}
+                  disabled={creating || bad}>
+            Align platform to feet
+          </button>
         </div>
       )}
       {reply && (
