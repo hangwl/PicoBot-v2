@@ -182,7 +182,7 @@ class BotHost:
 
         self._nav_cache = GraphCache()
         self.reach = ReachModel(
-            base_reach(self.bot_config), path=self.bot_config.nav_reach_file
+            base_reach(self.bot_config), path=self.bot_config.reach_path()
         )
 
         self.bot = None

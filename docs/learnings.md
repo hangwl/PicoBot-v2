@@ -152,6 +152,11 @@ fixed that — all 15 captured reads exact afterwards.
   (~0.08–0.18 s after the first tap's release, plus the tap's own hold),
   so outcomes varied with nothing recording why; the timing sweep
   records peak vs delay before the planner is taught to choose one.
+- **Per-class reach only after a switch** (2026-09-29): the host built its
+  reach model from `nav_reach_file` at startup and only moved to
+  `nav_reach_<class>.json` on a class switch, so a session started with
+  a class active learned and measured into the shared `nav_reach.json`.
+  Startup now uses `reach_path()`.
 - **Live view dying for good** (2026-09-29): every stage had a way to
   stall permanently with nothing to restart it. `GameWindow` kept the
   handle it found at startup, so a restarted game broke every capture

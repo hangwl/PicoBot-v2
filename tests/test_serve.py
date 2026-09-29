@@ -438,6 +438,14 @@ class HostCommandTests(unittest.TestCase):
                     if e["kind"] == "bot"]
             self.assertTrue(any("class: mage" in m for m in msgs))
 
+    def test_startup_loads_the_active_profile_reach_file(self):
+        cfg = AppConfig()
+        cfg.bot = {"class": {"active": "mage",
+                             "profiles": {"mage": {"travel": "teleport"}}}}
+        with patch("picobot.bot.reach.ReachModel.load"):
+            host = BotHost(None, "OldWin", config=cfg)
+        self.assertEqual(host.reach.path.name, "nav_reach_mage.json")
+
     def test_class_use_swaps_to_the_profile_reach_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)
