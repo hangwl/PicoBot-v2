@@ -96,6 +96,18 @@ class ReachModelTests(unittest.TestCase):
             self.assertEqual(again.get("flash").dx, 27)
             self.assertEqual(again.snapshot(), m.snapshot())
 
+    def test_profiles_persist_without_touching_the_envelope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "reach.json"
+            m = _model(path=path)
+            before = m.get("up_flash").rise
+            m.set_profile("up_flash", [{"delay": 0.2, "rise": 18.0}])
+            m.save(force=True)
+            again = _model(path=path)
+            self.assertEqual(again.profiles["up_flash"]["rows"],
+                             [{"delay": 0.2, "rise": 18.0}])
+            self.assertEqual(again.get("up_flash").rise, before)
+
     def test_version_changes_on_estimate_or_ceiling_change(self):
         m = _model()
         v = m.version

@@ -55,11 +55,29 @@ export interface MoveResult {
   skipped?: string;
 }
 
+/** One re-press delay of a timing sweep (delay null = plain jump). */
+export interface SweepRow {
+  delay: number | null;
+  n: number;
+  gap: number | null;
+  rise: number | null;
+  sd: number;
+  min: number | null;
+  max: number | null;
+  peak_t: number | null;
+  air: number | null;
+}
+
 export interface MeasureState {
   running: boolean;
   move: string | null;
   plan: string[];
   results: Record<string, MoveResult>;
+  mode: string;
+  /** Live rows of the sweep in progress. */
+  profile: SweepRow[];
+  /** Saved sweeps by move. */
+  profiles: Record<string, { at: number; rows: SweepRow[] }>;
 }
 
 /** Where the feet settle on one drawn platform (minimap px). */
@@ -190,7 +208,10 @@ const initial: AppState = {
   flashOn: true,
   navR: 5,
   fps: 3,
-  measure: { running: false, move: null, plan: [], results: {} },
+  measure: {
+    running: false, move: null, plan: [], results: {},
+    mode: "moves", profile: [], profiles: {},
+  },
   botRunning: false,
   botState: "–",
   hazard: "none",
@@ -457,6 +478,9 @@ function onEvent(p: Record<string, any> & { event: string }) {
           move: (p.move as string | null) ?? null,
           plan: (p.plan as string[]) ?? [],
           results: (p.results as Record<string, MoveResult>) ?? {},
+          mode: (p.mode as string) ?? "moves",
+          profile: (p.profile as SweepRow[]) ?? [],
+          profiles: (p.profiles as MeasureState["profiles"]) ?? {},
         },
       });
       return;

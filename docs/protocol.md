@@ -40,6 +40,7 @@ and follows the same view.
 | `layout|plat\|anchor\|…[|<name>]` | drawn geometry (see below) |
 | `nav|show|on\|off` / `nav|preview|x,y` | graph overlay + route preview (minimap px) |
 | `measure|start` / `measure|stop` / `measure|status` | move measurement (the moves the active class can use); `status` re-sends the `measure` event |
+| `measure|profile|up_flash` | up-flash timing sweep (stopped with `measure|stop`); saves `profiles.up_flash` in the reach file |
 | `host|serial\|<port\|auto>` / `host|window|<title>` | connection |
 | `key|down\|<k>` / `key|up\|<k>` | remote input pad (Pico HID): a real press and release — the dashboard sends them on touch and lift. `<k>` is a Pico `KEY_MAP` name. Keys a client still holds when it disconnects are released |
 | `config|get` | full config snapshot |
@@ -73,7 +74,7 @@ Text, `dash|` + JSON:
 | `history` | `{items: [evt…]}` — replay on connect |
 | `maps` | `{maps, active, detected, via, title, score, reading, platforms_n, anchors_n, platform_fit, ropes, recorded_title, anchor_stats}` — `recorded_title`: the resolved map's stored title; `anchor_stats`: per anchor `{name, visits, last, misses, skips: {why: n}}`; — `ropes`: learned ropes `{key, x, top, bottom}` (minimap px); — `platform_fit`: per drawn platform `{x0, x1, row, n, key, offset?, spread?, coverage?}` (minimap px; offset = median feet − row, + = drawn too high); re-sent at most every 5s while samples arrive |
 | `class` | `{active, profiles: {name: {travel, air_attacks, teleport_key}}, policy, temp, measured, measure_plan, measured_moves}` — `measure_plan` is the class's measurement moves, `measured_moves` those measured, `measured` their count; re-sent when a measurement ends |
-| `measure` | `{running, move, plan, results: {move: {dx} \| {rise} \| {skipped}}}` — on every change of a run, on `measure|status`, and on class switches |
+| `measure` | `{running, move, plan, results: {move: {dx} \| {rise} \| {skipped}}, mode, profile, profiles}` — `mode` is `moves` or `up_flash_profile`; `profile` the live sweep rows `{delay, n, gap, rise, sd, min, max, peak_t, air}` (`delay` null = plain jump); `profiles` the saved sweeps `{move: {at, rows}}`. Sent on every change of a run, on `measure|status`, and on class switches |
 | `skills` | `{source, inherited, skills}` — the book the bot uses: `source` is the active profile or `global`; `inherited` = the profile has no kit of its own and uses the global book |
 | `config` | full `BotConfig` snapshot |
 | `host` | `{ports, windows, serial, window, serial_open}` |

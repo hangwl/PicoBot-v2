@@ -466,6 +466,15 @@ class FlashAttackTests(unittest.TestCase):
             presses = self._presses(fn, *args)
             self.assertEqual(presses, ["space"] * jumps + ["a"], fn)
 
+    def test_timed_up_flash_holds_up_into_the_second_jump(self):
+        bot = _weave_bot((50, 50))
+        marks = []
+        bot._up_flash(None, delay=0.2, mark=marks.append)
+        self.assertEqual(bot.hid.downs, ["space", "up", "space"])
+        self.assertEqual(bot.hid.ups, ["space", "space", "up"])
+        self.assertEqual(bot.hid.presses, ["a"])        # attacks after
+        self.assertEqual(marks, ["jump", "rejump"])
+
 class RoamFallbackTests(unittest.TestCase):
     """No anchors: keep moving around where grinding started instead of
     standing still spamming attacks."""

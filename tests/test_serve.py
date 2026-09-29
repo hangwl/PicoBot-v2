@@ -1458,6 +1458,19 @@ class HostCommandTests(unittest.TestCase):
         self.host._measure_start()
         self.assertTrue(any("already measuring" in m for m in self.sent))
 
+    def test_up_flash_sweep_command_starts_profile_mode(self):
+        self.host._feed = Mock()
+        with patch("picobot.bot.SmartBot"),                 patch("picobot.bot.measure.MoveMeasurer") as mm:
+            self.host._handle_command("measure|profile|up_flash")
+        mm.return_value.start.assert_called_once_with("up_flash_profile")
+
+    def test_idle_measure_status_carries_stored_profiles(self):
+        self.host.reach.set_profile("up_flash", [{"delay": 0.2, "rise": 18}])
+        self.host._handle_command("measure|status")
+        st = self._events("measure")[-1]
+        self.assertEqual(st["profiles"]["up_flash"]["rows"],
+                         [{"delay": 0.2, "rise": 18}])
+
     def test_profile_edits_leave_the_global_book_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)

@@ -79,6 +79,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     measured / measuring / px result / skip reason) and one button that
     is *Measure moves* when idle and *Stop measuring* while running.
     While measuring, the top bar says so and Start bot is replaced.
+    Flash classes also get **Up-flash timing**: a sweep button and the
+    per-delay peaks (live while sweeping, then the saved sweep).
   - **Patrol** (loop order + temperature),
     **Connection** (Pico serial port, *Find the Pico* auto-probe that
     skips the open port, game window — locked while the bot runs).

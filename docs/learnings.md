@@ -143,6 +143,15 @@ fixed that — all 15 captured reads exact afterwards.
   rise is positive upward, so `rise > 8` rejected landing *higher* and
   accepted falls — an overshoot onto a lower platform was recorded as an
   inflated dx.
+- **Up flash measured the ledge, not the jump** (2026-09-29): vertical
+  measurement ran once and recorded the rise to wherever it landed — the
+  gap to the platform above the measuring spot. That became the
+  calibrated reach (13 px on one class vs a 26 px guess), so the planner
+  found no route to taller tiers while rope lift cooled. The up flash is
+  now measured by its recorded peak. Its re-press delay was also random
+  (~0.08–0.18 s after the first tap's release, plus the tap's own hold),
+  so outcomes varied with nothing recording why; the timing sweep
+  records peak vs delay before the planner is taught to choose one.
 - **Live view dying for good** (2026-09-29): every stage had a way to
   stall permanently with nothing to restart it. `GameWindow` kept the
   handle it found at startup, so a restarted game broke every capture

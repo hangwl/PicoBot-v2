@@ -73,6 +73,9 @@ class ReachModel:
         self._fail_streak: Dict[str, int] = {}
         # Measurement move name (e.g. "teleport_up") -> epoch seconds.
         self.measured: Dict[str, float] = {}
+        # Timing sweeps, e.g. "up_flash" -> {"at": epoch, "rows": [...]}:
+        # recorded for analysis, not used by the planner.
+        self.profiles: Dict[str, dict] = {}
         self.path = Path(path) if path else None
         self._dirty = False
         self._saved_at = 0.0
@@ -201,6 +204,11 @@ class ReachModel:
         logger.info("reach %s calibrated: dx %.1f→%.1f rise %.1f→%.1f",
                     move, before[0], e.dx, before[1], e.rise)
 
+    def set_profile(self, move: str, rows: list) -> None:
+        self.profiles[move] = {"at": time.time(), "rows": list(rows)}
+        self.version += 1
+        self._dirty = True
+
     # -- Persistence ----------------------------------------------------------------
     def load(self) -> None:
         if self.path is None or not self.path.exists():
@@ -219,6 +227,10 @@ class ReachModel:
                 self.ceiling[k] = Reach(inf(v.get("dx")), inf(v.get("rise")))
         self.measured = {
             str(k): float(v) for k, v in (data.get("measured") or {}).items()
+        }
+        self.profiles = {
+            str(k): v for k, v in (data.get("profiles") or {}).items()
+            if isinstance(v, dict) and isinstance(v.get("rows"), list)
         }
         self.version += 1
 
@@ -240,6 +252,8 @@ class ReachModel:
             for k, v in doc["ceiling"].items()
         }
         doc["measured"] = dict(self.measured)
+        if self.profiles:
+            doc["profiles"] = self.profiles
         try:
             write_text_atomic(self.path, json.dumps(doc, indent=2))
             self._dirty = False

@@ -122,7 +122,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Rope avoidance | climb edges cost `rope_penalty` (default 5s) — ropes are a **last resort**; platforms are normally reachable via jumps/rope lift/teleport. Rope mapping exists for accidental-grab recovery and future precise moves (rune solving) |
 | Map-change monitor + identity | `bot/monitor.py`, `bot/identity.py`, `vision/transition.py` |
 | Map store + identity | `bot/maps.py`, `vision/minimap.py`, `vision/mapname.py` |
-| Move measurement | `bot/measure.py` |
+| Move measurement | `bot/measure.py`, `bot/flight.py` (dot arc sampler: peak, landing) |
 | Host + dashboard cmds | `serve.py`, `remote/control.py` |
 | Frame pipeline | `remote/streamer.py` (`assemble_panel`, `annotate`) |
 | Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup pages), `keys.ts` (held keys); protocol in `docs/protocol.md` |

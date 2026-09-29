@@ -209,6 +209,12 @@ main {
 .moves li { min-height: var(--tap); }
 .fit h3 { font-size: 15px; font-weight: 600; margin: 8px 0 4px; }
 .fit .rows li b { font-weight: 500; font-variant-numeric: tabular-nums; }
+.sweep .bar {
+  width: 64px; height: 6px; border-radius: 3px; background: var(--surface-2);
+  overflow: hidden;
+}
+.sweep .bar i { display: block; height: 100%; background: var(--accent); }
+.sweep .pill { font-variant-numeric: tabular-nums; }
 button.small { min-height: 36px; padding: 0 10px; font-size: 14px; }
 
 /* -- Log ----------------------------------------------------------------- */

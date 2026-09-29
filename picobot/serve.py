@@ -1219,6 +1219,8 @@ class BotHost:
             self._set_map(msg.split("|", 2)[2])
         elif msg == "measure|start":
             self._measure_start()
+        elif msg == "measure|profile|up_flash":
+            self._measure_start("up_flash_profile")
         elif msg == "measure|stop":
             if self.measurer:
                 self.measurer.stop()
@@ -1751,7 +1753,7 @@ class BotHost:
         self._send_config()
 
     # -- Move measurement -------------------------------------------------------
-    def _measure_start(self) -> None:
+    def _measure_start(self, mode: str = "moves") -> None:
         if self.bot is not None or (self.bot_thread and self.bot_thread.is_alive()):
             self.bus.emit("error", "stop the bot before measuring moves")
             return
@@ -1792,10 +1794,11 @@ class BotHost:
         self.measurer = MoveMeasurer(
             bot, on_event=lambda k, m: self.bus.emit(k, m), on_status=on_status,
         )
-        self.measurer.start()
+        self.measurer.start(mode)
 
     def _send_measure(self, status: Optional[dict] = None) -> None:
-        """measure event: {running, move, plan, results}."""
+        """measure event: {running, move, plan, results, mode, profile,
+        profiles}."""
         if status is None:
             from .bot.measure import MoveMeasurer
 
@@ -1804,6 +1807,9 @@ class BotHost:
                     "running": False, "move": None,
                     "plan": list(MoveMeasurer.plan_for(self.bot_config)),
                     "results": {},
+                    "mode": "moves",
+                    "profile": [],
+                    "profiles": dict(self.reach.profiles),
                 }
             )
         self.remote.broadcast(

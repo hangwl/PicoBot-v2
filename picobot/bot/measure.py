@@ -6,16 +6,23 @@ executes each move its class can use in the safest available direction,
 and calibrates the reach model to the best result per move — a
 measurement is ground truth, so it may also lower a too-generous guess.
 Farming keeps refining from there.
+
+The up flash is measured by its recorded peak (a :class:`FlightRecorder`
+arc), not by the ledge it happened to land on. A separate timing sweep
+records how the peak depends on the re-press delay.
 """
 
 from __future__ import annotations
 
 import logging
+import statistics
 import threading
 import time
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from ..vision.minimap import platform_span_at
+from .flight import Flight, FlightRecorder
+from .timing import human_between
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +39,10 @@ class MoveMeasurer:
     WALK_PLAN = ("jump", "rope_lift")
     VERTICAL = ("up_flash", "rope_lift", "teleport_up")
     ROOM = {"flash": 34.0, "double_flash": 64.0, "jump": 16.0, "teleport": 40.0}
+    # Up-flash timing sweep: re-press delays (s) after the first key-down.
+    PROFILE_DELAYS = (0.08, 0.12, 0.16, 0.20, 0.25, 0.30, 0.36, 0.44)
+    PROFILE_REPS = 3
+    PROFILE_CLEAR_PX = 45.0
 
     @classmethod
     def plan_for(cls, config) -> Tuple[str, ...]:
@@ -50,8 +61,12 @@ class MoveMeasurer:
         on_event: Optional[Callable[[str, str], None]] = None,
         reps: int = 2,
         on_status: Optional[Callable[[dict], None]] = None,
+        recorder_factory: Optional[Callable[[], FlightRecorder]] = None,
     ) -> None:
         self.bot = bot
+        if recorder_factory is None and callable(getattr(bot, "sample_player", None)):
+            recorder_factory = lambda: FlightRecorder(bot.sample_player)
+        self._make_recorder = recorder_factory
         self._emit = on_event or (lambda k, m: None)
         self._on_status = on_status or (lambda st: None)
         self.reps = reps
@@ -61,17 +76,22 @@ class MoveMeasurer:
         self.results: Dict[str, dict] = {}
         self.current: Optional[str] = None
         self._running = False
+        self.mode = "moves"
+        self.profile_rows: List[dict] = []
 
     # -- Lifecycle ------------------------------------------------------------------
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self) -> None:
+    def start(self, mode: str = "moves") -> None:
+        """``mode``: "moves" (the class's plan) or "up_flash_profile"."""
         if self.running():
             return
         self._stop.clear()
         self.results = {}
+        self.profile_rows = []
         self.current = None
+        self.mode = mode
         self._running = True
         self._publish()
         self._thread = threading.Thread(
@@ -91,6 +111,9 @@ class MoveMeasurer:
             "move": self.current,
             "plan": list(self.plan_for(self.bot.config)),
             "results": dict(self.results),
+            "mode": self.mode,
+            "profile": list(self.profile_rows),
+            "profiles": dict(getattr(self.bot.reach, "profiles", {})),
         }
 
     def _publish(self) -> None:
@@ -100,6 +123,9 @@ class MoveMeasurer:
             logger.debug("measure status listener failed", exc_info=True)
 
     # -- Measurement ------------------------------------------------------------------
+    def _peak_measured(self, move: str) -> bool:
+        return move == "up_flash" and self._make_recorder is not None
+
     def _loop(self) -> None:
         bot = self.bot
         try:
@@ -109,13 +135,17 @@ class MoveMeasurer:
                     "measure", "draw the platforms first — nothing to measure against"
                 )
                 return
+            if self.mode == "up_flash_profile":
+                self._profile()
+                return
             self._emit("measure", "measuring moves — keep the game focused")
             for move in self.plan_for(bot.config):
                 self.current = move
                 self._publish()
                 best: Optional[float] = None
                 reason = ""
-                n = self.reps if move not in self.VERTICAL else 1
+                peak = self._peak_measured(move)
+                n = self.reps if move not in self.VERTICAL or peak else 1
                 for _ in range(n):
                     if self._stop.is_set() or not bot.is_window_focused():
                         self._emit("measure", "measurement stopped")
@@ -123,7 +153,8 @@ class MoveMeasurer:
                     got = self._measure(move)
                     if isinstance(got, str):
                         reason = got
-                    elif best is None or got > best:
+                    # The re-press timing varies: plan on the lowest peak.
+                    elif best is None or (got < best if peak else got > best):
                         best = got
                 self._record(move, best, reason)
             measured = [m for m, r in self.results.items() if "skipped" not in r]
@@ -168,6 +199,8 @@ class MoveMeasurer:
     def _measure(self, move: str):
         """One attempt: the measured reach (rise for upward moves, dx for
         the rest), or the reason it was skipped."""
+        if self._peak_measured(move):
+            return self._measure_peak(move)
         bot = self.bot
         graph = bot._nav_graph()
         vertical = move in self.VERTICAL
@@ -237,6 +270,140 @@ class MoveMeasurer:
             + (f" ({direction})" if direction else ""),
         )
         return rise if vertical else dx
+
+    def _measure_peak(self, move: str):
+        """Up flash as it runs on patrol; the recorded peak is its rise."""
+        got = self._fly(None, up_flash=True, open_sky=False)
+        if isinstance(got, str):
+            return self._skip(move, got)
+        pk = got.peak()
+        if pk is None or pk[1] < 2:
+            return self._skip(move, "no flight recorded — is the dot visible?")
+        self._emit("measure", f"{move}: peak {pk[1]:.0f}px at {pk[0]:.2f}s")
+        return pk[1]
+
+    def _fly(self, delay: Optional[float], *, up_flash: bool, open_sky: bool = True):
+        """Record one flight from standing: a plain jump, or an up flash
+        (re-press at ``delay`` s, or the patrol's own timing when None).
+        A :class:`Flight`, or the reason it can't be used — with
+        ``open_sky``, landing on a platform above is one."""
+        bot = self.bot
+        start = self._settle()
+        if start is None:
+            return "player dot not visible"
+        rec = self._make_recorder()
+        rec.start()
+        try:
+            bot.sleep(0.12)                # a few standing samples first
+            if not up_flash:
+                rec.mark("jump")
+                bot.hid.press(bot.config.jump_key)
+                bot.sleep(0.7)
+            elif delay is None:
+                rec.mark("jump")
+                bot._up_flash(None)
+            else:
+                bot._up_flash(None, delay=delay, mark=rec.mark)
+            land = self._settle(timeout=1.5)
+        finally:
+            flight = rec.stop()
+        if open_sky and land is not None and start[1] - land[1] > 3:
+            return (f"landed {start[1] - land[1]:.0f}px higher on a platform — "
+                    "measure where nothing is overhead")
+        return flight
+
+    # -- Up-flash timing sweep -------------------------------------------------------
+    def _profile(self) -> None:
+        bot = self.bot
+        cfg = bot.config
+        if self._make_recorder is None:
+            self._emit("measure", "timing sweep needs flight recording")
+            return
+        if getattr(cfg, "class_travel", "flash") != "flash" \
+                or not getattr(cfg, "flash_jump_enabled", True):
+            self._emit("measure", "the up-flash sweep is for flash-jump classes")
+            return
+        start = self._settle()
+        if start is None:
+            self._emit("measure", "player dot not visible")
+            return
+        graph = bot._nav_graph()
+        if graph.locate(*start) is None:
+            self._emit("measure", "stand on a drawn platform first")
+            return
+        above = graph.above(*start)
+        if above is not None:
+            gap = start[1] - graph.platforms[above].y_at(start[0])
+            if gap < self.PROFILE_CLEAR_PX:
+                self._emit(
+                    "measure",
+                    f"a platform is {gap:.0f}px overhead — stand where there's "
+                    f"at least {self.PROFILE_CLEAR_PX:.0f}px of open space above",
+                )
+                return
+        plan: List[Optional[float]] = [None, *self.PROFILE_DELAYS]
+        flights: Dict[Optional[float], List[Flight]] = {d: [] for d in plan}
+        self._emit(
+            "measure",
+            f"up-flash timing sweep: {len(plan) * self.PROFILE_REPS} jumps "
+            "— keep the game focused",
+        )
+        stopped = False
+        for _ in range(self.PROFILE_REPS):
+            for d in plan:
+                if self._stop.is_set() or not bot.is_window_focused():
+                    self._emit("measure", "sweep stopped")
+                    stopped = True
+                    break
+                self.current = "jump" if d is None else f"up_flash @{d:.2f}s"
+                self._publish()
+                got = self._fly(d, up_flash=d is not None)
+                if isinstance(got, str):
+                    self._emit("measure", f"sweep stopped — {got}")
+                    stopped = True
+                    break
+                flights[d].append(got)
+                self.profile_rows = self._profile_rows(flights)
+                self._publish()
+                bot.sleep(human_between(0.35, 0.25, 0.6))
+            if stopped:
+                break
+        rows = self._profile_rows(flights)
+        if not any(r["n"] for r in rows):
+            self._emit("measure", "sweep recorded nothing")
+            return
+        bot.reach.set_profile("up_flash", rows)
+        best = max((r for r in rows if r["delay"] is not None and r["n"]),
+                   key=lambda r: r["rise"], default=None)
+        msg = "sweep saved" + (" (partial)" if stopped else "")
+        if best is not None:
+            msg += f" — highest peak {best['rise']}px at {best['delay']:.2f}s"
+        self._emit("measure", msg)
+
+    @staticmethod
+    def _profile_rows(flights: Dict[Optional[float], List[Flight]]) -> List[dict]:
+        """One row per delay (None = the plain-jump baseline)."""
+        def avg(vals):
+            return round(statistics.fmean(vals), 3) if vals else None
+
+        rows = []
+        for delay, fs in flights.items():
+            peaks = [p for p in (f.peak() for f in fs) if p is not None]
+            rises = [r for _, r in peaks]
+            lands = [l for l in (f.landing() for f in fs) if l is not None]
+            gaps = [g for g in (f.gap() for f in fs) if g is not None]
+            rows.append({
+                "delay": delay,
+                "n": len(rises),
+                "gap": avg(gaps),
+                "rise": round(statistics.fmean(rises), 1) if rises else None,
+                "sd": round(statistics.pstdev(rises), 1) if len(rises) > 1 else 0.0,
+                "min": min(rises) if rises else None,
+                "max": max(rises) if rises else None,
+                "peak_t": avg([t for t, _ in peaks]),
+                "air": avg([t for t, _ in lands]),
+            })
+        return rows
 
     def _teleport_wait(self) -> str:
         """Wait out the teleport cooldown; a reason when it can't be used."""

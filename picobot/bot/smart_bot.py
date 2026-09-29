@@ -36,7 +36,7 @@ from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step, resolve_coord
 from .skills import Skill, SkillBook
 from .summons import SummonTracker
-from .timing import human_between, key_gap, new_session, release_lag
+from .timing import human_between, human_hold, key_gap, new_session, release_lag
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +188,17 @@ class SmartBot(BotBase):
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
         return self._stash_frame(img)
+
+    def sample_player(self) -> Optional[Tuple[int, int]]:
+        """Dot position for a sampler thread: no map sync, no viz stash."""
+        region = self.minimap.region
+        if region is None:
+            return None
+        x, y, w, h = region
+        img = self.screen.capture(
+            (self.window.client_left + x, self.window.client_top + y, w, h)
+        )
+        return None if img is None else self.minimap.player_pos(img)
 
     def _stash_frame(self, img):
         self.viz["img"] = img
@@ -409,22 +420,51 @@ class SmartBot(BotBase):
         self.sleep(human_between(0.45, 0.35, 0.6))
         return True
 
-    def _up_flash(self, direction: Optional[str] = None) -> None:
+    def _up_flash(
+        self,
+        direction: Optional[str] = None,
+        delay: Optional[float] = None,
+        mark=None,
+    ) -> None:
         """Jump, then Up + jump mid-air — the upward flash jump. Holding a
-        ``direction`` adds the sideways drift of a diagonal takeoff."""
+        ``direction`` adds the sideways drift of a diagonal takeoff.
+        ``delay`` times the second jump from the first key-down (seconds);
+        ``mark(name)`` is told when each jump goes down."""
         jk = self._flash_key()
         if direction:
             self.hid.key_down(direction)
         try:
-            self.hid.press(jk)
-            self._lead_sleep(self._repress(self.config.flash_repress_seconds * 0.8))
-            self.hid.key_down("up")
-            self.hid.press(jk)
-            self.hid.key_up("up")
+            if delay is None:
+                self.hid.press(jk)
+                self._lead_sleep(self._repress(self.config.flash_repress_seconds * 0.8))
+                self.hid.key_down("up")
+                self.hid.press(jk)
+                self.hid.key_up("up")
+            else:
+                self._timed_rejump(jk, delay, mark)
             self._after_flash(0.36)
         finally:
             if direction:
                 self.hid.key_up(direction)
+
+    UP_LEAD = 0.04       # Up goes down this long before the timed re-press
+
+    def _timed_rejump(self, jk: str, delay: float, mark=None) -> None:
+        """Jump, then Up + jump ``delay`` seconds after the first key-down."""
+        note = mark or (lambda name: None)
+        self.hid.key_down(jk)
+        t0 = time.monotonic()
+        note("jump")
+        self.sleep(min(human_hold(jk), max(0.02, delay * 0.4)))
+        self.hid.key_up(jk)
+        self.sleep(max(0.0, t0 + delay - self.UP_LEAD - time.monotonic()))
+        self.hid.key_down("up")
+        self.sleep(max(0.0, t0 + delay - time.monotonic()))
+        self.hid.key_down(jk)
+        note("rejump")
+        self.sleep(human_hold(jk))
+        self.hid.key_up(jk)
+        self.hid.key_up("up")
 
     def _up_side_flash(self, direction: str) -> None:
         """Double flash: upward flash, then a sideways flash mid-air —

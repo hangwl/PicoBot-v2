@@ -41,6 +41,7 @@ use `core.autocrlf=true` (files are CRLF on disk, LF in the repo).
 - `test_navigator.py` — one-move steps against a physics sim: landings,
   replans, rope-lift cooldown, reach learning.
 - `test_reach.py` — grow/shrink/ceiling rules, persistence.
+- `test_flight.py` — flight recorder: peak/landing from sampled arcs.
 - `test_patrol.py` — full-loop plans, continuous motion, linger, bans.
 - `test_remote.py` — command worker (ordering, loop never blocked),
   binary frame subscription/drop-if-busy, HTTP template.

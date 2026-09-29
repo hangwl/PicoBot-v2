@@ -57,6 +57,27 @@ overlay immediately shows the connections the new reach unlocks.
 Farming keeps refining the numbers (successes grow an envelope; two
 consecutive misses shrink it).
 
+The **up flash** is measured by its arc, not its landing: a flight
+recorder (`bot/flight.py`) samples the player dot at ~60 Hz on its own
+thread while the move runs, and the rise is the recorded peak — so it
+needs no platform above and isn't capped by whatever ledge happens to be
+there. The patrol's re-press timing varies, so it runs a couple of times
+and keeps the **lowest** peak. Other upward moves still measure the
+landing (a rope lift's height depends on the platform it grapples).
+
+### Up-flash timing sweep
+
+How high an up flash goes depends on when the second jump is pressed.
+**Sweep up-flash timing** (Measure page, flash classes) records that
+curve: standing on a drawn platform with at least 45 px of open space
+overhead, the character does a plain jump (the baseline) and up flashes
+re-pressed at fixed delays from the first key-down (0.08–0.44 s), three
+rounds interleaved. Each delay gets its mean peak ± spread, time to the
+top, airtime and the actual re-press gap. It's saved under `profiles` in
+the reach file for analysis — the planner doesn't use it yet, and it
+doesn't change the up flash's envelope. Landing on a platform stops the
+sweep (the start point would drift); a stopped sweep keeps its rows.
+
 ## Drawing layout (dashboard)
 
 All layout tools act on the **Map** panel's selection — one source of

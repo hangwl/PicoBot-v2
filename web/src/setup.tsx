@@ -8,6 +8,7 @@ import {
   type AppState,
   type PlatformFitRow,
   type RopeRow,
+  type SweepRow,
   go,
   send,
 } from "./protocol";
@@ -767,6 +768,69 @@ function MeasurePage({ s }: { s: AppState }) {
         )}
       {s.botRunning && <p class="hint warn">Stop the bot first.</p>}
       <p class="hint">Switching away from the game also stops a measurement.</p>
+      {plan.includes("up_flash") && <UpFlashSweep s={s} />}
+    </div>
+  );
+}
+
+function sweepLabel(r: SweepRow): string {
+  if (r.delay === null) return "Jump only";
+  const at = `${r.delay.toFixed(2)}s`;
+  return r.gap !== null && Math.abs(r.gap - r.delay) >= 0.01
+    ? `${at} (${r.gap.toFixed(2)}s)`
+    : at;
+}
+
+function sweepNote(r: SweepRow): string {
+  if (!r.n || r.rise === null) return "—";
+  const parts = [`${r.rise}px${r.n > 1 ? ` ±${r.sd}` : ""}`];
+  if (r.peak_t !== null) parts.push(`top ${r.peak_t.toFixed(2)}s`);
+  if (r.air !== null) parts.push(`air ${r.air.toFixed(2)}s`);
+  return parts.join(" · ");
+}
+
+function UpFlashSweep({ s }: { s: AppState }) {
+  const m = s.measure;
+  const live = m.running && m.mode === "up_flash_profile";
+  const saved = m.profiles.up_flash;
+  const rows = live ? m.profile : saved?.rows ?? [];
+  const top = Math.max(1, ...rows.map((r) => r.max ?? 0));
+  return (
+    <div class="fit">
+      <h3>Up-flash timing</h3>
+      <p class="hint">
+        Stand on a drawn platform with open space overhead. The character
+        jumps about 27 times, re-pressing at set delays, and records how
+        high each one peaks. Saved for analysis — travel doesn't use it yet.
+      </p>
+      {rows.length > 0 && (
+        <ul class="rows sweep">
+          {rows.map((r) => (
+            <li key={String(r.delay)}>
+              <b>{sweepLabel(r)}</b>
+              <span class="bar">
+                <i style={{ width: `${((r.rise ?? 0) / top) * 100}%` }} />
+              </span>
+              <span class="pill">{sweepNote(r)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!live && saved && (
+        <p class="hint">
+          Saved {new Date(saved.at * 1000).toLocaleString()}. Delay is from
+          the first jump; the actual re-press gap is in brackets when it
+          differs.
+        </p>
+      )}
+      {!m.running && (
+        <div class="actions">
+          <button disabled={s.botRunning || s.ws !== "on"}
+                  onClick={() => send("measure|profile|up_flash")}>
+            {saved ? "Sweep again" : "Sweep up-flash timing"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

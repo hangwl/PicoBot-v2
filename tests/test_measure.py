@@ -221,5 +221,135 @@ class MoveMeasurerTests(unittest.TestCase):
         self.assertTrue(any("draw the platforms" in m for _, m in got))
 
 
+def _peak_for(delay):
+    """Fake physics: the later the re-press (to 0.25s), the higher."""
+    if delay is None:
+        return 30.0
+    return 12.0 + 40.0 * min(delay, 0.25) - 20.0 * max(0.0, delay - 0.3)
+
+
+class FlightBot(MeasureBot):
+    """Records the up-flash delay; the fake recorder turns it into an arc."""
+
+    def __init__(self, plats, pos):
+        super().__init__(plats, pos)
+        self.delays = []
+        self.jumps = 0
+
+    def _up_flash(self, direction, delay=None, mark=None):
+        self.moves.append("up_flash")
+        self.delays.append(delay)
+        if mark:
+            mark("jump")
+            mark("rejump")
+        self._air(0, self.carry["up_flash"])
+
+    def _press(self, k, h=None):
+        if k == self.config.jump_key and not self.held:
+            self.jumps += 1
+            self.delays.append("jump")
+        return super()._press(k, h)
+
+
+class FakeRecorder:
+    def __init__(self, bot):
+        self.bot = bot
+        self.marks = {}
+
+    def start(self):
+        self.n = len(self.bot.delays)
+
+    def mark(self, name):
+        self.marks[name] = 0.1 if name == "jump" else 0.1 + 0.2
+
+    def stop(self):
+        from tests.test_flight import arc
+
+        d = self.bot.delays[-1] if len(self.bot.delays) > self.n else None
+        if d is None and len(self.bot.delays) == self.n:
+            return arc(rise=0.0)
+        rise = _peak_for(None if d == "jump" else d)
+        return arc(rise=rise, marks=dict(self.marks) or {"jump": 0.1})
+
+
+class UpFlashPeakTests(unittest.TestCase):
+    def _measurer(self, bot, **kw):
+        got = []
+        m = MoveMeasurer(bot, on_event=lambda k, msg: got.append((k, msg)),
+                         recorder_factory=lambda: FakeRecorder(bot), **kw)
+        return m, got
+
+    def test_up_flash_rise_is_the_recorded_peak_not_the_ledge(self):
+        bot = FlightBot([FLOOR, LEDGE, TOP], (30, 100))
+        m, _ = self._measurer(bot)
+        m._loop()
+        # The ledge above is 22px up; the patrol-timed arc peaks at 30px.
+        self.assertEqual(bot.reach.get("up_flash").rise, 30)
+        self.assertIn("up_flash", bot.reach.measured)
+
+    def test_up_flash_needs_no_platform_above(self):
+        bot = FlightBot([FLOOR], (30, 100))
+        m, _ = self._measurer(bot)
+        m._loop()
+        self.assertIn("up_flash", bot.moves)
+        self.assertEqual(m.results["up_flash"], {"rise": 30})
+
+    def test_sweep_records_every_delay_and_keeps_the_envelope(self):
+        bot = FlightBot([FLOOR], (30, 100))
+        before = bot.reach.get("up_flash").rise
+        m, got = self._measurer(bot)
+        m.mode = "up_flash_profile"
+        m._loop()
+        prof = bot.reach.profiles["up_flash"]["rows"]
+        self.assertEqual([r["delay"] for r in prof],
+                         [None, *MoveMeasurer.PROFILE_DELAYS])
+        self.assertTrue(all(r["n"] == MoveMeasurer.PROFILE_REPS for r in prof))
+        by = {r["delay"]: r for r in prof}
+        self.assertEqual(by[0.08]["rise"], 15)
+        self.assertEqual(by[0.25]["rise"], 22)
+        self.assertEqual(by[None]["rise"], 30)          # plain-jump baseline
+        self.assertAlmostEqual(by[0.2]["gap"], 0.2)
+        self.assertEqual(bot.reach.get("up_flash").rise, before)
+        self.assertNotIn("up_flash", bot.reach.measured)
+        self.assertTrue(any("sweep saved" in msg for _, msg in got))
+
+    def test_sweep_refuses_a_low_ceiling(self):
+        bot = FlightBot([FLOOR, LEDGE], (60, 100))
+        m, got = self._measurer(bot)
+        m.mode = "up_flash_profile"
+        m._loop()
+        self.assertEqual(bot.moves, [])
+        self.assertTrue(any("22px overhead" in msg for _, msg in got))
+
+    def test_sweep_stops_when_it_lands_higher(self):
+        high = (0, 50, 200, 50)                     # 50px up: allowed
+        bot = FlightBot([FLOOR, high], (30, 100))
+        bot.carry["up_flash"] = 60                  # ...but reached
+        m, got = self._measurer(bot)
+        m.mode = "up_flash_profile"
+        m._loop()
+        self.assertTrue(any("landed 50px higher" in msg for _, msg in got))
+        self.assertLessEqual(len(bot.delays), 2)
+
+    def test_sweep_is_for_flash_classes(self):
+        bot = FlightBot([FLOOR], (30, 100))
+        bot.config.class_travel = "teleport"
+        m, got = self._measurer(bot)
+        m.mode = "up_flash_profile"
+        m._loop()
+        self.assertEqual(bot.moves, [])
+
+    def test_status_carries_profiles(self):
+        bot = FlightBot([FLOOR], (30, 100))
+        seen = []
+        m = MoveMeasurer(bot, on_status=seen.append,
+                         recorder_factory=lambda: FakeRecorder(bot))
+        m.mode = "up_flash_profile"
+        m._loop()
+        self.assertEqual(seen[-1]["mode"], "up_flash_profile")
+        self.assertIn("up_flash", seen[-1]["profiles"])
+        self.assertTrue(seen[-1]["profile"])
+
+
 if __name__ == "__main__":
     unittest.main()
