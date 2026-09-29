@@ -489,19 +489,75 @@ class RoamFallbackTests(unittest.TestCase):
         self.assertEqual(bot.hid.presses, ["space", "space", "a"])
 
 
-class ArrivalSkillTests(unittest.TestCase):
-    def test_placed_anchor_falls_back_to_summons(self):
-        from picobot.bot.skills import Skill, SkillBook
+class SummonTests(unittest.TestCase):
+    """Summons are placed at anchors: one live summon per anchor, only
+    while standing on a platform, up to ``charges`` instances per skill."""
+
+    def _bot(self, skills, stand=((50, 50), (50, 50))):
+        from picobot.bot.skills import SkillBook
+        from picobot.bot.summons import SummonTracker
 
         bot = _weave_bot((50, 50))
-        bot.skills = SkillBook({
-            "main": Skill("main", "a"),
-            "fountain": Skill("fountain", "d", 57, "summon"),
-        })
-        bare = Anchor("a0", 0.2, 0.3)
-        self.assertEqual([s.name for s, _ in bot._arrival_skills(bare, 0.0)], ["fountain"])
+        bot.skills = SkillBook(skills)
+        bot.summons = SummonTracker()
+        reads = list(stand)
+        bot.player_pos = Mock(side_effect=lambda: reads.pop(0) if len(reads) > 1 else reads[0])
+        return bot
+
+    def _fountain(self, **kw):
+        from picobot.bot.skills import Skill
+
+        return Skill("fountain", "d", kw.pop("cooldown", 57), "summon", **kw)
+
+    def test_bare_anchor_allows_every_summon_listed_anchor_only_its_own(self):
+        from picobot.bot.skills import Skill
+
+        bot = self._bot({"main": Skill("main", "a"), "fountain": self._fountain()})
+        self.assertEqual([s.name for s in bot._anchor_skills(Anchor("a0", 0.2, 0.3))],
+                         ["fountain"])
         listed = Anchor("a1", 0.2, 0.3, on_arrive=("main",))
-        self.assertEqual([s.name for s, _ in bot._arrival_skills(listed, 0.0)], ["main"])
+        self.assertEqual([s.name for s in bot._anchor_skills(listed)], ["main"])
+
+    def test_casts_at_a_free_anchor_once(self):
+        bot = self._bot({"fountain": self._fountain(duration=60)})
+        a0 = Anchor("a0", 0.25, 1 / 3)
+        bot._cast_at_anchor(a0)
+        self.assertEqual(bot.hid.presses, ["d"])
+        bot._cast_at_anchor(a0)                          # summon still alive
+        self.assertEqual(bot.hid.presses, ["d"])
+        self.assertEqual(bot.viz["summons"]["placed"][0]["anchor"], "a0")
+
+    def test_no_cast_mid_air(self):
+        bot = self._bot({"fountain": self._fountain()},
+                        stand=((50, 50), (52, 46)))     # still moving
+        bot._cast_at_anchor(Anchor("a0", 0.25, 1 / 3))
+        self.assertEqual(bot.hid.presses, [])
+        bot.log.assert_any_call("Summon skipped at a0: not standing on a platform")
+
+    def test_no_cast_off_every_platform(self):
+        bot = self._bot({"fountain": self._fountain()},
+                        stand=((50, 20), (50, 20)))     # hanging above, still
+        bot._cast_at_anchor(Anchor("a0", 0.25, 1 / 3))
+        self.assertEqual(bot.hid.presses, [])
+
+    def test_charges_allow_that_many_out_then_the_oldest_goes(self):
+        bot = self._bot({"fountain": self._fountain(charges=2, cooldown=0.001,
+                                                    duration=600)})
+        for name in ("a0", "a1", "a2"):
+            time.sleep(0.002)                            # a charge returns
+            bot._cast_at_anchor(Anchor(name, 0.25, 1 / 3))
+        placed = {p["anchor"] for p in bot.viz["summons"]["placed"]}
+        self.assertEqual(placed, {"a1", "a2"})           # a0's was the oldest
+
+    def test_the_fullest_summon_goes_first(self):
+        from picobot.bot.skills import Skill
+
+        totem = Skill("totem", "t", 30, "summon", charges=2)
+        bot = self._bot({"fountain": self._fountain(), "totem": totem})
+        bot.skills.mark_used("fountain")                 # 0/1 left
+        bot.skills.mark_used("totem")                    # 1/2 left
+        bot._cast_at_anchor(Anchor("a0", 0.25, 1 / 3))
+        self.assertEqual(bot.hid.presses, ["t"])
 
 
 class TravelKitTests(unittest.TestCase):
@@ -825,6 +881,8 @@ class SyncMapTests(unittest.TestCase):
         bot.log = Mock()
         bot.event = Mock()
         bot._apply_stored_layout = Mock()
+        from picobot.bot.summons import SummonTracker
+        bot.summons = SummonTracker()
         return bot
 
     def test_title_resolves_map_and_restores_layout(self):

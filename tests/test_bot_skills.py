@@ -103,5 +103,53 @@ class SkillBookTests(unittest.TestCase):
         self.assertIn("b", book)
 
 
+class ChargeTests(unittest.TestCase):
+    def test_one_charge_behaves_like_a_plain_cooldown(self):
+        book = SkillBook({"s": Skill("s", "s", 10.0)})
+        book.mark_used("s", now=100.0)
+        self.assertFalse(book.ready("s", now=105.0))
+        self.assertAlmostEqual(book.remaining("s", now=105.0), 5.0)
+        self.assertTrue(book.ready("s", now=110.0))
+
+    def test_charges_return_one_per_cooldown(self):
+        book = SkillBook({"s": Skill("s", "s", 10.0, "summon", charges=2)})
+        book.mark_used("s", now=100.0)
+        book.mark_used("s", now=101.0)
+        self.assertEqual(book.charges("s", now=101.0), 0)
+        self.assertEqual(book.charges("s", now=110.5), 1)   # first back at 110
+        self.assertEqual(book.charges("s", now=119.0), 1)
+        self.assertEqual(book.charges("s", now=120.0), 2)   # second at 120
+        self.assertEqual(book.charges("s", now=500.0), 2)   # never above max
+
+    def test_use_while_recharging_keeps_the_timer(self):
+        book = SkillBook({"s": Skill("s", "s", 10.0, "summon", charges=2)})
+        book.mark_used("s", now=100.0)                      # timer -> 110
+        book.mark_used("s", now=105.0)                      # still -> 110
+        self.assertEqual(book.charges("s", now=110.0), 1)
+
+    def test_charges_and_duration_round_trip(self):
+        s = Skill.from_dict("f", {"key": "d", "kind": "summon", "cooldown": 57,
+                                  "charges": 2, "duration": 60})
+        self.assertEqual((s.charges, s.duration, s.uptime), (2, 60.0, 60.0))
+        again = Skill.from_dict("f", s.to_dict())
+        self.assertEqual((again.charges, again.duration), (2, 60.0))
+        plain = Skill.from_dict("g", {"key": "g", "kind": "summon", "cooldown": 30})
+        self.assertEqual(plain.uptime, 30.0)                # until its cooldown
+
+
+class SummonTrackerTests(unittest.TestCase):
+    def test_expiry_frees_the_anchor_and_reset_clears(self):
+        from picobot.bot.summons import SummonTracker
+
+        t = SummonTracker()
+        f = Skill("f", "d", 57, "summon", duration=60)
+        t.place(f, "a0", now=0.0)
+        self.assertFalse(t.anchor_free("a0", now=59.0))
+        self.assertTrue(t.anchor_free("a0", now=60.5))
+        t.place(f, "a1", now=100.0)
+        t.reset()
+        self.assertEqual(t.active(now=101.0), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,7 +33,7 @@ and follows the same view.
 | `class|add|<name>\|{spec}` | create a profile (travel, air_attacks, teleport_key, teleport_cooldown, skills) and apply it |
 | `patrol|policy|<weighted\|greedy>` | set the loop-ordering policy |
 | `patrol|temp|<v>` | set the weighted-roulette temperature |
-| `skills|set\|{json}` / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
+| `skills|set\|{json}` (`name, key, kind, cooldown`, summons also `charges, duration`) / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
 | `movekeys|set|{json}` | movement keybinds (jump/rope-lift/flash) + nav radius |
 | `layout|save\|clear\|reset[|<name>]` | layout lifecycle |
 | `layout|plat\|anchor\|…[|<name>]` | drawn geometry (see below) |
@@ -80,7 +80,8 @@ Text, `dash|` + JSON:
 
 Binary frame: `PBF1` magic + u32 BE JSON length + JSON meta + JPEG.
 Meta carries `mode`, `w`, `h`, `ox`/`oy` (panel offset), `state` (bot
-FSM state) and `hazard` (in every view), `player`, and map identity (`map`, `map_via`,
+FSM state), `hazard` and `summons` (`{placed: [{skill, anchor, left}],
+charges: {skill: [have, max]}}`) in every view, `player`, and map identity (`map`, `map_via`,
 `map_conf`, `map_title`, `layout`, `no_rotation`). Overlays (platforms,
 ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
 view shifted by `ox`/`oy`, in the Window view shifted to where the

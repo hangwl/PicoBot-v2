@@ -378,7 +378,7 @@ class FrameStreamer:
             }
             for key in (
                 "state", "map", "map_via", "map_conf", "map_title",
-                "hazard", "player",
+                "hazard", "player", "summons",
                 "layout", "no_rotation", "ox", "oy",
             ):
                 if snap.get(key) is not None:

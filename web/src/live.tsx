@@ -107,6 +107,9 @@ export function StatusList({ s }: { s: AppState }) {
     ["Class", kitLabel(s.classActive, s.profiles[s.classActive])],
     ["Route", `${s.anchorsN} anchors · ${s.platformsN} platforms`],
     ["Last skill", last ? `${last.msg}${last.t ? ` · ${ago(last.t)}` : ""}` : "–"],
+    ...(s.summons && Object.keys(s.summons.charges).length
+      ? [["Summons", summonLine(s.summons)] as [string, string]]
+      : []),
   ];
   return (
     <dl class="kv">
@@ -115,6 +118,17 @@ export function StatusList({ s }: { s: AppState }) {
       ))}
     </dl>
   );
+}
+
+function summonLine(sm: NonNullable<AppState["summons"]>): string {
+  const out = sm.placed.map((p) => {
+    const [have, max] = sm.charges[p.skill] ?? [0, 0];
+    return `${p.skill} at ${p.anchor} · ${Math.max(0, p.left)}s left · ${have}/${max}`;
+  });
+  const idle = Object.entries(sm.charges)
+    .filter(([name]) => !sm.placed.some((p) => p.skill === name))
+    .map(([name, [have, max]]) => `${name} ready ${have}/${max}`);
+  return [...out, ...idle].join("; ") || "–";
 }
 
 function ago(t: number): string {

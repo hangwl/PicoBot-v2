@@ -244,3 +244,11 @@ fixed that — all 15 captured reads exact afterwards.
   margin. Siblings (different number, extra real word, complete read
   that stops early) are now capped at 0.6, exact titles win outright,
   and the recorded title is visible and fixable on the Map page.
+- **Summons as positional, charged skills** (2026-09-29): every
+  checkpoint re-cast every off-cooldown summon, with no memory of where
+  one was or how long it lasted — casts stacked at one anchor while
+  others stayed empty, and a cast could fire mid-air. Summons now have
+  charges (one back per cooldown) and an uptime, placements are tracked
+  per anchor (one live summon each; a skill's oldest instance goes when
+  it has `charges` out), and a cast needs the character standing on a
+  platform. The tracker is timing only — the bot can't see summons.

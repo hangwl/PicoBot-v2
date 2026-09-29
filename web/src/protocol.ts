@@ -16,6 +16,8 @@ export interface SkillSpec {
   kind: string;
   cooldown?: number;
   wait_on_arrival?: number;
+  charges?: number;
+  duration?: number;
   hold?: number | null;
 }
 
@@ -81,6 +83,12 @@ export interface RopeRow {
   bottom: number;
 }
 
+/** Summons out right now and each summon skill's charges. */
+export interface SummonState {
+  placed: { skill: string; anchor: string; left: number }[];
+  charges: Record<string, [number, number]>;
+}
+
 export interface HostPort {
   device: string;
   desc?: string;
@@ -126,6 +134,7 @@ export interface AppState {
   botRunning: boolean;
   botState: string;
   hazard: string;
+  summons: SummonState | null;
   logs: EvtItem[];
   logFilter: LogFilter;
   viewMode: ViewMode;
@@ -174,6 +183,7 @@ const initial: AppState = {
   botRunning: false,
   botState: "–",
   hazard: "none",
+  summons: null,
   logs: [],
   logFilter: "info",
   viewMode: "minimap",
@@ -398,6 +408,7 @@ function onFrame(buf: ArrayBuffer) {
   }
   set({
     hazard,
+    summons: (meta.summons as SummonState | undefined) ?? state.summons,
     botState: meta.state ? String(meta.state) : "–",
     viewMode: (meta.mode as ViewMode) ?? state.viewMode,
   });

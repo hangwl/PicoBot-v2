@@ -31,9 +31,10 @@ loop:
   splices a re-route from the player's actual position into the plan
   (rope lift excluded while cooling, without counting a failure); 3
   missed landings ban the anchor for 30s and re-route to the next one.
-- **Anchors are pure pass-through waypoints**: arriving fires `on_arrive`
-  skills (or, for placed anchors, any summon that is off cooldown) and
-  the bot moves on immediately — no linger, no dwell timers.
+- **Anchors are pure pass-through waypoints**: arriving fires the
+  anchor's non-summon `on_arrive` skills and places at most one summon
+  (see Summons) in passing, then the bot moves on — no linger, no dwell
+  timers.
 - **Bans**: no route, unreachable-at-plan-time (including anchors not
   on any drawn platform — "re-place it"), or 3 missed landings → skipped
   for 30s, so one bad anchor can't shrink or stall the patrol.
@@ -236,8 +237,26 @@ Registered skills have `key`, `kind`, `cooldown`:
 
 - `attack` — attack loop / travel weaving.
 - `buff` — fires when ready, anywhere.
-- `summon` — fires at anchors listing it via `on_arrive`;
-  `wait_on_arrival` caps how long the bot waits for its cooldown.
+- `summon` — placed at anchors (below). Allowed at an anchor that lists
+  it in `on_arrive`, or at any anchor that lists none.
+
+## Summons (`summons.py`)
+
+- **Charges**: a skill stores up to `charges` uses (default 1); while
+  below the maximum, one returns every `cooldown` seconds (the timer
+  restarts for the next). With one charge it's a plain cooldown.
+- **Uptime**: each cast lasts `duration` seconds (0 = until its cooldown
+  ends). Up to `charges` instances of a skill can be out at once; casting
+  one more removes that skill's oldest (as the game does).
+- **One summon per anchor**, of any kind: an anchor with a live summon
+  gets none. Otherwise, on arrival, the summon allowed there with the
+  most charges banked (by fraction) is cast.
+- **Standing only**: two position reads a moment apart must both be on a
+  drawn platform and within 1px — never mid-air or on a rope. Otherwise
+  the cast is skipped (logged), not waited for.
+- The bot can't see summons: placements are timed from casts, cleared
+  on a map change and when the bot starts. Home shows them ("fountain at
+  a2 · 38s left · 1/2"). `wait_on_arrival` is ignored.
 - Movement keys (jump, flash, rope-lift) register the same way.
 
 `position_jitter_px` adds entropy to hand-authored walk legs. There is

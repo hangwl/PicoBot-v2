@@ -35,6 +35,7 @@ from .machine import Machine
 from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step, resolve_coord
 from .skills import Skill, SkillBook
+from .summons import SummonTracker
 from .timing import human_between, key_gap, new_session, release_lag
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,9 @@ class SmartBot(BotBase):
         self._map: Optional[MapEntry] = None
         self._anchor_idx = 0
         self._travel_target: Optional[int] = None
-        self._arrive_pending: List[Tuple[Skill, float]] = []
+        # Anchors just reached, waiting for their summon on the next tick.
+        self._arrive_pending: list = []
+        self.summons = SummonTracker()
         self._minimap_warned = False
         self._last_up_skill = 0.0
         self._weave_dir: Optional[str] = None
@@ -314,6 +317,7 @@ class SmartBot(BotBase):
         self.viz["title"] = res.title
         if (entry.name if entry else None) != (self._map.name if self._map else None):
             self._map = entry
+            self.summons.reset()            # summons stay on the old map
             self.viz["map"] = entry.name if entry else None
             merged = dict(self.config.skills)
             if entry is not None:
@@ -1117,30 +1121,91 @@ class SmartBot(BotBase):
             self._arrive_pending = []
 
     def _arrival_skills(self, anchor, now: float) -> list:
-        """(skill, deadline) pairs to fire at ``anchor``: its ``on_arrive``
-        list, or — for anchors placed without one — every registered
-        summon (cast at the next checkpoint once off cooldown)."""
+        """Queue ``anchor`` for its arrival skills on the next tick —
+        decided then, with live charges and placements."""
+        return [anchor]
+
+    def _anchor_skills(self, anchor) -> list:
+        """Skills allowed at ``anchor``: its ``on_arrive`` list, or every
+        registered summon for anchors placed without one."""
         names = anchor.on_arrive or [
             s.name for s in self.skills.skills.values() if s.kind == "summon"
         ]
-        return [
-            (s, now + s.wait_on_arrival)
-            for name in names
-            if (s := self.skills.get(name)) is not None
+        return [s for n in names if (s := self.skills.get(n)) is not None]
+
+    def _standing_on_platform(self) -> bool:
+        """Summons need the character standing on a platform: two reads a
+        moment apart, both on a drawn platform (when any are drawn) and
+        within 1px — not mid-air, not on a rope."""
+        a = self.player_pos()
+        if a is None:
+            return False
+        self.sleep(human_between(0.08, 0.06, 0.12))
+        b = self.player_pos()
+        if b is None or abs(a[0] - b[0]) > 1 or abs(a[1] - b[1]) > 1:
+            return False
+        graph = self._nav_graph()
+        return graph is None or graph.locate(*b) is not None
+
+    def _cast_at_anchor(self, anchor) -> None:
+        """At a checkpoint: listed non-summon skills fire when ready; then
+        one summon — only if this anchor has no live one, a summon allowed
+        here has a charge, and the character stands on a platform. The
+        fullest skill (most charges banked) goes first."""
+        now = time.time()
+        allowed = self._anchor_skills(anchor)
+        for skill in allowed:
+            if skill.kind != "summon" and self.skills.ready(skill.name, now):
+                self._use_skill(skill)
+        summons = [
+            s for s in allowed
+            if s.kind == "summon" and self.skills.charges(s.name, now) > 0
         ]
+        if not summons or not self.summons.anchor_free(anchor.name, now):
+            return
+        if not self._standing_on_platform():
+            self.log(f"Summon skipped at {anchor.name}: not standing on a platform")
+            return
+        pick = max(summons, key=lambda s: (
+            self.skills.charges(s.name, now) / s.charges,
+            self.skills.charges(s.name, now),
+        ))
+        if not self._use_skill(pick):
+            return
+        now = time.time()
+        gone = self.summons.place(pick, anchor.name, now)
+        self.log(
+            f"Summon {pick.name} at {anchor.name} "
+            f"({self.skills.charges(pick.name, now)}/{pick.charges} charges left)"
+            + (f"; the one at {gone.anchor} expired early" if gone else "")
+        )
+        self._publish_summons(now)
+
+    def _publish_summons(self, now: Optional[float] = None) -> None:
+        """Summon state for the dashboard (rides the frame meta)."""
+        now = time.time() if now is None else now
+        self.viz["summons"] = {
+            "placed": [
+                {"skill": p.skill, "anchor": p.anchor,
+                 "left": round(p.expires - now)}
+                for p in self.summons.active(now)
+            ],
+            "charges": {
+                s.name: [self.skills.charges(s.name, now), s.charges]
+                for s in self.skills.skills.values() if s.kind == "summon"
+            },
+        }
 
     def travel_due(self) -> bool:
         return self._travel_target is not None
 
     def grind_tick(self) -> None:
         """One farming tick: arrival skills, buffs, then patrol/weave."""
-        now = time.time()
-        for skill, deadline in list(self._arrive_pending):
-            if self.skills.ready(skill.name, now):
-                self._use_skill(skill)
-                self._arrive_pending.remove((skill, deadline))
-            elif now > deadline:
-                self._arrive_pending.remove((skill, deadline))
+        pending, self._arrive_pending = self._arrive_pending, []
+        for anchor in pending:
+            self._cast_at_anchor(anchor)
+        if any(s.kind == "summon" for s in self.skills.skills.values()):
+            self._publish_summons()
         for buff in self.skills.due_buffs():
             if not self.should_continue():
                 break
@@ -1418,6 +1483,7 @@ class SmartBot(BotBase):
     def start(self) -> None:
         try:
             new_session()               # this run's pace differs from the last
+            self.summons.reset()
             if self.identity.current.title is None and not self.identity.pending:
                 self.identity.request("startup")
             if self._own_monitor:

@@ -502,6 +502,12 @@ function SkillsPage({ s }: { s: AppState }) {
               <span class="pill">{sk.kind}</span>
               <span class="pill">{sk.key}</span>
               {!!sk.cooldown && <span class="pill">{sk.cooldown}s</span>}
+              {sk.kind === "summon" && (sk.charges ?? 1) > 1 && (
+                <span class="pill">{sk.charges} charges</span>
+              )}
+              {sk.kind === "summon" && !!sk.duration && (
+                <span class="pill">lasts {sk.duration}s</span>
+              )}
               <button class="icon" aria-label={`Remove ${n}`}
                       onClick={() => {
                         if (confirm(`Remove skill ${n}?`)) send(`skills|del|${n}`);
@@ -520,19 +526,34 @@ function SkillAdd() {
   const [key, setKey] = useState("");
   const [kind, setKind] = useState("attack");
   const [cd, setCd] = useState("");
+  const [charges, setCharges] = useState("");
+  const [dur, setDur] = useState("");
   const n = name.trim();
   const cdNum = cd.trim() === "" ? 0 : Number(cd);
+  const chNum = charges.trim() === "" ? 1 : Number(charges);
+  const durNum = dur.trim() === "" ? 0 : Number(dur);
+  const summon = kind === "summon";
   const ok = !!n && !n.includes("|") && !!key.trim() &&
-    Number.isFinite(cdNum) && cdNum >= 0;
+    Number.isFinite(cdNum) && cdNum >= 0 &&
+    (!summon || (Number.isInteger(chNum) && chNum >= 1 &&
+                 Number.isFinite(durNum) && durNum >= 0));
   return (
     <form class="card form" onSubmit={(e) => {
       e.preventDefault();
       if (!ok) return;
-      send(`skills|set|` +
-           JSON.stringify({ name: n, key: key.trim(), kind, cooldown: cdNum }));
+      const spec: Record<string, unknown> = {
+        name: n, key: key.trim(), kind, cooldown: cdNum,
+      };
+      if (summon) {
+        spec.charges = chNum;
+        spec.duration = durNum;
+      }
+      send(`skills|set|` + JSON.stringify(spec));
       setName("");
       setKey("");
       setCd("");
+      setCharges("");
+      setDur("");
     }}>
       <div class="grid2">
         <Field label="Name"><input value={name} placeholder="burst"
@@ -547,11 +568,30 @@ function SkillAdd() {
             <option>movement</option>
           </select>
         </Field>
-        <Field label="Cooldown (s)">
+        <Field label={summon ? "Recharge (s)" : "Cooldown (s)"}>
           <input type="number" inputMode="decimal" step="0.1" min="0"
                  placeholder="0" value={cd} onInput={(e) => setCd(val(e))} />
         </Field>
+        {summon && (
+          <Field label="Charges" hint="Out at once, max.">
+            <input type="number" inputMode="numeric" step="1" min="1"
+                   placeholder="1" value={charges}
+                   onInput={(e) => setCharges(val(e))} />
+          </Field>
+        )}
+        {summon && (
+          <Field label="Lasts (s)" hint="Blank: until it recharges.">
+            <input type="number" inputMode="decimal" step="1" min="0"
+                   placeholder="0" value={dur} onInput={(e) => setDur(val(e))} />
+          </Field>
+        )}
       </div>
+      {summon && (
+        <p class="hint">
+          Placed at anchors while standing on a platform — one summon per
+          anchor; each charge recharges on its own.
+        </p>
+      )}
       <button type="submit" class="primary" disabled={!ok}>Add skill</button>
     </form>
   );

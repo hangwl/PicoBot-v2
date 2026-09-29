@@ -166,9 +166,17 @@ class TimingTests(unittest.TestCase):
         self.assertGreater(statistics.mean(s), statistics.median(s))
 
     def test_human_between_is_clamped_lognormal(self):
+        from picobot.bot import timing
         from picobot.bot.timing import human_between
 
-        samples = [human_between(0.17, 0.11, 0.26) for _ in range(500)]
+        # The session tempo moves the median (±7%); pin it to test the
+        # distribution itself.
+        old = timing.TEMPO
+        timing.TEMPO = type("T", (), {"factor": lambda self: 1.0})()
+        try:
+            samples = [human_between(0.17, 0.11, 0.26) for _ in range(500)]
+        finally:
+            timing.TEMPO = old
         self.assertTrue(all(0.11 <= v <= 0.26 for v in samples))
         self.assertGreater(len({round(v, 3) for v in samples}), 50)
         above = sum(v > 0.17 for v in samples)

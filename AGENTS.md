@@ -72,6 +72,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
   **Every flash move weaves attacks; no attack outside a flash move** in
   moving paths — except a rope-grab flash, which weaves none (an attack
   mid-air costs the grab).
+- **Summons**: one live summon per anchor (any kind), cast only while
+  standing on a platform (two stable reads, on a drawn line), never
+  waited for; up to `charges` instances per skill, the oldest replaced.
+  Placements are timed bookkeeping in `SummonTracker`, reset on map
+  change.
 - **Rope grabs are moving grabs**: Up down well before takeoff, then a
   hop (or flash) toward the rope from beside it — never a standing jump
   unless the platform is too narrow. A rope's bottom stays
