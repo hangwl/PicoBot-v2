@@ -463,6 +463,9 @@ class RemoteControlServer:
         if loop is None:
             return
         now = time.monotonic()
+        stalled = []
+        # Only bookkeeping under the lock: logging reaches the event bus,
+        # which broadcasts — and broadcast takes this same lock.
         with self.clients_lock:
             for client in list(self.frame_clients):
                 prev = self._frame_inflight.get(client)
@@ -470,14 +473,7 @@ class RemoteControlServer:
                     if now - prev[1] > self.FRAME_STALL_S:
                         self.frame_clients.discard(client)
                         self._frame_inflight.pop(client, None)
-                        self._log("WS: frame send stuck — closing that client")
-                        try:
-                            asyncio.run_coroutine_threadsafe(
-                                client.close(code=1011, reason="frame send stalled"),
-                                loop,
-                            )
-                        except Exception:
-                            pass
+                        stalled.append(client)
                     continue
                 try:
                     self._frame_inflight[client] = (
@@ -486,6 +482,14 @@ class RemoteControlServer:
                     )
                 except Exception:
                     pass
+        for client in stalled:
+            self._log("WS: frame send stuck — closing that client")
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    client.close(code=1011, reason="frame send stalled"), loop,
+                )
+            except Exception:
+                pass
 
     # -- Dashboard command worker ------------------------------------------
     def _submit(self, job: Callable[[], None]) -> None:

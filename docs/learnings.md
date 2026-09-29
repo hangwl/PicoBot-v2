@@ -202,3 +202,13 @@ fixed that — all 15 captured reads exact afterwards.
   below. Python's banker's rounding also put an even-width dot's centre
   (x.5) on alternating sides. The overlay now frames the detected bounds;
   x rounds half-up.
+- **Whole-app freeze** (2026-09-29): the stuck-frame-send close (added to
+  revive dead streams) logged while holding `clients_lock`. Logging runs
+  inline, emits on the event bus, and the bus broadcasts to dashboards —
+  taking `clients_lock` again on the same thread. A plain `Lock` isn't
+  re-entrant, so the streamer deadlocked itself; then the bot thread
+  (every log line broadcasts) and the WS loop (connect/disconnect) blocked
+  on the same lock. Symptoms: stream dead, bot silent mid-patrol, WS
+  handshakes hang while HTTP still answers. Fixed by only doing
+  bookkeeping under the lock; a test wires log → broadcast like
+  `serve.py` and fails on a deadlock.

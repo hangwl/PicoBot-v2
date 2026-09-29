@@ -144,6 +144,31 @@ class FrameBroadcastTests(unittest.TestCase):
         self.assertEqual(stuck.closed[0], 1011)
         self.assertNotIn(stuck, self.srv.frame_clients)
 
+    def test_stuck_send_close_does_not_deadlock_on_logging(self):
+        # serve.py logs through the event bus, which broadcasts to every
+        # client — taking clients_lock. Logging while broadcast_frame held
+        # that lock deadlocked the streamer, then the bot and the WS loop.
+        srv = RemoteControlServer(
+            "", 0, _callbacks(log=lambda m: srv.broadcast(f"evt {m}")),
+            serial_manager=Mock(),
+        )
+        srv.bridge = Mock(_loop=self.loop.loop)
+        stuck = _Client(threading.Event())
+        asyncio.run(srv._handle_ws_message(stuck, "dash|subscribe|frames"))
+        srv.FRAME_STALL_S = 0.05
+        srv.broadcast_frame(b"f0")
+        time.sleep(0.1)
+        t = threading.Thread(target=srv.broadcast_frame, args=(b"f1",), daemon=True)
+        t.start()
+        t.join(2.0)
+        self.assertFalse(t.is_alive(), "broadcast_frame deadlocked")
+        self.assertNotIn(stuck, srv.frame_clients)
+        # The lock is free again: other threads can still broadcast.
+        done = threading.Event()
+        threading.Thread(target=lambda: (srv.broadcast("x"), done.set()),
+                         daemon=True).start()
+        self.assertTrue(done.wait(2.0))
+
     def test_disconnect_unsubscribes(self):
         c = _Client()
         self._subscribe(c)

@@ -91,6 +91,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Dashboard commands** run on the `DashboardCommands` worker, never the
   WS event loop. View frames are binary and opt-in
   (`dash|subscribe|frames`).
+- **Never call out while holding a lock** — no logging, bus emits,
+  broadcasts or callbacks inside `with …lock:`. Logging reaches the
+  event bus, which broadcasts under `clients_lock`: a call-out under that
+  lock deadlocks the streamer, then the bot and the WS loop.
 - **Profile skills**: a profile with a `skills` entry (even `{}`) owns its
   kit; without one it inherits the global book. Anything that changes the
   kit re-broadcasts `skills`/`config`; reads never seed a profile.
