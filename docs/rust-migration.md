@@ -59,6 +59,7 @@ Crates (initial picks): `serde`/`serde_json`, `serialport`, `windows`
 cd rust
 cargo test                                   # all crates
 $env:PICOBOT_DATA = "..\..\PicoBot-v2"; cargo test -p picobot-core --test parity   # + real data
+python toolsision_trace.py ..\..\PicoBot-v2 trace.json; $env:PICOBOT_VISION_TRACE = "trace.json"; cargo test -p picobot-core --test vision_parity
 cargo clippy --all-targets; cargo fmt
 ..\..\PicoBot-v2\.venv\Scripts\python.exe tools\gen_fixtures.py   # regenerate parity fixtures (Python writers)
 ```
@@ -108,6 +109,21 @@ conversion.
   replies, silence, NACK, older protocol, port loss). `examples/pico_ping`
   handshakes with the real Pico (no key presses): it answers `PICO_READY
   v2`.
+- **M5** — done: `core::vision` (BGRA `Image`, colour masks, frame finding,
+  marker blobs, the percentile darkness test, platform lookups) and
+  `core::minimap` (`TransitionDetector`, `MinimapAnalyzer` behind a mutex,
+  an explicit per-thread `PlayerTracker`); `io::window` (find by title,
+  client rect, focus, DPI-aware) and `io::capture` (GDI `BitBlt` into a
+  reused DIB section — `!Send`, so each thread keeps its own). Parity on
+  the recorded frames (`tools/vision_trace.py` + `tests/vision_parity.rs`,
+  opt-in via `PICOBOT_VISION_TRACE`): 773 minimap frames — darkness, every
+  blackout/arrival event and state, 490 dot positions with tracking,
+  runes, other players — plus window frame finding and title crops, all
+  identical. Live (`examples/vision_bench.rs` vs `tools/vision_bench.py`):
+  same frame and dot; per minimap frame **0.10 ms CPU vs 1.93 ms** (analysis
+  0.21 vs 1.6 ms). Wall time is ~7 ms for both: the capture waits for the
+  compositor's next frame, which costs no CPU. `CAPTUREBLT` is off by
+  default (no measurable difference; the game isn't a layered window).
 
 ## Milestones
 

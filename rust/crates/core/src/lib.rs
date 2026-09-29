@@ -8,6 +8,7 @@ pub mod error;
 pub mod fileio;
 pub mod json;
 pub mod maps;
+pub mod minimap;
 pub mod navgraph;
 pub mod planner;
 pub mod platform_fit;
@@ -16,5 +17,6 @@ pub mod rotation;
 pub mod skills;
 pub mod summons;
 pub mod timing;
+pub mod vision;
 
 pub use error::{Error, Result};
