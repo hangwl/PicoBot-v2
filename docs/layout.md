@@ -49,7 +49,9 @@ measured:
 - walk classes, or flash jump disabled — jump and rope lift.
 
 Each move calibrates as soon as its attempts finish, so a stopped run
-keeps what it measured. An attempt is skipped — with the reason shown
+keeps what it measured. Each move also has its own **Measure** button,
+for when one spot doesn't suit every move (rope lift needs a platform
+above, sideways moves need room). An attempt is skipped — with the reason shown
 next to the move — when the player dot is lost, there's no room or no
 platform above, the key isn't bound, the character didn't move, or a
 sideways move changed level (fell off or caught a ledge). The Route

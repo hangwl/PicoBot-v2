@@ -207,6 +207,7 @@ main {
 .pill.warn { color: var(--warn); background: var(--warn-bg); white-space: normal; }
 .pill.accent { color: var(--accent); background: var(--accent-bg); }
 .moves li { min-height: var(--tap); }
+.moves li button { margin-left: auto; }
 .fit h3 { font-size: 15px; font-weight: 600; margin: 8px 0 4px; }
 .fit .rows li b { font-weight: 500; font-variant-numeric: tabular-nums; }
 .sweep .bar {

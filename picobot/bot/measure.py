@@ -77,14 +77,16 @@ class MoveMeasurer:
         self.current: Optional[str] = None
         self._running = False
         self.mode = "moves"
+        self.only: Optional[str] = None
         self.profile_rows: List[dict] = []
 
     # -- Lifecycle ------------------------------------------------------------------
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, mode: str = "moves") -> None:
-        """``mode``: "moves" (the class's plan) or "up_flash_profile"."""
+    def start(self, mode: str = "moves", only: Optional[str] = None) -> None:
+        """``mode``: "moves" (the class's plan, or just ``only``) or
+        "up_flash_profile"."""
         if self.running():
             return
         self._stop.clear()
@@ -92,6 +94,7 @@ class MoveMeasurer:
         self.profile_rows = []
         self.current = None
         self.mode = mode
+        self.only = only
         self._running = True
         self._publish()
         self._thread = threading.Thread(
@@ -112,6 +115,7 @@ class MoveMeasurer:
             "plan": list(self.plan_for(self.bot.config)),
             "results": dict(self.results),
             "mode": self.mode,
+            "only": self.only,
             "profile": list(self.profile_rows),
             "profiles": dict(getattr(self.bot.reach, "profiles", {})),
         }
@@ -138,8 +142,17 @@ class MoveMeasurer:
             if self.mode == "up_flash_profile":
                 self._profile()
                 return
-            self._emit("measure", "measuring moves — keep the game focused")
-            for move in self.plan_for(bot.config):
+            plan = self.plan_for(bot.config)
+            if self.only is not None:
+                if self.only not in plan:
+                    self._emit("measure", f"{self.only} isn't one of this class's moves")
+                    return
+                plan = (self.only,)
+            self._emit(
+                "measure",
+                f"measuring {self.only if self.only else 'moves'} — keep the game focused",
+            )
+            for move in plan:
                 self.current = move
                 self._publish()
                 best: Optional[float] = None

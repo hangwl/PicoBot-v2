@@ -1517,7 +1517,13 @@ class HostCommandTests(unittest.TestCase):
         self.host._feed = Mock()
         with patch("picobot.bot.SmartBot"),                 patch("picobot.bot.measure.MoveMeasurer") as mm:
             self.host._handle_command("measure|profile|up_flash")
-        mm.return_value.start.assert_called_once_with("up_flash_profile")
+        mm.return_value.start.assert_called_once_with("up_flash_profile", None)
+
+    def test_measure_one_move_command(self):
+        self.host._feed = Mock()
+        with patch("picobot.bot.SmartBot"),                 patch("picobot.bot.measure.MoveMeasurer") as mm:
+            self.host._handle_command("measure|start|rope_lift")
+        mm.return_value.start.assert_called_once_with("moves", "rope_lift")
 
     def test_idle_measure_status_carries_stored_profiles(self):
         self.host.reach.set_profile("up_flash", [{"delay": 0.2, "rise": 18}])

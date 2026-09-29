@@ -79,7 +79,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
   - **Move keys** — jump / rope lift / flash keys and arrival radius; only
     edited fields are saved.
   - **Measure moves** — the class's moves with each one's status (not
-    measured / measuring / px result / skip reason) and one button that
+    measured / measuring / px result / skip reason) and a **Measure**
+    button per move (one move on its own), plus one button that
     is *Measure moves* when idle and *Stop measuring* while running.
     While measuring, the top bar says so and Start bot is replaced.
     Flash classes also get **Up-flash timing**: a sweep button and the

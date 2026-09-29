@@ -215,6 +215,26 @@ class MoveMeasurerTests(unittest.TestCase):
         _, got = self._run(bot)
         self.assertTrue(any("fell off a ledge" in msg for _, msg in got))
 
+    def test_one_move_measures_only_that_move(self):
+        bot = MeasureBot([FLOOR, LEDGE, TOP], (60, 100))
+        m = MoveMeasurer(bot)
+        m.only = "rope_lift"
+        m._loop()
+        self.assertEqual(bot.moves, ["rope_lift"])
+        self.assertEqual(list(m.results), ["rope_lift"])
+        self.assertEqual(bot.reach.get("rope_lift").rise, 22)
+        self.assertEqual(bot.reach.get("flash").dx, 30)     # untouched
+        self.assertEqual(set(bot.reach.measured), {"rope_lift"})
+
+    def test_one_move_outside_the_kit_is_refused(self):
+        bot = MeasureBot([FLOOR], (30, 100))
+        m = MoveMeasurer(bot, on_event=lambda k, msg: got.append(msg))
+        got = []
+        m.only = "teleport"                   # a flash class
+        m._loop()
+        self.assertEqual(bot.moves, [])
+        self.assertTrue(any("isn't one of this class's moves" in g for g in got))
+
     def test_no_platforms_warns(self):
         bot = MeasureBot([], (30, 100))
         _, got = self._run(bot)

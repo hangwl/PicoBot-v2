@@ -74,6 +74,8 @@ export interface MeasureState {
   plan: string[];
   results: Record<string, MoveResult>;
   mode: string;
+  /** The one move being measured, or null for the whole plan. */
+  only: string | null;
   /** Live rows of the sweep in progress. */
   profile: SweepRow[];
   /** Saved sweeps by move. */
@@ -210,7 +212,7 @@ const initial: AppState = {
   fps: 3,
   measure: {
     running: false, move: null, plan: [], results: {},
-    mode: "moves", profile: [], profiles: {},
+    mode: "moves", only: null, profile: [], profiles: {},
   },
   botRunning: false,
   botState: "–",
@@ -479,6 +481,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
           plan: (p.plan as string[]) ?? [],
           results: (p.results as Record<string, MoveResult>) ?? {},
           mode: (p.mode as string) ?? "moves",
+          only: (p.only as string | null) ?? null,
           profile: (p.profile as SweepRow[]) ?? [],
           profiles: (p.profiles as MeasureState["profiles"]) ?? {},
         },

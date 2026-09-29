@@ -745,7 +745,8 @@ function MeasurePage({ s }: { s: AppState }) {
         one above it. The character works each move
         {s.classActive ? ` ${s.classActive}` : " this class"} can use, and
         the best result becomes that move's reach. Results are saved per
-        class.
+        class. Measure one move on its own when a spot suits it — rope lift
+        needs a platform above; sideways moves need room.
       </p>
       <ul class="rows moves">
         {plan.map((mv) => {
@@ -754,6 +755,12 @@ function MeasurePage({ s }: { s: AppState }) {
             <li key={mv}>
               <b>{MOVE_LABEL[mv] ?? mv}</b>
               <span class={`pill ${tone}`}>{text}</span>
+              {!m.running && (
+                <button class="small" disabled={s.botRunning || s.ws !== "on"}
+                        onClick={() => send(`measure|start|${mv}`)}>
+                  Measure
+                </button>
+              )}
             </li>
           );
         })}
