@@ -60,7 +60,7 @@ cd rust
 cargo test                                   # all crates
 $env:PICOBOT_DATA = "..\..\PicoBot-v2"; cargo test -p picobot-core --test parity   # + real data
 cargo clippy --all-targets; cargo fmt
-..\.venv\Scripts\python.exe tools\gen_fixtures.py   # regenerate parity fixtures (Python writers)
+..\..\PicoBot-v2\.venv\Scripts\python.exe tools\gen_fixtures.py   # regenerate parity fixtures (Python writers)
 ```
 
 Parity fixtures in `crates/core/tests/fixtures/` are written by the
