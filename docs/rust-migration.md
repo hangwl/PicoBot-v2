@@ -59,7 +59,7 @@ Crates (initial picks): `serde`/`serde_json`, `serialport`, `windows`
 cd rust
 cargo test                                   # all crates
 $env:PICOBOT_DATA = "..\..\PicoBot-v2"; cargo test -p picobot-core --test parity   # + real data
-python toolsision_trace.py ..\..\PicoBot-v2 trace.json; $env:PICOBOT_VISION_TRACE = "trace.json"; cargo test -p picobot-core --test vision_parity
+..\..\PicoBot-v2\.venv\Scripts\python.exe tools\vision_trace.py ..\..\PicoBot-v2 trace.json; $env:PICOBOT_VISION_TRACE = "trace.json"; cargo test -p picobot-core --test vision_parity
 cargo clippy --all-targets; cargo fmt
 ..\..\PicoBot-v2\.venv\Scripts\python.exe tools\gen_fixtures.py   # regenerate parity fixtures (Python writers)
 ```
