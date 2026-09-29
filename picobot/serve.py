@@ -358,7 +358,7 @@ class BotHost:
                 monitor=feed.monitor if feed is not None else None,
                 identity=self.identity,
                 reach=self.reach,
-                notify_callback=self.telegram.send_message,
+                notify_callback=self.telegram.send_async,
                 event_bus=bus,
             )
             self.bot.platfit = self.platfit
@@ -726,7 +726,8 @@ class BotHost:
         n = 0
         while f"a{n}" in taken:
             n += 1
-        rot.anchors.append(Anchor(f"a{n}", round(x / w, 4), round(y / h, 4)))
+        # A new list, not an append: a running bot may be iterating it.
+        rot.anchors = rot.anchors + [Anchor(f"a{n}", round(x / w, 4), round(y / h, 4))]
         self._save_entry(entry)
         note = "" if snapped is not None else " (no drawn platform under it)"
         self.bus.emit("map", f"{entry.name}: anchor a{n} placed{note}")
@@ -746,14 +747,13 @@ class BotHost:
         segs = list(getattr(entry, field) or [])
         stack = self._layout_undo.setdefault((entry.name, field), [])
         if payload == "undo":
-            if stack:
-                segs, moved = stack.pop()    # before the last edit (merges too)
-                self._restore_anchors(entry, moved)
-            elif segs:
-                segs.pop()
-            else:
-                self.bus.emit("map", f"{entry.name}: no {label} to undo")
+            if not stack:
+                # Only this session's edits can be undone — never delete a
+                # drawn line nobody just changed.
+                self.bus.emit("map", f"{entry.name}: no {label} edit to undo")
                 return
+            segs, moved = stack.pop()    # before the last edit (merges too)
+            self._restore_anchors(entry, moved)
             setattr(entry, field, segs or None)
             self._save_entry(entry)
             self.bus.emit(
@@ -1501,9 +1501,11 @@ class BotHost:
         cfg.class_active = name
         cfg._apply_class({"active": name, "profiles": cfg.class_profiles},
                          cfg)
-        # Reach is per character: swap to this profile's learned envelopes.
+        # Reach is per character: swap to this profile's learned envelopes
+        # (the outgoing one saves first — it writes at most every 10s).
         from .bot.reach import ReachModel, base_reach
 
+        self.reach.save(force=True)
         self.reach = ReachModel(base_reach(cfg), path=cfg.reach_path())
         bot_cfg = getattr(self.config, "bot", None) or {}
         cls = dict(bot_cfg.get("class") or {})
@@ -1768,9 +1770,8 @@ class BotHost:
             merged = dict(self.bot_config.skills)
             if bot._map is not None:
                 merged.update(bot._map.skills)
-            # Mutate in place so cooldown timestamps survive the edit.
-            bot.skills.skills.clear()
-            bot.skills.skills.update(merged)
+            # The bot swaps it in on its own thread, cooldowns kept.
+            bot.request_skills(merged)
         self._send_skills()
 
     def _movekeys_set(self, payload: str) -> None:
@@ -1797,7 +1798,12 @@ class BotHost:
             changed.setdefault("flash_jump", {})[
                 "enabled"] = cfg.flash_jump_enabled
         if "nav_threshold_px" in spec and spec["nav_threshold_px"] is not None:
-            cfg.nav_threshold_px = min(15, max(2, int(spec["nav_threshold_px"])))
+            try:
+                radius = int(spec["nav_threshold_px"])
+            except (TypeError, ValueError):
+                self.bus.emit("error", f"invalid arrival radius: {spec['nav_threshold_px']!r}")
+                return
+            cfg.nav_threshold_px = min(15, max(2, radius))
             changed["nav_threshold_px"] = cfg.nav_threshold_px
         if not changed:
             return
@@ -1868,7 +1874,7 @@ class BotHost:
             monitor=feed.monitor,
             identity=self.identity,
             reach=self.reach,
-            notify_callback=self.telegram.send_message,
+            notify_callback=self.telegram.send_async,
             event_bus=self.bus,
         )
         bot.platfit = self.platfit

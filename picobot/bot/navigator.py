@@ -171,7 +171,7 @@ class Navigator:
             )
         elif kind in ("jump", "flash", "double_flash"):
             self._gap_jump(leg, direction)
-        pos = self._settle()
+        pos = self._land(start, takeoff=self.TAKEOFF_S.get(kind, 0.4))
         ok = pos is not None and self._on_platform(pos, want)
         if kind in MOVES and start is not None and pos is not None:
             self.graph.reach.observe(
@@ -270,6 +270,46 @@ class Navigator:
         if note is not None and pos is not None:
             note(pos)
         return pos
+
+    # How long a move may take to leave the ground: rope lift winds up
+    # while its rope grapples (longer for higher platforms).
+    TAKEOFF_S = {"rope_lift": 1.2, "teleport": 0.6, "climb_up": 0.8}
+    POLL_S = 0.05
+
+    def _land(self, start: Optional[Point], *, takeoff: float = 0.4,
+              timeout: float = 2.5) -> Optional[Point]:
+        """Where the move came down: wait until the character has left
+        ``start`` (a wind-up stands still and must not read as a landing),
+        then for two steady reads *on a drawn platform* — a pause at the
+        top of a jump is steady too, but in the air. Polls are counted
+        rather than timed so a slow capture can't shorten the wait."""
+        polls = int(timeout / self.POLL_S)
+        wait_takeoff = int(takeoff / self.POLL_S)
+        last = self._pos()
+        moved = start is None or last is None or (
+            abs(last[0] - start[0]) > 2 or abs(last[1] - start[1]) > 2)
+        stable = 0
+        for i in range(polls):
+            if self.bot.sleep(self.POLL_S):
+                return last
+            pos = self._pos()
+            if pos is None:
+                continue
+            if not moved:
+                moved = (abs(pos[0] - start[0]) > 2 or abs(pos[1] - start[1]) > 2
+                         or i >= wait_takeoff)
+                last = pos
+                continue
+            if (last is not None and abs(pos[0] - last[0]) <= 1
+                    and abs(pos[1] - last[1]) <= 1
+                    and self.graph.locate(*pos) is not None):
+                stable += 1
+                if stable >= 2:
+                    return pos
+            else:
+                stable = 0
+            last = pos
+        return last
 
     def _settle(self, quick: bool = False, timeout: float = 0.7) -> Optional[Point]:
         """Position once the player dot is stable (within ~1.5px for two

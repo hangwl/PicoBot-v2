@@ -37,10 +37,13 @@ KIND_LEVELS = {
 
 
 class EventBus:
-    def __init__(self, history: int = 300) -> None:
+    def __init__(self, history: int = 300, debug_history: int = 100) -> None:
         self._subscribers: list[Subscriber] = []
         self._lock = threading.Lock()
         self._history: Deque[Event] = deque(maxlen=history)
+        # Per-keystroke chatter has its own buffer, so it can't push the
+        # events worth reading out of the history.
+        self._debug: Deque[Event] = deque(maxlen=debug_history)
 
     def emit(
         self,
@@ -58,7 +61,7 @@ class EventBus:
         if data:
             event["data"] = data
         with self._lock:
-            self._history.append(event)
+            (self._debug if level == "debug" else self._history).append(event)
             subscribers = list(self._subscribers)
         for sub in subscribers:
             try:
@@ -79,8 +82,11 @@ class EventBus:
                 pass
 
     def history(self) -> list[Event]:
+        """Recent events, oldest first (debug ones from their own buffer)."""
         with self._lock:
-            return list(self._history)
+            items = list(self._history) + list(self._debug)
+        items.sort(key=lambda e: e["t"])
+        return items
 
 
 __all__ = ["EventBus"]

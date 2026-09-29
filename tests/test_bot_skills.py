@@ -151,5 +151,20 @@ class SummonTrackerTests(unittest.TestCase):
         self.assertEqual(t.active(now=101.0), [])
 
 
+class CarryOverTests(unittest.TestCase):
+    def test_rebuilt_book_keeps_cooldowns_and_caps_charges(self):
+        from picobot.bot.skills import Skill, SkillBook
+
+        old = SkillBook({"burst": Skill("burst", "s", cooldown=30),
+                         "orb": Skill("orb", "d", cooldown=60, kind="summon", charges=3)})
+        old.mark_used("burst", now=100.0)
+        new = SkillBook({"burst": Skill("burst", "s", cooldown=30),
+                         "orb": Skill("orb", "d", cooldown=60, kind="summon", charges=1),
+                         "fresh": Skill("fresh", "f", cooldown=10)}).carry_from(old)
+        self.assertFalse(new.ready("burst", now=110.0))       # still cooling
+        self.assertEqual(new.charges("orb", now=100.0), 1)    # 3 capped to 1
+        self.assertTrue(new.ready("fresh", now=100.0))
+
+
 if __name__ == "__main__":
     unittest.main()

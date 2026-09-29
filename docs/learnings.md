@@ -171,6 +171,32 @@ fixed that — all 15 captured reads exact afterwards.
   stuck sends close the client after 10s, and the page pings and
   reconnects after 12s of silence.
 
+## Pre-migration review (2026-09-30)
+
+A whole-codebase pass before the Rust port found, among others:
+
+- **Keys could stay held for good**: the firmware never released on
+  disconnect or host silence; late ACKs were credited to the next command
+  (positional matching, NACK ignored); and a key-down that timed out in the
+  host's queue still went out later, untracked, so `release_all` skipped
+  it. Fixed with numbered commands, a keepalive + 2s firmware watchdog,
+  dropping stale key-downs, and tracking a key from the first attempt.
+- **Rope-lift landings were judged before takeoff**: the landing wait
+  took two still reads as "landed" — during the rope's grapple the
+  character stands still, so a good lift read as a miss (the Limina 2-6
+  pattern: miss → "not on any drawn platform" → walking on the upper
+  tier). Landing now needs a takeoff and a steady read on a platform.
+- **Up flashes overshot their target**: the graph aimed them at the
+  nearest platform above, but the character lands on the highest one its
+  peak clears. Those misses also shrank the reach model — misses now only
+  count when the move fell short.
+- **Cross-thread mutation**: dashboard skill edits cleared the bot's
+  skill dict mid-iteration; anchor deletes shrank the list the patrol
+  indexed. Skill books are now handed over and swapped on the bot thread
+  (cooldowns carried over); anchor lists are replaced, never mutated, and
+  the patrol replans when they change. A running bot also read a stale
+  copy of the map's anchors after any layout save.
+
 ## Movement and detection
 
 - **Dot lost on ropes** (2026-09-30): markers were found with a 3x3

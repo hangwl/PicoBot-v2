@@ -14,6 +14,10 @@ import serial.tools.list_ports
 LineCallback = Callable[[str], None]
 
 HANDSHAKE_COMMAND = b"hello|handshake\n"
+# Sent when the link is otherwise idle: the firmware releases every held
+# key after ~2s without any line from the host.
+KEEPALIVE_COMMAND = b"ka\n"
+KEEPALIVE_S = 0.4
 _DEFAULT_BAUDRATE = 115200
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +72,7 @@ def discover_data_port(
                 ):
                     found_console = True
                     break
-                if line == "PICO_READY":
+                if line.startswith("PICO_READY"):
                     got_ready = True
                     break
             if not got_ready and not found_console:
@@ -95,7 +99,7 @@ def discover_data_port(
                     ):
                         found_console = True
                         break
-                    if line == "PICO_READY":
+                    if line.startswith("PICO_READY"):
                         got_ready = True
                         break
             if got_ready and not found_console:
@@ -125,7 +129,7 @@ def finalize_handshake(ser: serial.Serial, *, wait_window: float = 0.8) -> None:
             break
         if not line:
             continue
-        if line == "PICO_READY":
+        if line.startswith("PICO_READY"):
             break
     try:
         ser.reset_input_buffer()
@@ -145,13 +149,27 @@ def wait_for_ack(ser: serial.Serial, timeout: float = 1.5) -> bool:
             continue
         if line == "ACK":
             return True
-        if line == "PICO_READY":
+        if line.startswith("PICO_READY"):
             continue
     return False
 
 
+class _Waiter:
+    __slots__ = ("event", "ok")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.ok = False
+
+
 class SerialManager:
-    """Owns a persistent serial session with handshake, ACK, and READY tracking."""
+    """Owns a persistent serial session with handshake, ACK, and READY tracking.
+
+    Each command goes out as ``<seq>:<payload>`` and the firmware answers
+    ``ACK <seq>`` / ``NACK <seq>``, so a reply that arrives after its
+    sender gave up can never be credited to a later command. Firmware that
+    answers a bare ``ACK`` is matched first-in-first-out instead.
+    """
 
     def __init__(
         self,
@@ -168,8 +186,16 @@ class SerialManager:
         self._serial: Optional[serial.Serial] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._stop_reader = threading.Event()
-        self._ack_waiters: deque[threading.Event] = deque()
+        self._ack_waiters: deque[_Waiter] = deque()
+        self._by_seq: dict[int, _Waiter] = {}
+        self._seq = 0
         self._ack_lock = threading.Lock()
+        self._last_tx = 0.0
+        # Set from the firmware's READY line: "PICO_READY v2" takes
+        # numbered commands and keepalives; older firmware gets neither.
+        self.numbered = False
+        # Called (reader thread) when the port fails underneath us.
+        self.on_lost: Optional[Callable[[str], None]] = None
         self._ready_event = threading.Event()
         self._last_ready = 0.0
         self._callbacks: list[LineCallback] = []
@@ -224,9 +250,16 @@ class SerialManager:
             except Exception:
                 pass
         self._serial = None
-        with self._ack_lock:
-            self._ack_waiters.clear()
+        self._fail_waiters()
         self._ready_event.clear()
+
+    def _fail_waiters(self) -> None:
+        with self._ack_lock:
+            waiters = list(self._ack_waiters)
+            self._ack_waiters.clear()
+            self._by_seq.clear()
+        for w in waiters:
+            w.event.set()
 
     def register_line_callback(self, callback: LineCallback) -> None:
         if not callback:
@@ -256,35 +289,54 @@ class SerialManager:
             return False
         if not self.is_open:
             raise RuntimeError("Serial port is not open")
-        cmd = payload if payload.endswith("\n") else f"{payload}\n"
-        waiter: Optional[threading.Event] = None
-        if wait_ack:
-            waiter = threading.Event()
-            with self._ack_lock:
-                self._ack_waiters.append(waiter)
+        body = payload.rstrip("\n")
+        if body.startswith("hello"):
+            # Handshakes are answered with PICO_READY, never an ACK.
+            with self._write_lock:
+                assert self._serial is not None
+                self._serial.write(f"{body}\n".encode("utf-8"))
+                self._serial.flush()
+                self._last_tx = time.monotonic()
+            return True
+        waiter: Optional[_Waiter] = _Waiter() if wait_ack else None
+        with self._ack_lock:
+            self._seq = self._seq % 999999 + 1
+            seq = self._seq
+            # Every command is numbered (its reply is ignored when nobody
+            # waits); bare-ACK firmware needs a FIFO entry per command.
+            entry = waiter or _Waiter()
+            self._by_seq[seq] = entry
+            self._ack_waiters.append(entry)
+            while len(self._ack_waiters) > 256:
+                stale = self._ack_waiters.popleft()
+                for k, v in list(self._by_seq.items()):
+                    if v is stale:
+                        del self._by_seq[k]
+                        break
+        cmd = f"{seq}:{body}" if self.numbered else body
         try:
             with self._write_lock:
                 assert self._serial is not None
-                self._serial.write(cmd.encode("utf-8"))
+                self._serial.write(f"{cmd}\n".encode("utf-8"))
                 self._serial.flush()
+                self._last_tx = time.monotonic()
         except Exception:
-            if waiter is not None:
-                with self._ack_lock:
-                    try:
-                        self._ack_waiters.remove(waiter)
-                    except ValueError:
-                        pass
+            self._forget(seq)
             raise
-        if not wait_ack or waiter is None:
+        if waiter is None:
             return True
-        if waiter.wait(timeout):
-            return True
+        got = waiter.event.wait(timeout)
+        self._forget(seq)
+        return got and waiter.ok
+
+    def _forget(self, seq: int) -> None:
         with self._ack_lock:
-            try:
-                self._ack_waiters.remove(waiter)
-            except ValueError:
-                pass
-        return False
+            w = self._by_seq.pop(seq, None)
+            if w is not None:
+                try:
+                    self._ack_waiters.remove(w)
+                except ValueError:
+                    pass
 
     def send_hid(
         self,
@@ -297,36 +349,80 @@ class SerialManager:
         base = f"{event_type}|{key}" if key else event_type
         return self.send_payload(base, wait_ack=wait_ack, timeout=timeout)
 
-    def _resolve_next_ack(self) -> None:
+    def _resolve(self, line: str) -> None:
+        """``ACK <seq>`` / ``NACK <seq>`` resolve that command; a bare
+        ``ACK`` / ``NACK`` (older firmware) the oldest outstanding one."""
+        word, _, rest = line.partition(" ")
         with self._ack_lock:
-            if self._ack_waiters:
-                waiter = self._ack_waiters.popleft()
-                try:
-                    waiter.set()
-                except Exception:
-                    pass
+            if rest.strip().isdigit():
+                w = self._by_seq.pop(int(rest), None)
+                if w is not None:
+                    try:
+                        self._ack_waiters.remove(w)
+                    except ValueError:
+                        pass
+            else:
+                w = self._ack_waiters.popleft() if self._ack_waiters else None
+                if w is not None:
+                    for k, v in list(self._by_seq.items()):
+                        if v is w:
+                            del self._by_seq[k]
+                            break
+        if w is not None:
+            w.ok = word == "ACK"
+            w.event.set()
+
+    def _keepalive(self, ser) -> None:
+        if not self.numbered or time.monotonic() - self._last_tx < KEEPALIVE_S:
+            return
+        try:
+            with self._write_lock:
+                ser.write(KEEPALIVE_COMMAND)
+                self._last_tx = time.monotonic()
+        except Exception:
+            _LOGGER.debug("keepalive write failed", exc_info=True)
 
     def _reader_loop(self) -> None:
+        lost = None
         while not self._stop_reader.is_set():
             ser = self._serial
             if ser is None:
                 break
+            self._keepalive(ser)
             try:
                 raw = ser.readline()
-            except Exception:
+            except Exception as exc:
+                lost = str(exc) or type(exc).__name__
                 break
             if not raw:
                 continue
             line = raw.decode("utf-8", errors="ignore").strip()
             if not line:
                 continue
-            if line == "ACK":
-                self._resolve_next_ack()
-            elif line == "PICO_READY":
+            if line.split(" ", 1)[0] in ("ACK", "NACK"):
+                self._resolve(line)
+            elif line.startswith("PICO_READY"):
                 self._last_ready = time.time()
+                self.numbered = line.split()[-1] == "v2"
                 self._ready_event.set()
             self._dispatch_line(line)
         self._stop_reader.set()
+        if lost is not None:
+            # The port died (unplugged, driver reset): report closed, fail
+            # every waiting sender now instead of at its timeout.
+            ser, self._serial = self._serial, None
+            try:
+                if ser is not None:
+                    ser.close()
+            except Exception:
+                pass
+            self._fail_waiters()
+            _LOGGER.error("serial port %s lost: %s", self.port, lost)
+            if self.on_lost is not None:
+                try:
+                    self.on_lost(lost)
+                except Exception:
+                    _LOGGER.debug("on_lost callback failed", exc_info=True)
 
     def _dispatch_line(self, line: str) -> None:
         with self._callbacks_lock:

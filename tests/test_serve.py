@@ -38,6 +38,16 @@ class EventBusTests(unittest.TestCase):
         self.assertEqual(len(items), 5)
         self.assertEqual(items[-1]["msg"], "m7")
 
+    def test_keystroke_chatter_cannot_evict_real_events(self):
+        bus = EventBus(history=5, debug_history=3)
+        bus.emit("map", "arrived")
+        for i in range(50):
+            bus.emit("hid", f"key {i}")
+        items = bus.history()
+        self.assertIn("arrived", [e["msg"] for e in items])
+        self.assertEqual(sum(e["kind"] == "hid" for e in items), 3)
+        self.assertEqual([e["t"] for e in items], sorted(e["t"] for e in items))
+
     def test_bad_subscriber_does_not_break_emit(self):
         bus = EventBus()
         bus.subscribe(lambda e: 1 / 0)
@@ -446,6 +456,16 @@ class HostCommandTests(unittest.TestCase):
             host = BotHost(None, "OldWin", config=cfg)
         self.assertEqual(host.reach.path.name, "nav_reach_mage.json")
 
+    def test_class_switch_saves_the_outgoing_reach_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._use_store(tmp)
+            self.host.bot_config.class_profiles = {"mage": {"travel": "teleport"}}
+            old = self.host.reach
+            old.save = Mock()
+            with patch("picobot.bot.reach.ReachModel.load"):
+                self.host._class_use("mage")
+            old.save.assert_called_with(force=True)
+
     def test_class_use_swaps_to_the_profile_reach_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._use_store(tmp)
@@ -598,6 +618,17 @@ class HostCommandTests(unittest.TestCase):
     def _plats_px(self, tmp):
         return [[round(v * (200 if i % 2 == 0 else 150), 1) for i, v in enumerate(s)]
                 for s in MapStore(tmp).get("m1").platforms or []]
+
+    def test_undo_without_an_edit_never_deletes_a_platform(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            entry = MapStore(tmp).get("m1")
+            entry.platforms = [[0.1, 0.3, 0.5, 0.3]]
+            self.host.maps.save(entry)
+            self.host.maps.reload()
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertEqual(MapStore(tmp).get("m1").platforms, [[0.1, 0.3, 0.5, 0.3]])
+            self.assertTrue(any("no platform edit to undo" in m for m in self.sent))
 
     def test_wobbly_drag_is_saved_level(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1277,8 +1308,11 @@ class HostCommandTests(unittest.TestCase):
         self.host.bot = bot
         self.host._handle_command(
             'skills|set|{"name":"main","key":"a","kind":"attack"}')
-        self.assertIn("main", bot.skills.skills)
-        self.assertNotIn("old", bot.skills.skills)
+        # Handed over, never mutated from this (non-bot) thread.
+        (book,), _ = bot.request_skills.call_args
+        self.assertIn("main", book)
+        self.assertNotIn("old", book)
+        self.assertEqual(set(bot.skills.skills), {"old"})
 
     def test_bot_start_shares_feed_analyzer(self):
         feed = Mock()

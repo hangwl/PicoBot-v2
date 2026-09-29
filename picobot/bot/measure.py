@@ -185,6 +185,9 @@ class MoveMeasurer:
         finally:
             # Finished moves are kept even when the run was stopped.
             bot.reach.save(force=True)
+            close = getattr(getattr(bot, "screen", None), "close", None)
+            if callable(close):
+                close()
             self.current = None
             self._running = False
             self._publish()

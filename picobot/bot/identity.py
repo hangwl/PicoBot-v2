@@ -68,6 +68,9 @@ class MapIdentity:
         self._on_event = on_event
         self._clock = clock
         self._lock = threading.Lock()
+        # Serialises _recompute (OCR worker, monitor, dashboard threads);
+        # announcements happen after it is released.
+        self._resolve_lock = threading.Lock()
         self._want = False
         self._busy = False
         self._gen = 0
@@ -215,34 +218,37 @@ class MapIdentity:
 
     # -- Resolution ----------------------------------------------------------------
     def _recompute(self) -> None:
-        t = self._title
-        title_map = t.entry if t else None
-        pinned = self.store.get(self.pin) if self.pin else None
-        if self.pin and pinned is None and not self._pin_warned:
-            self._pin_warned = True
-            self._emit("map", f"pinned map '{self.pin}' not found")
-        if pinned is not None and title_map and title_map != pinned.name:
-            name, via = title_map, "ocr"
-        elif pinned is not None:
-            name, via = pinned.name, ("ocr" if title_map == pinned.name else "pin")
-        else:
-            name, via = title_map, ("ocr" if title_map else None)
-        res = Resolution(
-            name=name, via=via,
-            title=t.text if t else None,
-            score=round(t.score, 3) if t else 0.0,
-            title_map=title_map,
-        )
-        if res == self._current:
-            return
-        prev = self._current
-        self._current = res
-        self.version += 1
-        if res.name != prev.name or res.title != prev.title:
-            detail = f' — title "{res.title}"' if res.title else ""
-            if pinned is not None and via == "ocr" and name != pinned.name:
-                detail += f" (overrides pin '{pinned.name}')"
-            self._emit("map", f"map: {name or '–'} ({via or 'unknown'}){detail}")
+        notes = []
+        with self._resolve_lock:
+            t = self._title
+            title_map = t.entry if t else None
+            pinned = self.store.get(self.pin) if self.pin else None
+            if self.pin and pinned is None and not self._pin_warned:
+                self._pin_warned = True
+                notes.append(f"pinned map '{self.pin}' not found")
+            if pinned is not None and title_map and title_map != pinned.name:
+                name, via = title_map, "ocr"
+            elif pinned is not None:
+                name, via = pinned.name, ("ocr" if title_map == pinned.name else "pin")
+            else:
+                name, via = title_map, ("ocr" if title_map else None)
+            res = Resolution(
+                name=name, via=via,
+                title=t.text if t else None,
+                score=round(t.score, 3) if t else 0.0,
+                title_map=title_map,
+            )
+            if res != self._current:
+                prev = self._current
+                self._current = res
+                self.version += 1
+                if res.name != prev.name or res.title != prev.title:
+                    detail = f' — title "{res.title}"' if res.title else ""
+                    if pinned is not None and via == "ocr" and name != pinned.name:
+                        detail += f" (overrides pin '{pinned.name}')"
+                    notes.append(f"map: {name or '–'} ({via or 'unknown'}){detail}")
+        for msg in notes:
+            self._emit("map", msg)
 
     def _emit(self, kind: str, msg: str) -> None:
         logger.info("%s", msg)

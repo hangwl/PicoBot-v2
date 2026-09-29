@@ -326,5 +326,56 @@ class NavigatorTests(unittest.TestCase):
         self.assertTrue(any(k == "up_flash" for k, *_ in bot.viz["route"]))
 
 
+class ScriptedFlightBot(SimBot):
+    """Positions come from a script, one per read: the move itself does
+    nothing, so the navigator's landing wait sees the flight as it
+    happens (the last position repeats once the script runs out)."""
+
+    def __init__(self, plats, script, **kw):
+        super().__init__(plats, script[0], **kw)
+        self.script = list(script)
+        self.minimap = SimpleNamespace(
+            player_pos=lambda img: self._next(), region=(0, 0, 200, 150))
+
+    def _next(self):
+        if len(self.script) > 1:
+            self.pos = self.script.pop(0)
+        else:
+            self.pos = self.script[0]
+        return self.pos
+
+    def rope_lift(self):
+        self.moves.append("rope_lift")
+        return True
+
+    def sleep(self, dt):
+        self.slept += dt
+        return False
+
+
+class LandingWaitTests(unittest.TestCase):
+    def test_rope_lift_wind_up_is_not_a_landing(self):
+        from picobot.bot.navgraph import Leg
+
+        # Stands still while the rope grapples, rises, hangs at the top in
+        # the air (steady but off every platform), then lands on MID.
+        script = ([(80, 100)] * 12
+                  + [(80, 95), (80, 88), (80, 80), (80, 74), (80, 74), (80, 74)]
+                  + [(80, 78), (80, 84)])
+        bot = ScriptedFlightBot([FLOOR, MID], script, rope=30)
+        nav = Navigator(bot, bot.g, rng=random.Random(0))
+        res = nav.execute_leg(Leg("rope_lift", 80, 100, 80, 84))
+        self.assertEqual(res, "ok")
+        self.assertEqual(bot.pos, (80, 84))
+
+    def test_move_that_never_leaves_is_a_miss_after_the_takeoff_wait(self):
+        from picobot.bot.navgraph import Leg
+
+        bot = ScriptedFlightBot([FLOOR, MID], [(80, 100)], rope=30)
+        nav = Navigator(bot, bot.g, rng=random.Random(0))
+        self.assertEqual(nav.execute_leg(Leg("rope_lift", 80, 100, 80, 84)), "failed")
+        self.assertLess(bot.slept, 3.0)            # bounded wait
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,15 @@ class ReachModelTests(unittest.TestCase):
             m.observe("up_flash", planned=(0, e), observed=(0, 0), ok=False)
         self.assertGreaterEqual(m.get("up_flash").rise, 7.0)
 
+    def test_overshoot_is_not_a_reach_failure(self):
+        m = _model()
+        before = m.get("up_flash").rise
+        for _ in range(3):
+            # Planned 16 up, went 23 up onto a higher tier: not short.
+            m.observe("up_flash", planned=(0, 16), observed=(0, 23), ok=False)
+        self.assertEqual(m.get("up_flash").rise, before)
+        self.assertNotIn("up_flash", m.ceiling)
+
     def test_persistence_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "reach.json"

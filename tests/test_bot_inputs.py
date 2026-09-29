@@ -86,10 +86,21 @@ class HidControllerTests(unittest.TestCase):
         hid.key_up("left")
         self.assertEqual(hid.held_keys, frozenset())
 
-    def test_failed_key_down_not_tracked(self):
+    def test_unconfirmed_key_down_is_still_released(self):
+        # A press whose ACK timed out may still land on the Pico.
         sender = FakeSender(fail=True)
         hid = HidController(sender, sleep=_noop_sleep)
         self.assertFalse(hid.key_down("a"))
+        self.assertEqual(hid.held_keys, frozenset({"a"}))
+        hid.release_all()
+        self.assertIn("hid|key|up|a", sender.sent)
+        self.assertEqual(hid.held_keys, frozenset())
+
+    def test_unconfirmed_press_still_sends_its_key_up(self):
+        sender = FakeSender(fail=True)
+        hid = HidController(sender, sleep=_noop_sleep)
+        self.assertFalse(hid.press("a"))
+        self.assertEqual(sender.sent[-1], "hid|key|up|a")
         self.assertEqual(hid.held_keys, frozenset())
 
     def test_mouse_and_move_payloads(self):

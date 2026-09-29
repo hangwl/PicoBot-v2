@@ -238,5 +238,21 @@ class MapStoreTests(unittest.TestCase):
             self.assertEqual(store.load_all(), [])
 
 
+class FileNameCollisionTests(unittest.TestCase):
+    def test_names_that_sanitise_alike_get_their_own_files(self):
+        import tempfile
+
+        from picobot.bot.maps import MapEntry, MapStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            a = store.save(MapEntry(name="Foo 2"))
+            b = store.save(MapEntry(name="Foo_2"))
+            self.assertNotEqual(a, b)
+            again = MapStore(tmp)
+            self.assertEqual(sorted(again.names()), ["Foo 2", "Foo_2"])
+            self.assertEqual(store.save(again.get("Foo 2")), a)   # stable
+
+
 if __name__ == "__main__":
     unittest.main()

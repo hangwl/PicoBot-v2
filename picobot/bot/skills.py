@@ -107,6 +107,16 @@ class SkillBook:
     def get(self, name: str) -> Optional[Skill]:
         return self.skills.get(name)
 
+    def carry_from(self, other: "SkillBook") -> "SkillBook":
+        """Keep ``other``'s cooldowns and charges for skills of the same
+        name (a rebuilt book must not make everything ready at once)."""
+        for name, state in other._charges.items():
+            skill = self.skills.get(name)
+            if skill is not None:
+                have, nxt = state
+                self._charges[name] = (min(have, skill.charges), nxt)
+        return self
+
     def overlay(self, skills: Dict[str, Skill]) -> None:
         """Merge map-level skill definitions over the base set (by name)."""
         self.skills.update(skills)

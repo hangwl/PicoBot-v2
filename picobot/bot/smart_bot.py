@@ -48,6 +48,7 @@ class SmartBot(BotBase):
     _patrol: Optional[Patrol] = None
     _reach: Optional[ReachModel] = None
     _roam_origin = None
+    _pending_skills = None
     def __init__(
         self,
         controller: HidController,
@@ -100,6 +101,8 @@ class SmartBot(BotBase):
         self._travel_target: Optional[int] = None
         # Anchors just reached, waiting for their summon on the next tick.
         self._arrive_pending: list = []
+        # Skill edits from the dashboard, swapped in on the bot thread.
+        self._pending_skills: Optional[Dict[str, Skill]] = None
         self.summons = SummonTracker()
         self._minimap_warned = False
         self._last_up_skill = 0.0
@@ -118,9 +121,12 @@ class SmartBot(BotBase):
         # Cooldown-spaced gate for attack presses woven into travel legs.
         self._travel_attack_at = 0.0
         # Latest-observation snapshot consumed by the dashboard streamer.
+        # Every key exists up front: the streamer copies this dict from
+        # another thread, and a copy fails if a key is first added mid-copy.
         self.viz: dict = {
             "state": "IDLE", "img": None, "player": None, "hazard": None,
             "target": None, "map": None, "title": None, "route": None,
+            "plan": None, "rune": None, "summons": None, "patrol": None,
         }
 
     def _viz_state(self, name: str) -> None:
@@ -321,8 +327,10 @@ class SmartBot(BotBase):
 
     # -- Maps & rotation -----------------------------------------------------------
     def effective_rotation(self) -> Rotation:
-        if self._map is not None:
-            return self._map.rotation
+        # The store's copy: dashboard edits reload it mid-run.
+        entry = self._current_map_entry()
+        if entry is not None:
+            return entry.rotation
         return self.config.rotation
 
     def rotation_active(self) -> bool:
@@ -345,7 +353,9 @@ class SmartBot(BotBase):
             if entry is not None:
                 merged.update(entry.skills)
                 self.log(f"Map: {entry.name} ({res.via})")
-            self.skills = SkillBook(merged)
+            book = SkillBook(merged)
+            old = getattr(self, "skills", None)
+            self.skills = book.carry_from(old) if old is not None else book
             self._anchor_idx = 0
             self._travel_target = None
             self._weave_dir = None
@@ -1254,8 +1264,18 @@ class SmartBot(BotBase):
     def travel_due(self) -> bool:
         return self._travel_target is not None
 
+    def request_skills(self, skills: Dict[str, Skill]) -> None:
+        """Replace the skill book (any thread); applied at the next tick."""
+        self._pending_skills = dict(skills)
+
+    def _apply_pending_skills(self) -> None:
+        skills, self._pending_skills = self._pending_skills, None
+        if skills is not None:
+            self.skills = SkillBook(skills).carry_from(self.skills)
+
     def grind_tick(self) -> None:
         """One farming tick: arrival skills, buffs, then patrol/weave."""
+        self._apply_pending_skills()
         pending, self._arrive_pending = self._arrive_pending, []
         for anchor in pending:
             self._cast_at_anchor(anchor)
@@ -1515,6 +1535,7 @@ class SmartBot(BotBase):
     def grind_once(self) -> None:
         """No-rotation tick: due buffs, then keep moving — weave-hop
         around where grinding started."""
+        self._apply_pending_skills()
         if not self.is_window_focused() or not self.should_continue():
             return
         for buff in self.skills.due_buffs():

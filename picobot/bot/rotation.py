@@ -191,8 +191,9 @@ class Rotation:
 
     # -- Editing --------------------------------------------------------------
     def remove_anchor(self, index: int) -> None:
-        """Drop an anchor and its legs; later legs shift down one index."""
-        del self.anchors[index]
+        """Drop an anchor and its legs; later legs shift down one index.
+        Builds a new list: a running bot may be iterating the old one."""
+        self.anchors = self.anchors[:index] + self.anchors[index + 1:]
 
         def shift(i: int) -> int:
             return i - 1 if i > index else i

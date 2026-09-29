@@ -206,10 +206,17 @@ class MapStore:
         return self.match_title(ocr_text)[0]
 
     def save(self, entry: MapEntry) -> Path:
-        """Write the map file; returns its path."""
+        """Write the map file; returns its path. Names that sanitise to the
+        same file name ("Foo 2" / "Foo_2") get distinct files."""
         self.directory.mkdir(parents=True, exist_ok=True)
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in entry.name)
-        path = self.directory / f"{safe}.json"
+        taken = {
+            e.path.resolve() for e in self.load_all()
+            if e.name != entry.name and e.path is not None
+        }
+        path, n = self.directory / f"{safe}.json", 2
+        while path.resolve() in taken:
+            path, n = self.directory / f"{safe}_{n}.json", n + 1
         write_text_atomic(path, json.dumps(entry.to_dict(), indent=2))
         entry.path = path
         if self._entries is not None and entry not in self._entries:

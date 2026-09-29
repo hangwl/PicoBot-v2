@@ -37,6 +37,7 @@ class Patrol:
         self.fails = 0
         self.arrived = 0
         self._halted = False
+        self._anchors_sig: Optional[tuple] = None
         self._nav: Optional[Navigator] = None
         self._replan_at = 0.0
         self._break_logged = 0.0
@@ -72,9 +73,28 @@ class Patrol:
             "halted": self._halted,
         }
 
+    def _anchors_changed(self) -> bool:
+        """The map's anchors were added, removed or renamed since the plan
+        was made (a dashboard edit mid-run): its indices are stale."""
+        rot = self.bot.effective_rotation()
+        sig = tuple((a.name, a.x, a.y) for a in rot.anchors)
+        if sig == self._anchors_sig:
+            return False
+        first = self._anchors_sig is None
+        self._anchors_sig = sig
+        return not first
+
     def _tick(self) -> None:
         self._halted = False
         bot = self.bot
+        if self._anchors_changed():
+            arrived = self.arrived
+            self.reset()
+            self._anchors_changed()
+            self.arrived = arrived
+            bot._ckpt_ban = {}
+            bot._anchor_idx = 0
+            bot.log("Patrol: anchors changed — replanning")
         img = bot.minimap_frame()
         pos = bot.minimap.player_pos(img) if img is not None else None
         bot.viz["player"] = pos

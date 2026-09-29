@@ -8,7 +8,9 @@ executed move reports where it took off and landed:
 - failure at or inside the envelope → the second consecutive failure
   shrinks the envelope below the attempted size (one miss may be input
   timing, not reach);
-- failure beyond it (an exploratory attempt) → a ceiling stops retrying.
+- failure beyond it (an exploratory attempt) → a ceiling stops retrying;
+- a miss that went at least as far as planned (overshot, or came down on
+  another platform) says nothing about reach and is ignored.
 
 The planner may explore up to ``explore`` × the envelope (capped by the
 ceiling) at a cost penalty, so estimates grow from conservative starts.
@@ -139,6 +141,11 @@ class ReachModel:
             if not horizontal:
                 e.rise = max(e.rise, orise)
         else:
+            odx, orise = observed
+            short_dx, short_rise = odx < pdx - 2.0, orise < prise - 2.0
+            if not (short_dx if horizontal else
+                    (short_dx or short_rise) if diagonal else short_rise):
+                return
             streak = self._fail_streak.get(move, 0) + 1
             self._fail_streak[move] = streak
             c = self.ceiling.setdefault(move, Reach(float("inf"), float("inf")))

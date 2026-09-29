@@ -108,6 +108,17 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Profile skills**: a profile with a `skills` entry (even `{}`) owns its
   kit; without one it inherits the global book. Anything that changes the
   kit re-broadcasts `skills`/`config`; reads never seed a profile.
+- **HID wire safety**: with v2 firmware (`PICO_READY v2`) commands are
+  numbered (`<seq>:hid|…` → `ACK <seq>`) and the firmware releases
+  everything on disconnect or after 2s of host silence (the serial reader
+  sends `ka` when idle); older firmware gets plain commands. Never send HID without
+  going through `SerialManager`, and never drop a key-*up*.
+- **Landing = takeoff + steady on a platform** (`Navigator._land`); an
+  up flash is planned only onto the highest platform its peak clears; a
+  miss counts against reach only when it fell short.
+- **Cross-thread state**: the dashboard never mutates bot-owned
+  containers in place — skill books go through `SmartBot.request_skills`,
+  anchor lists are replaced (the patrol replans on change).
 - **Remote keys mirror the finger**: `key|down` on touch, `key|up` on
   lift — never synthesized taps. `web/src/keys.ts` `PICO_KEYS` must match
   the firmware `KEY_MAP` (a test checks it).

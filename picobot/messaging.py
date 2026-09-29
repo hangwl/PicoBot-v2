@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
 
 import requests
@@ -17,6 +18,15 @@ class TelegramHandler:
         self.bot_token = bot_token
         self.chat_id = chat_id
 
+    def send_async(self, text: str) -> None:
+        """Send without blocking the caller (the bot thread must not wait
+        on the network while a hazard is being handled)."""
+        if not self.bot_token or not self.chat_id:
+            return
+        threading.Thread(
+            target=self.send_message, args=(text,), name="Telegram", daemon=True
+        ).start()
+
     def send_message(self, text: str) -> Optional[requests.Response]:
         """Send *text* to the configured chat."""
 
@@ -29,7 +39,9 @@ class TelegramHandler:
         try:
             response = requests.post(url, params=params, timeout=10)
         except Exception as exc:
-            logger.error("Error sending Telegram message: %s", exc)
+            # The exception text can carry the URL, which holds the token.
+            logger.error("Error sending Telegram message: %s",
+                         str(exc).replace(self.bot_token, "<token>"))
             return None
 
         if response.status_code == 200:

@@ -25,6 +25,35 @@ def kinds(legs):
     return [l.kind for l in legs if l.kind != "walk"]
 
 
+class UpFlashOvershootTests(unittest.TestCase):
+    """Limina 2-6's left stack: an up flash peaking at 26px from the y64
+    tier clears the y51 tier *and* the y41 one (23px up) where they
+    overlap, so it comes down on y41 — never plan it onto y51 there."""
+
+    PLATS = [(31, 82, 140, 82), (31, 64, 66, 64), (32, 51, 71, 51), (31, 41, 55, 41)]
+
+    def _graph(self):
+        return NavGraph(self.PLATS, reach(up_flash=Reach(6, 26), rope_lift=Reach(3, 0)))
+
+    def _up_edges(self, g, frm_row, to_row):
+        return [l for l in g.transfer_legs()
+                if l.kind == "up_flash" and round(l.y0) == frm_row and round(l.y1) == to_row]
+
+    def test_targets_the_highest_platform_the_peak_clears(self):
+        g = self._graph()
+        to51 = self._up_edges(g, 64, 51)
+        self.assertTrue(to51)                         # beyond the top tier's end
+        self.assertTrue(all(l.x0 > 55 for l in to51))
+        self.assertTrue(self._up_edges(g, 64, 41))    # where y41 is overhead
+
+    def test_route_to_the_middle_tier_goes_around_the_top_one(self):
+        g = self._graph()
+        legs = g.route((45, 64), (60, 51))
+        ups = [l for l in legs if l.kind == "up_flash"]
+        self.assertEqual(len(ups), 1)
+        self.assertGreater(ups[0].x0, 55)
+
+
 class NavGraphTests(unittest.TestCase):
     def test_climbs_tier_by_tier_with_up_flash(self):
         no_rope = reach(rope_lift=Reach(0, 0))

@@ -89,10 +89,10 @@ class HidController:
     # -- Keyboard ---------------------------------------------------------------
     def key_down(self, key: str) -> bool:
         self._space()
-        if self._send(f"hid|key|down|{key}"):
-            self._held_keys.add(key)
-            return True
-        return False
+        # Tracked even when unconfirmed: a press that timed out may still
+        # land, and release_all must let it go too.
+        self._held_keys.add(key)
+        return bool(self._send(f"hid|key|down|{key}"))
 
     def key_up(self, key: str) -> bool:
         self._space()
@@ -103,6 +103,7 @@ class HidController:
     def press(self, key: str, hold: Optional[float] = None) -> bool:
         """Tap ``key``; hold duration defaults to a human-like value."""
         if not self.key_down(key):
+            self.key_up(key)
             return False
         self._sleep(hold if hold is not None else human_hold(key))
         return self.key_up(key)

@@ -5,13 +5,15 @@ move to another platform is possible. Edges:
 
 - ``walk`` — along one platform (executed as flash weaves when long).
 - ``down_jump`` onto the next platform below; ``drop`` off an end.
-- Upward: ``up_flash`` / ``rope_lift`` onto the platform directly above;
+- Upward: ``up_flash`` / ``rope_lift`` onto a platform above;
   ``up_side_flash`` (up flash, then a sideways flash) up-and-over onto a
   higher platform across a gap.
 - Horizontal gaps: ``jump``, ``flash``, ``double_flash``.
 - ``rope_lift`` targets the **highest** platform within its grab range
   (``rope_max_px``, ~90 in-game) — the skill always grabs the topmost
   platform in range, so no edge points at a lower one.
+- ``up_flash`` rises through platforms and comes down on the highest one
+  its peak (the learned rise) clears, so it too only targets that one.
 
 Platform ends are the boundaries: the bot never plans beyond a drawn
 platform's span, so drawn geometry alone prevents wall-banging.
@@ -252,8 +254,19 @@ class NavGraph:
                            "down_jump", COSTS["down_jump"])
             elif self.above(x, yp, exclude=i) == j:
                 rise = yp - q.y_at(x)
-                self._move(i, x, j, x, "up_flash", 0.0, rise)
                 self._move(i, x, j, x, "teleport", 0.0, rise)
+            if self._up_lands_on(j, x, yp, exclude=i):
+                self._move(i, x, j, x, "up_flash", 0.0, yp - q.y_at(x))
+
+    def _up_lands_on(self, j: int, x: float, y: float, exclude: int = -1) -> bool:
+        """Whether an up flash rising from ``y`` at column ``x`` comes
+        down on platform ``j``: the highest platform its peak clears — or,
+        with none that low, the nearest above (an exploratory reach)."""
+        peak = self.reach.get("up_flash").rise
+        hit = self.highest_above(x, y, peak, exclude=exclude)
+        if hit is not None:
+            return hit[0] == j
+        return self.above(x, y, exclude=exclude) == j
 
     def _link_rope_tiers(self, i: int, p: Platform) -> None:
         """Rope lift grabs the highest platform within ``rope_max_px``."""
@@ -378,7 +391,8 @@ class NavGraph:
                     self._move(i, takeoff, j, land_x, kind, dx, rise)
             else:
                 self._move(i, takeoff, j, land_x, "up_side_flash", dx, rise)
-                self._move(i, takeoff, j, land_x, "up_flash", dx, rise)
+                if self._up_lands_on(j, land_x, ey, exclude=i):
+                    self._move(i, takeoff, j, land_x, "up_flash", dx, rise)
                 self._move(i, takeoff, j, land_x, "teleport", dx, rise)
 
     # -- Queries ------------------------------------------------------------------

@@ -215,6 +215,31 @@ class HeldKeyTests(unittest.TestCase):
         self.assertTrue(srv.has_frame_clients())
 
 
+class StaleCommandTests(unittest.TestCase):
+    def _run_writer(self, srv):
+        srv.stop_event.clear()
+        t = threading.Thread(target=srv._writer_loop, daemon=True)
+        t.start()
+        deadline = time.monotonic() + 1.0
+        while not srv.cmd_queue.empty() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.05)
+        srv.stop_event.set()
+        t.join(1.0)
+
+    def test_timed_out_key_down_is_dropped_but_key_up_still_sent(self):
+        manager = Mock()
+        manager.send_payload.return_value = True
+        srv = RemoteControlServer("", 0, _callbacks(), serial_manager=manager)
+        past = time.monotonic() - 1.0
+        srv.cmd_queue.put(("hid|key|down|left", True, None, 1.5, past))
+        srv.cmd_queue.put(("hid|key|up|left", True, None, 1.5, past))
+        srv.cmd_queue.put(("hid|key|down|right", True, None, 1.5, time.monotonic() + 5))
+        self._run_writer(srv)
+        sent = [c.args[0] for c in manager.send_payload.call_args_list]
+        self.assertEqual(sent, ["hid|key|up|left", "hid|key|down|right"])
+
+
 class HttpStaticTests(unittest.TestCase):
     def _dist(self, tmp):
         dist = Path(tmp) / "dist"

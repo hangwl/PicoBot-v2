@@ -203,9 +203,16 @@ Bot-controlled movement looks like a player farming, not a macro:
   instead of walking into the gap.
 - Landings are scored tolerantly (platform x-span + row slack): a move
   that succeeded never shrinks the reach model — only a real miss does.
-- After each move the bot waits for the player dot to be stable within
-  ~1.5px (≤0.7s), not for exact-equal readings — detection jitter no
-  longer adds a fixed stall to every move.
+- After each move the bot waits for the landing: first for the
+  character to leave its takeoff spot (up to 1.2s for a rope lift, whose
+  rope grapples while the character stands still), then for two steady
+  reads **on a drawn platform** (≤2.5s) — steadiness alone is not enough,
+  since the top of a jump is steady too, in the air.
+- An up flash comes down on the **highest** platform its peak (the
+  learned rise) clears, so the graph only plans it onto that one — never
+  onto a lower tier it would fly past.
+- A miss only counts against a move's reach when it fell short of the
+  plan; one that overshot or came down elsewhere says nothing about reach.
 - Re-press gaps are tunable: `flash_repress_seconds` (jump → flash) and
   `combo_repress_seconds` (between chained flashes).
 - The **up flash** is timed from the first jump's key-down: the re-press

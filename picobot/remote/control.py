@@ -240,7 +240,8 @@ class RemoteControlServer:
         self.callbacks = callbacks
         self.serial_manager = serial_manager or SerialManager(serial_port_name)
         self.ssl_context = ssl_context
-        self.cmd_queue: "queue.Queue[tuple[str, bool, Optional[queue.Queue[bool]], Optional[float]]]" = queue.Queue()
+        # (command, wait_ack, response queue, ack timeout, give-up time)
+        self.cmd_queue: "queue.Queue[tuple]" = queue.Queue()
         self.stop_event = threading.Event()
         self.writer_thread: Optional[threading.Thread] = None
         self.bridge: Optional[AsyncWebsocketBridge] = None
@@ -270,6 +271,7 @@ class RemoteControlServer:
                 return
             # Degraded mode: WS/HTTP still come up; payloads fail on send.
         self.serial_manager.register_line_callback(self._on_serial_line)
+        self.serial_manager.on_lost = self._on_serial_lost
         self.stop_event.clear()
         self.cmd_queue = queue.Queue()
         self.writer_thread = threading.Thread(target=self._writer_loop, daemon=True)
@@ -335,6 +337,7 @@ class RemoteControlServer:
         self.serial_manager = manager
         self.serial_port_name = port
         manager.register_line_callback(self._on_serial_line)
+        manager.on_lost = self._on_serial_lost
         self._log(f"serial connected on {port}")
         self._set_status("Remote: Serial connected")
         return True
@@ -342,12 +345,18 @@ class RemoteControlServer:
     def _writer_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
-                cmd, wait_ack, response_queue, timeout_s = self.cmd_queue.get(
+                cmd, wait_ack, response_queue, timeout_s, give_up = self.cmd_queue.get(
                     timeout=0.1
                 )
             except queue.Empty:
                 continue
             result = False
+            if give_up is not None and time.monotonic() > give_up and "|down|" in cmd:
+                # Its sender already timed out and treats the key as never
+                # pressed — a late press would stay held with nobody to
+                # release it. (Key-ups always go out.)
+                self._log(f"dropped stale command: {cmd.strip()}")
+                continue
             try:
                 self._log(f"TX: {cmd.strip()}")
                 result = self.serial_manager.send_payload(
@@ -364,11 +373,15 @@ class RemoteControlServer:
                     except queue.Full:
                         pass
 
+    def _on_serial_lost(self, why: str) -> None:
+        self._log(f"ERR: serial port lost ({why}) — reconnect it in Connection")
+        self._set_status("Remote: Serial lost")
+
     def _on_serial_line(self, line: str) -> None:
         if line == "ACK":
             self._log("RX: ACK")
-        elif line == "PICO_READY":
-            self._log("RX: PICO_READY")
+        elif line.startswith("PICO_READY"):
+            self._log(f"RX: {line}")
         else:
             self._log(f"RX: {line}")
 
@@ -392,12 +405,13 @@ class RemoteControlServer:
                 cmd = message
         if wait_ack:
             response_queue: "queue.Queue[bool]" = queue.Queue(maxsize=1)
-            self.cmd_queue.put((cmd, True, response_queue, timeout))
+            give_up = time.monotonic() + timeout
+            self.cmd_queue.put((cmd, True, response_queue, timeout, give_up))
             try:
                 return response_queue.get(timeout=timeout)
             except queue.Empty:
                 return False
-        self.cmd_queue.put((cmd, False, None, timeout))
+        self.cmd_queue.put((cmd, False, None, timeout, None))
         return True
 
     def wait_for_ready(self, timeout: float = 12.0) -> bool:

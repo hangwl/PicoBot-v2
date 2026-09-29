@@ -176,6 +176,19 @@ class PatrolTests(unittest.TestCase):
         self.assertTrue(halted.viz["patrol"]["halted"])
         self.assertIsNone(halted.viz["patrol"]["target"])
 
+    def test_anchor_removed_mid_run_replans_instead_of_crashing(self):
+        bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (100, 100), (180, 100)])
+        p = Patrol(bot, rng=random.Random(0))
+        p.tick()
+        self.assertTrue(p.plan)
+        bot.rot.remove_anchor(2)                  # dashboard delete
+        bot._ckpt_ban[2] = 9e9
+        for _ in range(6):
+            p.tick()
+        self.assertTrue(any("anchors changed" in l for l in bot.log_lines))
+        self.assertTrue(all(i < 2 for i, _, _ in p.plan))
+        self.assertEqual(bot._ckpt_ban, {})
+
     def test_repeated_misses_ban_the_anchor(self):
         bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)
         p = Patrol(bot, rng=random.Random(0))

@@ -31,6 +31,29 @@ the firmware relays raw down/up events verbatim, so inputs are
 indistinguishable from a physical keyboard. That is the point: the
 project exists because recorded macro playback is too easily detected.
 
+Wire protocol (one line each way):
+
+- Host → Pico: `<seq>:hid|key|down|<name>` (also `up`, `hid|mouse|…`,
+  `hid|move|dx|dy`, `hid|scroll|dx|dy`); `hello|handshake` (answered with
+  `PICO_READY`); `ka` keepalive when idle (~0.4s), no reply.
+- Pico → host: `ACK <seq>` / `NACK <seq>` (unknown key or command).
+  Replies are matched by number, so one that arrives after its sender
+  timed out can't be credited to a later command.
+- Versions: current firmware announces `PICO_READY v2`; only then does
+  the host number commands and send `ka`. Before that (or with older
+  firmware, which says plain `PICO_READY`) commands go out unnumbered and
+  bare `ACK`s are matched first-in-first-out. Update the host first — it
+  speaks both — then copy `CIRCUITPY/code.py` to the Pico.
+- Failsafe: the firmware releases every key and button when the DATA
+  port disconnects, and — once the host has shown it speaks v2 (a
+  numbered command or `ka`) — when nothing has arrived for 2s while
+  anything is held: a crashed or hung host never leaves a key down.
+- The command writer drops a key-*down* whose sender already timed out
+  (it would land with nobody to release it); key-ups always go out, and
+  `HidController` counts a key as held from the moment it tries to press it.
+- A serial port that fails underneath the reader is closed and reported
+  (`Remote: Serial lost`); waiting senders fail at once.
+
 ## Vision (`vision/`)
 
 - `game_window.py` — locates the game window, exposes the **client-area**
