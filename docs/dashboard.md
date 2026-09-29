@@ -63,21 +63,22 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
 - **Setup** — a readiness banner (map identified → platforms → anchors →
   moves measured; tap it for the next step) over a list of one-off tasks,
   each opening its own page:
-  - **Map and layout** — pin a map, `Auto-detect` (live identity), or
-    `New map…` (names the next layout save and pins it); detected map,
-    how it was resolved, the accepted title and score; Save layout /
-    Re-detect / Forget (confirmed); Tidy platforms / Undo platform /
-    Align platform to feet; and
-    the **platform fit** list — per platform, whether the feet settle on
-    its line or it was drawn too high / too low, with **Move to feet**
-    on flagged rows. Layout actions show the host's reply under the
-    buttons.
+  - **Map** — which map this is: pin a map, `Auto-detect` (live
+    identity), or `New map…` (*Create map* saves and pins it); detected
+    map, how it was resolved, the title on screen and the recorded one;
+    Save map / Re-detect / Forget (confirmed); Record / Clear title.
+  - **Layout** — the map's platforms, anchors and ropes: counts, Tidy
+    platforms / Undo platform / Align platform to feet, the **platform
+    fit** list (per platform, whether the feet settle on its line or it
+    was drawn too high / too low, with **Move to feet** on flagged rows)
+    and **learned ropes** (remove one, remove all, undo). Drawing itself
+    is on the desktop view.
   - **Class** — pick or create a profile (name, movement, air attacks,
-    teleport key). Switching applies live and stops the bot first.
+    teleport key), and its **move keys** (jump / rope lift / flash keys
+    and arrival radius; only edited fields are saved). Switching applies
+    live and stops the bot first.
   - **Skills** — the active skill book (the profile's kit when one is
     active); add or remove (confirmed) attacks, buffs, summons.
-  - **Move keys** — jump / rope lift / flash keys and arrival radius; only
-    edited fields are saved.
   - **Measure moves** — the class's moves with each one's status (not
     measured / measuring / px result / skip reason) and a **Measure**
     button per move (one move on its own), plus one button that
@@ -85,11 +86,15 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     While measuring, the top bar says so and Start bot is replaced.
     Flash classes also get **Up-flash timing**: a sweep button and the
     per-delay peaks (live while sweeping, then the saved sweep).
-  - **Patrol** (loop order + temperature),
-    **Connection** (Pico serial port, *Find the Pico* auto-probe that
+  - **Patrol** — loop order + temperature, and per-anchor **stats**
+    (visits, misses, skips by reason; Reset).
+  - **Connection** (Pico serial port, *Find the Pico* auto-probe that
     skips the open port, game window — locked while the bot runs).
 - **Log** — the event log with severity filters; while scrolled up it
   stops following and shows an "N new" chip that jumps back down.
+
+Actions that change something show the host's reply right under their
+buttons (`useReply`/`Reply` in `web/src/ui.tsx`).
 
 ### Drawing (desktop)
 

@@ -40,7 +40,7 @@ loop:
   Higher temperature → nearer-first sweeps → shorter loops, so *every*
   anchor (far ones too) comes around sooner; lower → more random,
   longer loops. An anchor that falls behind is being skipped or missed —
-  Setup → Map → **Anchors** lists visits, last visit, missed landings
+  Setup → Patrol → **Anchors** lists visits, last visit, missed landings
   and skips by reason per anchor (this host session; **Reset anchor
   stats** after fixing geometry).
 - **Bans**: no route, unreachable-at-plan-time (including anchors not

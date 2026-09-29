@@ -1,8 +1,9 @@
-// Setup → Class.
+// Setup → Class: profile, movement kit and its move keys.
 import { useState } from "preact/hooks";
 import { kitLabel } from "../live";
 import { type AppState, send } from "../protocol";
-import { Field, val } from "../ui";
+import { Field, Section, val } from "../ui";
+import { MoveKeys } from "./keys";
 
 export function ClassPage({ s }: { s: AppState }) {
   const [creating, setCreating] = useState(false);
@@ -23,6 +24,10 @@ export function ClassPage({ s }: { s: AppState }) {
       {creating
         ? <NewClass onDone={() => setCreating(false)} />
         : <button onClick={() => setCreating(true)}>New class</button>}
+      <Section title="Move keys"
+               hint={`Saved to ${s.classActive || "this class"}.`}>
+        <MoveKeys s={s} />
+      </Section>
     </div>
   );
 }

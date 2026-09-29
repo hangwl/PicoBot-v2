@@ -97,7 +97,7 @@ truth, no per-section map names.
   height — anything steeper is a real slope and stays, however gentle —
   and level segments on the same row (within 2px) that overlap or meet
   merge into one; pieces with a gap stay apart (the gap may be real). **Tidy
-  platforms** (Setup → Map) applies the same to a map drawn earlier.
+  platforms** (Setup → Layout) applies the same to a map drawn earlier.
   Anchors move with their line: when a platform is levelled, merged or
   tidied, each anchor standing on it keeps its x and its float above the
   line. **Undo** restores the list — and the anchors that edit moved,
@@ -106,7 +106,7 @@ truth, no per-section map names.
   **Clear** wipes. Tidying works while the bot runs: the bot reads the
   new lines on its next graph lookup (the loop in progress keeps its
   already-planned legs).
-- **Platform fit** (Setup → Map) — while the bot runs, it records where
+- **Platform fit** (Setup → Layout) — while the bot runs, it records where
   the feet settle on each drawn platform (a standstill of ±1px for 0.3s,
   with exactly one platform within 8px). Each platform lists its median
   offset: feet *below* the line mean it was drawn too high — the bot
@@ -117,7 +117,7 @@ truth, no per-section map names.
   right away), and **Undo platform** reverts it. Nothing moves on its
   own. Samples live in host memory and reset when a platform is
   redrawn.
-- **Align platform to feet** (Control pad, and the Map page) does the
+- **Align platform to feet** (Control pad, and Setup → Layout) does the
   same from one reading, without waiting for samples: stand still on a
   platform and tap it. The host takes three dot reads 0.1 s apart (all
   within 1px, else "stand still"), picks the drawn line spanning the
@@ -131,7 +131,7 @@ truth, no per-section map names.
   stops 5px above (stacked tiers stay separate, and boarding is a grab).
   Learned rope climbs cost `rope_penalty` — a last resort, since
   platforms are normally reachable via jumps/rope lift/teleport.
-- **Learned ropes** (Setup → Map) lists each rope by column and span;
+- **Learned ropes** (Setup → Layout) lists each rope by column and span;
   **Remove** drops one learned by mistake (it's re-learned if the bot
   really hangs there again), **Remove all** clears them (confirmed),
   **Undo rope** restores.

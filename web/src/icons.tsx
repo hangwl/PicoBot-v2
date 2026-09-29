@@ -19,6 +19,7 @@ const PATHS = {
   ruler: "M4 16 16 4l4 4L8 20zM8 12l2 2M11 9l2 2M14 6l2 2",
   route: "M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 17h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7",
   plug: "M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4",
+  layers: "M3 19.5h18M4 13.5h8.5M11.5 7.5H20M7 13.5v.01M16 7.5v.01",
 } as const;
 
 export type IconName = keyof typeof PATHS;

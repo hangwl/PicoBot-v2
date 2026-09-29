@@ -1,9 +1,9 @@
-// Setup → Move keys.
+// Move keys of the active class (shown on the Class page).
 import { useState } from "preact/hooks";
 import { type AppState, send } from "../protocol";
 import { Field, val } from "../ui";
 
-export function MoveKeysPage({ s }: { s: AppState }) {
+export function MoveKeys({ s }: { s: AppState }) {
   // null = untouched: show and send the live value.
   const [jump, setJump] = useState<string | null>(null);
   const [rope, setRope] = useState<string | null>(null);

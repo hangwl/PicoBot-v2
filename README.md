@@ -46,8 +46,9 @@ desktop, two columns. See [docs/dashboard.md](docs/dashboard.md).
 - **Home** — live view, bot status, one big Start/Stop.
 - **Control** — rune solving: hazard banner, view, arrow pad and keys.
   A rune or another player jumps here and vibrates the phone.
-- **Setup** — readiness checklist plus pages for map and layout, class,
-  skills, move keys, measuring moves, patrol and connection.
+- **Setup** — readiness checklist plus pages for the map, its layout,
+  class (with move keys), skills, measuring moves, patrol (with anchor
+  stats) and connection.
 - **Log** — levelled events (`debug < info < warn < error`) with
   severity filters; HID/serial chatter sits at debug.
 

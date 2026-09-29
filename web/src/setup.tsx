@@ -3,7 +3,7 @@ import { Icon, type IconName } from "./icons";
 import { kitLabel } from "./live";
 import { ClassPage } from "./pages/class";
 import { ConnectionPage } from "./pages/connection";
-import { MoveKeysPage } from "./pages/keys";
+import { LayoutPage } from "./pages/layout";
 import { MapPage } from "./pages/map";
 import { MeasurePage, allMeasured } from "./pages/measure";
 import { PatrolPage } from "./pages/patrol";
@@ -20,8 +20,8 @@ interface Step {
 function steps(s: AppState): Step[] {
   return [
     { ok: !!s.via, next: "identify the map", page: "map" },
-    { ok: s.platformsN > 0, next: "draw platforms (desktop)", page: "map" },
-    { ok: s.anchorsN > 0, next: "place anchors (desktop)", page: "map" },
+    { ok: s.platformsN > 0, next: "draw platforms (desktop)", page: "layout" },
+    { ok: s.anchorsN > 0, next: "place anchors (desktop)", page: "layout" },
     { ok: allMeasured(s), next: "measure moves", page: "measure" },
   ];
 }
@@ -51,26 +51,25 @@ interface Entry {
 
 const ENTRIES: Entry[] = [
   {
-    page: "map", title: "Map and layout", icon: "map",
-    sub: (s) => `${s.activeMap || s.detected || "auto-detect"} · ` +
-      `${s.platformsN} platforms · ${s.anchorsN} anchors`,
-    flag: (s) => (s.via && s.platformsN && s.anchorsN ? "ok" : "todo"),
+    page: "map", title: "Map", icon: "map",
+    sub: (s) => (s.activeMap || s.detected || "auto-detect") +
+      (s.via ? ` · ${s.via}` : ""),
+    flag: (s) => (s.via ? "ok" : "todo"),
+  },
+  {
+    page: "layout", title: "Layout", icon: "layers",
+    sub: (s) => `${s.platformsN} platforms · ${s.anchorsN} anchors · ` +
+      `${s.ropes.length} ropes`,
+    flag: (s) => (s.platformsN && s.anchorsN ? "ok" : "todo"),
   },
   {
     page: "class", title: "Class", icon: "user",
-    sub: (s) => kitLabel(s.classActive, s.profiles[s.classActive]),
+    sub: (s) => `${kitLabel(s.classActive, s.profiles[s.classActive])} · ` +
+      `jump ${s.jumpKey || "–"}`,
   },
   {
     page: "skills", title: "Skills", icon: "bolt",
     sub: (s) => skillSummary(s) || "No skills yet",
-  },
-  {
-    page: "keys", title: "Move keys", icon: "keyboard",
-    sub: (s) => [
-      `jump ${s.jumpKey || "–"}`,
-      `rope lift ${s.ropeKey || "combo"}`,
-      `flash ${s.flashKey || "jump key"}`,
-    ].join(" · "),
   },
   {
     page: "measure", title: "Measure moves", icon: "ruler",
@@ -82,7 +81,8 @@ const ENTRIES: Entry[] = [
   },
   {
     page: "patrol", title: "Patrol", icon: "route",
-    sub: (s) => `${s.policy} · temperature ${s.temp}`,
+    sub: (s) => `${s.policy} · temperature ${s.temp}` +
+      (s.anchorStats.length ? ` · ${s.anchorStats.length} anchors tracked` : ""),
   },
   {
     page: "connection", title: "Connection", icon: "plug",
@@ -99,7 +99,8 @@ function skillSummary(s: AppState): string {
 }
 
 export function Setup({ s, wide }: { s: AppState; wide: boolean }) {
-  const page = s.route.split("/")[1];
+  const sub = s.route.split("/")[1];
+  const page = sub === "keys" ? "class" : sub;     // Move keys live on Class
   const entry = ENTRIES.find((e) => e.page === page);
   if (entry) {
     return (
@@ -141,10 +142,10 @@ export function Setup({ s, wide }: { s: AppState; wide: boolean }) {
 
 function SetupPage({ page, s, wide }: { page: string; s: AppState; wide: boolean }) {
   switch (page) {
-    case "map": return <MapPage s={s} wide={wide} />;
+    case "map": return <MapPage s={s} />;
+    case "layout": return <LayoutPage s={s} wide={wide} />;
     case "class": return <ClassPage s={s} />;
     case "skills": return <SkillsPage s={s} />;
-    case "keys": return <MoveKeysPage s={s} />;
     case "measure": return <MeasurePage s={s} />;
     case "patrol": return <PatrolPage s={s} />;
     case "connection": return <ConnectionPage s={s} />;
