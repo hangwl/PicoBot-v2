@@ -265,12 +265,19 @@ class BotHost:
                 Path(__file__).resolve().parent.parent / "web" / "dist"
             ),
             ws_scheme="wss" if self.remote.ssl_context else "ws",
+            # Every page request lands in the event log (debug), so a phone
+            # that "won't load" shows whether its request ever arrived.
+            on_log=lambda m, level: self.bus.emit("http", m, level=level),
         )
         self.http.start()
         self.streamer.start()
-        self.bus.emit("status", f"dashboard: http://0.0.0.0:{self.config.http_port}")
-        logger.info("BotHost running (ws :%s, http :%s)",
-                    self.remote.ws_port, self.config.http_port)
+        urls = self.http.urls()
+        self.bus.emit("status", "dashboard: " + ", ".join(urls))
+        logger.info("BotHost running (ws :%s, http :%s%s)",
+                    self.remote.ws_port, self.http.http_port,
+                    "" if self.http.dual_stack else ", IPv4 only")
+        for url in urls:
+            logger.info("dashboard: %s   (health check: add /health)", url)
         try:
             threading.Event().wait()
         except KeyboardInterrupt:

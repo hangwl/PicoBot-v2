@@ -222,3 +222,14 @@ fixed that — all 15 captured reads exact afterwards.
   changes maps. Learned ropes between stacked tiers could run down onto
   the lower platform (a merge kept the lowest end); the bottom now stays
   5px above it, both when learning and when the graph is built.
+- **Dashboard not loading on the phone** (2026-09-29): impossible to
+  diagnose — the HTTP handler swallowed every error and logged nothing.
+  Looking closer: it bound IPv4 only (a Tailscale name resolves to an
+  IPv6 address too, and IPv6 attempts hung rather than failing fast),
+  sent no Content-Length (a cut-off transfer looked complete), and —
+  worst — `HTTPServer` sets SO_REUSEADDR, which on Windows lets a second
+  process bind a port already in use: a stale or hung host could keep
+  receiving some of the connections, and the "next free port" fallback
+  could never trigger. Now: dual-stack, exclusive bind with port
+  fallback, Content-Length, per-connection timeout, every request and
+  error logged as an `http` event, `/health`, and real URLs at startup.

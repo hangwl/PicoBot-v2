@@ -55,7 +55,7 @@ class AsyncWebsocketBridge:
 
     def __init__(
         self,
-        host: str,
+        host: Optional[str],
         port: int,
         *,
         message_handler: Callable,
@@ -280,7 +280,7 @@ class RemoteControlServer:
         )
         self._job_thread.start()
         self.bridge = AsyncWebsocketBridge(
-            host="0.0.0.0",
+            host=None,                  # every interface, IPv4 and IPv6
             port=self.ws_port,
             message_handler=self._handle_ws_message,
             on_port_bound=self._on_ws_port_bound,

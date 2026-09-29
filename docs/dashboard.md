@@ -1,13 +1,29 @@
 # Dashboard
 
 Served at `http://localhost:8000` (Tailscale `http://<host>.ts.net:8000`
-for remote). Single-page WebSocket UI — commands are `|`-delimited
+or `http://100.x.y.z:8000` for remote — the host prints every reachable
+address at startup, Tailscale first). Both servers listen on IPv4 and
+IPv6, own their port exclusively (a stale host can't keep answering on
+it), and move to the next free port if it's taken. Single-page WebSocket UI — commands are `|`-delimited
 strings; pushes are `dash|{json}` text messages plus binary view frames.
 The page reconnects with backoff (0.5s → 10s) and uses `wss://` when
 `ws_tls` is on. A heartbeat catches links that die without closing (a
 sleeping phone, a network switch): 12s of silence — or no answer within
 3s of coming back to the foreground — drops the socket and reconnects,
 with the top bar showing *Reconnecting*.
+
+## Phone can't load the dashboard?
+
+1. Open `http://<address>:8000/health` on the phone. JSON back (`"ok":
+   true`) means the host is reachable — a page that still won't load is
+   an app problem; no answer means the network.
+2. Every page request is logged as an `http` event (Log → All): the
+   phone's address, the request and the status. No line for the phone's
+   attempt means it never reached the host — check Tailscale is on for
+   both devices, and that Windows Firewall allows `python.exe` inbound
+   on ports 8000 and 8765 for the network type Tailscale uses.
+3. Try the `100.x.y.z` address the host printed instead of the MagicDNS
+   name.
 
 ## The app
 

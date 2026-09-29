@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import time
 import unittest
@@ -238,6 +239,51 @@ class HttpStaticTests(unittest.TestCase):
             self.assertIn(b'content="8766"', body)
             ctype, body = srv._serve_static("/../secret.txt")
             self.assertNotIn(b"no", body)
+
+
+class HttpServingTests(unittest.TestCase):
+    def _get(self, url):
+        import urllib.request
+
+        with urllib.request.urlopen(url, timeout=3) as r:
+            return r.status, dict(r.headers), r.read()
+
+    def test_serves_with_length_health_and_logs(self):
+        with TemporaryDirectory() as tmp:
+            logs = []
+            dist = HttpStaticTests()._dist(tmp)
+            srv = EmbeddedHTTPServer(lambda: 8766, 0, static_dir=dist,
+                                     on_log=lambda m, l: logs.append((l, m)))
+            self.assertTrue(srv.start())
+            try:
+                port = srv.http_port
+                status, headers, body = self._get(f"http://127.0.0.1:{port}/")
+                self.assertEqual(status, 200)
+                self.assertEqual(int(headers["Content-Length"]), len(body))
+                self.assertIn(b'content="8766"', body)
+                _, _, health = self._get(f"http://127.0.0.1:{port}/health")
+                self.assertEqual(json.loads(health)["ws_port"], 8766)
+                if srv.dual_stack:
+                    self.assertEqual(self._get(f"http://[::1]:{port}/health")[0], 200)
+            finally:
+                srv.stop()
+            self.assertTrue(any("127.0.0.1 GET / " in m and "200" in m for _, m in logs))
+
+    def test_a_busy_port_moves_to_the_next_one_instead_of_sharing(self):
+        first = EmbeddedHTTPServer(lambda: 8765, 0)
+        self.assertTrue(first.start())
+        try:
+            logs = []
+            second = EmbeddedHTTPServer(lambda: 8765, first.http_port,
+                                        on_log=lambda m, l: logs.append((l, m)))
+            self.assertTrue(second.start())
+            try:
+                self.assertNotEqual(second.http_port, first.http_port)
+                self.assertTrue(any(l == "warn" and "busy" in m for l, m in logs))
+            finally:
+                second.stop()
+        finally:
+            first.stop()
 
 
 class StreamerIdleTests(unittest.TestCase):
