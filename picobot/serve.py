@@ -732,8 +732,8 @@ class BotHost:
         stack = self._layout_undo.setdefault((entry.name, field), [])
         if payload == "undo":
             if stack:
-                segs, anchors = stack.pop()  # before the last edit (merges too)
-                self._restore_anchors(entry, anchors)
+                segs, moved = stack.pop()    # before the last edit (merges too)
+                self._restore_anchors(entry, moved)
             elif segs:
                 segs.pop()
             else:
@@ -747,7 +747,7 @@ class BotHost:
             )
             return
         if payload == "clear":
-            stack.append((segs, self._anchor_snapshot(entry)))
+            stack.append((segs, {}))
             setattr(entry, field, None)
             self._save_entry(entry)
             self.bus.emit("map", f"{label} cleared for {entry.name}")
@@ -761,14 +761,15 @@ class BotHost:
             if tidied == segs:
                 self.bus.emit("map", f"{entry.name}: {label}s already tidy")
                 return
-            stack.append((segs, self._anchor_snapshot(entry)))
             moved = self._resnap_anchors(entry, segs, tidied, *size)
+            stack.append((segs, moved))
             setattr(entry, field, tidied or None)
             self._save_entry(entry)
             self.bus.emit(
                 "map",
                 f"{entry.name}: tidied {label}s ({len(segs)} → {len(tidied)})"
-                + (f", moved {moved} anchor(s) with their lines" if moved else ""),
+                + (f", moved {len(moved)} anchor(s) with their lines"
+                   if moved else ""),
             )
             return
         try:
@@ -797,31 +798,32 @@ class BotHost:
             round(seg[0] / w, 4), round(seg[1] / h, 4),
             round(seg[2] / w, 4), round(seg[3] / h, 4),
         ])
-        stack.append((before, self._anchor_snapshot(entry)))
-        del stack[:-50]
+        moved = {}
         if field == "platforms":
             # Hand drags are never level: straighten, merge same-row overlaps.
             segs = self._tidy(segs, w, h)
-            self._resnap_anchors(entry, before, segs, w, h)
+            moved = self._resnap_anchors(entry, before, segs, w, h)
+        stack.append((before, moved))
+        del stack[:-50]
         setattr(entry, field, segs)
         self._save_entry(entry)
         self.bus.emit("map", f"{entry.name}: {label} {len(segs)} drawn")
 
     @staticmethod
-    def _anchor_snapshot(entry) -> dict:
-        return {a.name: (a.x, a.y) for a in entry.rotation.anchors}
-
-    @staticmethod
-    def _restore_anchors(entry, snap: dict) -> None:
+    def _restore_anchors(entry, moved: dict) -> None:
+        """Undo re-snaps: put back anchors an edit moved — only while they
+        are still where it left them (a deleted-and-replaced anchor can
+        reuse the name)."""
         for a in entry.rotation.anchors:
-            if a.name in snap:
-                a.x, a.y = snap[a.name]
+            m = moved.get(a.name)
+            if m is not None and (a.x, a.y) == m[1]:
+                a.x, a.y = m[0]
 
     @staticmethod
     def _resnap_anchors(entry, old_segs, new_segs, w: int, h: int) -> int:
         """Move anchors with the platform they stand on when its line
         moves (levelled, merged, redrawn). Each keeps its x and its own
-        float above the line. Returns how many moved."""
+        float above the line. Returns ``{name: (before, after)}``."""
         def rows(segs):
             out = []
             for s in segs or []:
@@ -837,7 +839,7 @@ class BotHost:
             return y0 + t * (y1 - y0)
 
         old, new = rows(old_segs), rows(new_segs)
-        moved = 0
+        moved = {}
         for a in entry.rotation.anchors:
             ax, ay = a.x * w, a.y * h
             # The platform it stands on — the planner's rule: up to 8px
@@ -862,8 +864,9 @@ class BotHost:
             new_row = min(cands, key=lambda r: abs(r - old_row))
             if abs(new_row - old_row) < 0.05:
                 continue
+            before = (a.x, a.y)
             a.y = round((new_row - float_px) / h, 4)
-            moved += 1
+            moved[a.name] = (before, (a.x, a.y))
         return moved
 
     @staticmethod

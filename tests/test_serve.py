@@ -632,6 +632,20 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|plat|undo|m1")
             self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 35.0, delta=0.2)
 
+    def test_undo_leaves_a_recreated_anchor_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self._with_anchors(tmp, [[0.1, 40 / 150, 0.9, 44 / 150]],
+                               [("a0", 20, 35)])
+            self.host._handle_command("layout|plat|tidy|m1")       # moves a0
+            # a0 deleted and a new a0 placed elsewhere (names are reused).
+            entry = MapStore(tmp).get("m1")
+            entry.rotation.anchors = [Anchor("a0", 150 / 200, 90 / 150)]
+            self.host.maps.save(entry)
+            self.host.maps.reload()
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertEqual(self._anchor_px(tmp)["a0"], (150.0, 90.0))
+
     def test_merging_a_drag_moves_anchors_on_the_merged_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

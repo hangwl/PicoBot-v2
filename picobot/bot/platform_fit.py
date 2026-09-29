@@ -9,7 +9,6 @@ It only reports — drawn geometry stays authoritative.
 
 from __future__ import annotations
 
-import math
 import statistics
 import threading
 import time
@@ -17,19 +16,21 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 Seg = Tuple[float, float, float, float]
 
-FLAT_PX = 3.0        # a drag whose ends differ this little is level
-FLAT_DEG = 8.0       # ... or this shallow
-MERGE_PX = 2.0       # same row within this, touching within this
+# Levelling moves each end by half the height difference; the planner
+# tolerates feet 2px below a line, so level only up to 4px. Wobble is a
+# pixel amount, not an angle — a long gentle ramp is a real slope.
+FLAT_PX = 4.0
+MERGE_PX = 2.0       # rows this close are the same ledge ...
+TOUCH_PX = 0.5       # ... when the pieces overlap or meet (a gap is real)
 
 
-def straighten(seg: Seg, flat_px: float = FLAT_PX, flat_deg: float = FLAT_DEG) -> Seg:
+def straighten(seg: Seg, flat_px: float = FLAT_PX) -> Seg:
     """Level a near-flat segment at its mean height; keep real slopes.
     Always returned left-to-right."""
     x0, y0, x1, y1 = seg
     if x1 < x0:
         x0, y0, x1, y1 = x1, y1, x0, y0
-    dx, dy = x1 - x0, y1 - y0
-    if abs(dy) <= flat_px or (dx > 0 and math.degrees(math.atan2(abs(dy), dx)) <= flat_deg):
+    if abs(y1 - y0) <= flat_px:
         y = (y0 + y1) / 2.0
         return (x0, y, x1, y)
     return (x0, y0, x1, y1)
@@ -41,12 +42,13 @@ def _level(s: Seg) -> bool:
 
 def _touch(a: Seg, b: Seg, merge_px: float) -> bool:
     return (abs(a[1] - b[1]) <= merge_px
-            and b[0] <= a[2] + merge_px and a[0] <= b[2] + merge_px)
+            and b[0] <= a[2] + TOUCH_PX and a[0] <= b[2] + TOUCH_PX)
 
 
 def merge_level(segs: Sequence[Seg], merge_px: float = MERGE_PX) -> List[Seg]:
     """Merge level segments on the same row (within ``merge_px``) whose
-    spans overlap or touch; the row is the length-weighted mean. Sloped
+    spans overlap or meet; the row is the length-weighted mean. Pieces
+    with a gap between them stay apart (the gap may be real). Sloped
     segments pass through untouched."""
     sloped = [s for s in segs if not _level(s)]
     level = [s for s in segs if _level(s)]

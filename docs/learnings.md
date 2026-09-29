@@ -190,4 +190,9 @@ fixed that — all 15 captured reads exact afterwards.
   time; a fit diagnostic reports where the feet actually settle per
   platform. Auto-correcting from those samples was deferred, and so was
   drawing learned lines over the view — too cluttered on a map with many
-  platforms.
+  platforms. First cut bugs: an "under 8°" levelling rule flattened long
+  gentle ramps (a 12px rise over 100px ended 6px off — hand wobble is a
+  pixel amount, not an angle; now ≤4px only), merging pieces "within
+  2px" bridged real gaps (now overlap or meet only), and undo restored
+  anchors by name although names are reused (now only anchors the edit
+  moved, and only while they're still where it left them).

@@ -12,9 +12,14 @@ class StraightenTests(unittest.TestCase):
     def test_near_flat_drag_is_levelled_at_its_mean(self):
         self.assertEqual(straighten((10, 50, 90, 52)), (10, 51.0, 90, 51.0))
 
-    def test_shallow_long_drag_is_levelled(self):
-        # 6px over 100px is ~3.4 degrees: a wobbly hand, not a slope.
-        self.assertEqual(straighten((0, 40, 100, 46)), (0, 43.0, 100, 43.0))
+    def test_four_px_wobble_is_levelled(self):
+        self.assertEqual(straighten((0, 40, 100, 44)), (0, 42.0, 100, 42.0))
+
+    def test_long_gentle_ramp_is_a_real_slope(self):
+        # 12px over 100px (6.8 degrees): levelling it would leave the ends
+        # 6px off — beyond the planner's 2px-below tolerance.
+        self.assertEqual(straighten((0, 40, 200, 52)), (0, 40, 200, 52))
+        self.assertEqual(straighten((0, 40, 100, 46)), (0, 40, 100, 46))
 
     def test_real_slope_is_kept(self):
         self.assertEqual(straighten((0, 40, 40, 60)), (0, 40, 40, 60))
@@ -30,6 +35,15 @@ class MergeTests(unittest.TestCase):
         x0, y0, x1, y1 = got[0]
         self.assertEqual((x0, x1), (10, 120))
         self.assertTrue(50 < y0 < 51 and y0 == y1)
+
+    def test_a_gap_between_pieces_is_kept(self):
+        # Same row, 2px apart: could be a real hole — never bridge it.
+        got = merge_level([(10, 50, 60, 50), (62, 50, 120, 50)])
+        self.assertEqual(len(got), 2)
+
+    def test_pieces_that_meet_merge(self):
+        got = merge_level([(10, 50, 60, 50), (60, 51, 120, 51)])
+        self.assertEqual(len(got), 1)
 
     def test_different_rows_stay_apart(self):
         got = merge_level([(10, 50, 60, 50), (20, 56, 70, 56)])

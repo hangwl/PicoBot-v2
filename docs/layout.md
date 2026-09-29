@@ -68,15 +68,19 @@ truth, no per-section map names.
   detection over pinning.
 - **Draw plats** — drag a segment along each platform line on the Panel
   view; stays armed for successive drags. Hand drags are tidied as they
-  are saved: a near-flat drag (ends within 3px, or under 8°) is levelled
-  at its mean height — real slopes stay — and level segments on the same
-  row (within 2px) that overlap or touch merge into one. **Tidy
+  are saved: a near-flat drag (ends within 4px) is levelled at its mean
+  height — anything steeper is a real slope and stays, however gentle —
+  and level segments on the same row (within 2px) that overlap or meet
+  merge into one; pieces with a gap stay apart (the gap may be real). **Tidy
   platforms** (Setup → Map) applies the same to a map drawn earlier.
   Anchors move with their line: when a platform is levelled, merged or
   tidied, each anchor standing on it keeps its x and its float above the
-  line. **Undo** restores the list — and those anchors — as they were
-  before the last edit (so undoing a merge brings back what was there),
-  **Clear** wipes.
+  line. **Undo** restores the list — and the anchors that edit moved,
+  if they're still where it left them — as they were before the last
+  edit (so undoing a merge brings back what was there),
+  **Clear** wipes. Tidying works while the bot runs: the bot reads the
+  new lines on its next graph lookup (the loop in progress keeps its
+  already-planned legs).
 - **Platform fit** (Setup → Map) — while the bot runs, it records where
   the feet settle on each drawn platform (a standstill of ±1px for 0.3s,
   with exactly one platform within 8px). Each platform lists its median
