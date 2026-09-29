@@ -1,7 +1,7 @@
 import unittest
 
 from picobot.bot.config import BotConfig
-from picobot.bot.timing import human_delay, human_hold, jittered
+from picobot.bot.timing import human_delay, human_hold
 
 
 class BotConfigTests(unittest.TestCase):
@@ -146,10 +146,24 @@ class TimingTests(unittest.TestCase):
         self.assertLess(mean, 1.2)
 
     def test_human_hold_range(self):
-        for _ in range(200):
-            value = human_hold()
-            self.assertGreaterEqual(value, 0.04)
-            self.assertLessEqual(value, 0.25)
+        for key in (None, "a", "left"):
+            for _ in range(200):
+                value = human_hold(key)
+                self.assertGreaterEqual(value, 0.045)
+                self.assertLessEqual(value, 0.22)
+
+    def test_arrow_holds_run_longer(self):
+        import statistics
+
+        arrows = statistics.median(human_hold("left") for _ in range(2000))
+        letters = statistics.median(human_hold("a") for _ in range(2000))
+        self.assertGreater(arrows, letters)
+
+    def test_holds_are_right_skewed(self):
+        import statistics
+
+        s = [human_hold("a") for _ in range(4000)]
+        self.assertGreater(statistics.mean(s), statistics.median(s))
 
     def test_human_between_is_clamped_lognormal(self):
         from picobot.bot.timing import human_between
@@ -160,10 +174,38 @@ class TimingTests(unittest.TestCase):
         above = sum(v > 0.17 for v in samples)
         self.assertTrue(150 < above < 350)       # centred near the mean
 
-    def test_jittered_stays_in_band(self):
-        for _ in range(100):
-            self.assertGreaterEqual(jittered(1.0), 0.85)
-            self.assertLessEqual(jittered(1.0), 1.15)
+    def test_tempo_differs_per_session_and_drifts_boundedly(self):
+        import random
+
+        from picobot.bot.timing import Tempo
+
+        clock = [0.0]
+        t = Tempo(rng=random.Random(3), clock=lambda: clock[0])
+        bases = set()
+        for _ in range(5):
+            t.new_session()
+            bases.add(round(t.base, 4))
+        self.assertEqual(len(bases), 5)
+        factors = []
+        for _ in range(2000):
+            clock[0] += 5.0
+            factors.append(t.factor())
+        self.assertGreater(max(factors) - min(factors), 0.02)   # it drifts
+        self.assertTrue(all(0.7 < f / t.base < 1.4 for f in factors))
+
+    def test_tempo_never_breaks_a_clamp(self):
+        from picobot.bot import timing
+        from picobot.bot.timing import human_between
+
+        old = timing.TEMPO
+        try:
+            for pace in (0.5, 2.0):
+                timing.TEMPO = type("T", (), {"factor": lambda self, p=pace: p})()
+                for _ in range(200):
+                    v = human_between(0.17, 0.11, 0.26)
+                    self.assertTrue(0.11 <= v <= 0.26)
+        finally:
+            timing.TEMPO = old
 
 
 if __name__ == "__main__":

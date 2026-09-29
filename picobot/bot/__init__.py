@@ -14,7 +14,7 @@ from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step
 from .skills import Skill, SkillBook
 from .smart_bot import SmartBot
-from .timing import human_between, human_delay, human_hold, jittered
+from .timing import human_between, human_delay, human_hold, new_session
 
 __all__ = [
     "Anchor",
@@ -32,5 +32,5 @@ __all__ = [
     "human_between",
     "human_delay",
     "human_hold",
-    "jittered",
+    "new_session",
 ]

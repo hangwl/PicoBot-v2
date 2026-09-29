@@ -204,6 +204,27 @@ Bot-controlled movement looks like a player farming, not a macro:
 - All gaps are log-normal (`timing.human_between`: clamped to the game's
   input windows, e.g. re-press 0.11–0.26s around 0.17s).
 
+## Human input timing (`timing.py`, `inputs.py`)
+
+- **Session tempo**: each bot start draws a pace (±~7%) that also drifts
+  slowly within the session (mean-reverting, minutes-scale). It scales
+  every mean; clamps are applied after it, so input windows hold.
+- **Key spacing**: `HidController` spaces consecutive key events (downs,
+  ups, and `release_all`) by a drawn gap (~25ms, 10–70ms) — fingers never
+  land at once. Time already spent (a deliberate sleep, the serial
+  round-trip) counts toward it, so timed sequences barely shift; where a
+  key leads the next press (Up before the up-flash re-press), the lead
+  sleep gives the gap back so the jump still lands on time.
+- **Holds**: lognormal around ~85ms (a bit longer for arrows and
+  modifiers), 45–220ms.
+- **Reactions** (~0.22s, 0.13–0.55s) only where a person reacts to
+  something unexpected: resuming after a pause clears, and noticing a
+  missed landing before re-routing. Planned move chains flow without
+  one. Walking lets go of the direction a moment (~40ms) after the
+  target is seen.
+- The Pico firmware polls every 1ms, so it doesn't round every key event
+  to 10ms.
+
 ## Skills (`skills.py`, dashboard Skills panel)
 
 Registered skills have `key`, `kind`, `cooldown`:

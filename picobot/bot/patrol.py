@@ -17,6 +17,7 @@ import time
 from typing import List, Optional, Tuple
 
 from .navgraph import Leg
+from .timing import human_reaction
 from .navigator import Navigator
 
 Point = Tuple[float, float]
@@ -138,6 +139,8 @@ class Patrol:
                 f"Patrol: missed a landing toward {rot.anchors[idx].name}"
                 f" ({self.fails})"
             )
+            # Noticing the missed landing takes a moment before re-routing.
+            bot.sleep(human_reaction())
             if self.fails >= 3:
                 self._ban(graph, pos, idx, "unreachable after retries")
             else:

@@ -65,7 +65,8 @@ use `core.autocrlf=true` (files are CRLF on disk, LF in the repo).
   change as a trigger — translucent UI defeats it (see learnings.md).
 - Event levels: `hid`/serial chatter is `debug`; think before emitting
   chatty kinds at `info`.
-- `CIRCUITPY/` is the Pico firmware (`code.py`).
+- `CIRCUITPY/` is the Pico firmware (`code.py`). Changes take effect
+  only once copied onto the Pico's CIRCUITPY drive.
 
 ## Debug frame captures
 

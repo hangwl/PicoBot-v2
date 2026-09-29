@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..timing import human_reaction
 from .base import POP, States, safety_transition
 
 
@@ -28,6 +29,8 @@ class Pause(States):
 
     def exit(self) -> None:
         self.bot.hid.release_all()
+        # A person notices the all-clear before carrying on.
+        self.bot.sleep(human_reaction())
 
 
 __all__ = ["Pause"]

@@ -35,7 +35,7 @@ from .machine import Machine
 from .maps import MapEntry, MapStore
 from .rotation import Anchor, Rotation, Step, resolve_coord
 from .skills import Skill, SkillBook
-from .timing import human_between
+from .timing import human_between, key_gap, new_session, release_lag
 
 logger = logging.getLogger(__name__)
 
@@ -389,7 +389,7 @@ class SmartBot(BotBase):
             self.hid.key_down(direction)
         try:
             self.hid.press(jk)
-            self.sleep(self._repress(self.config.flash_repress_seconds * 0.8))
+            self._lead_sleep(self._repress(self.config.flash_repress_seconds * 0.8))
             self.hid.key_down("up")
             self.hid.press(jk)
             self.hid.key_up("up")
@@ -405,7 +405,7 @@ class SmartBot(BotBase):
         self.hid.key_down(direction)
         try:
             self.hid.press(jk)
-            self.sleep(self._repress(self.config.flash_repress_seconds * 0.8))
+            self._lead_sleep(self._repress(self.config.flash_repress_seconds * 0.8))
             self.hid.key_down("up")
             self.hid.press(jk)
             self.sleep(self._repress(self.config.combo_repress_seconds))
@@ -484,6 +484,12 @@ class SmartBot(BotBase):
         self.sleep(self._repress(self.config.flash_repress_seconds))
         self.hid.press(jk)
         self._after_flash(0.34)
+
+    def _lead_sleep(self, seconds: float) -> None:
+        """Sleep before a key that leads the next press (Up before the
+        re-press jump): the HID spacing will put a gap between the two,
+        so take one out here — the jump still lands on time."""
+        self.sleep(max(0.0, seconds - key_gap()))
 
     def _repress(self, mean: float) -> float:
         """Log-normal gap around ``mean`` for a mid-air re-press."""
@@ -610,11 +616,14 @@ class SmartBot(BotBase):
             self.log(f"Vertically blocked ({verb}) — aborting leg")
             return False
 
-        def sync_dir(new_dir):
+        def sync_dir(new_dir, *, lag: bool = False):
             nonlocal held_dir
             if new_dir == held_dir:
                 return
             if held_dir:
+                if lag:
+                    # Seeing the goal and letting go aren't simultaneous.
+                    self.sleep(release_lag())
                 self.hid.key_up(held_dir)
             if new_dir:
                 self.hid.key_down(new_dir)
@@ -701,9 +710,9 @@ class SmartBot(BotBase):
                 if not flash_ok:
                     self._travel_attack()
                 if held_dir == "right" and dx <= stop_band:
-                    sync_dir(None)
+                    sync_dir(None, lag=True)
                 elif held_dir == "left" and dx >= -stop_band:
-                    sync_dir(None)
+                    sync_dir(None, lag=True)
                 if held_dir is None:
                     if dx > threshold:
                         sync_dir("right")
@@ -1381,6 +1390,7 @@ class SmartBot(BotBase):
     # -- Entry ---------------------------------------------------------------------
     def start(self) -> None:
         try:
+            new_session()               # this run's pace differs from the last
             if self.identity.current.title is None and not self.identity.pending:
                 self.identity.request("startup")
             if self._own_monitor:

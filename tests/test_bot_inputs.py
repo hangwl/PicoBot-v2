@@ -17,6 +17,49 @@ def _noop_sleep(_seconds):
     return None
 
 
+class KeySpacingTests(unittest.TestCase):
+    def _hid(self, gap=0.03):
+        clock = [0.0]
+        slept = []
+
+        def sleep(s):
+            slept.append(round(s, 4))
+            clock[0] += s
+
+        hid = HidController(FakeSender(), sleep=sleep, gap=lambda: gap,
+                            clock=lambda: clock[0])
+        return hid, clock, slept
+
+    def test_back_to_back_events_are_staggered(self):
+        hid, _, slept = self._hid()
+        hid.key_down("left")
+        hid.key_down("space")          # would land at the same instant
+        self.assertEqual(slept, [0.03])
+
+    def test_time_already_passed_counts_toward_the_gap(self):
+        hid, clock, slept = self._hid()
+        hid.key_down("left")
+        clock[0] += 0.02               # e.g. the serial round-trip
+        hid.key_down("space")
+        self.assertEqual(slept, [0.01])
+        clock[0] += 0.5                # a deliberate re-press sleep
+        hid.key_up("space")
+        self.assertEqual(slept, [0.01])
+
+    def test_releases_are_staggered_too(self):
+        hid, _, slept = self._hid()
+        hid.key_down("left")
+        hid.key_down("up")
+        hid.release_all()
+        self.assertEqual(len(slept), 3)
+
+    def test_no_gap_when_disabled(self):
+        hid = HidController(FakeSender(), sleep=_noop_sleep, gap=None)
+        hid.key_down("left")
+        hid.key_down("space")
+        self.assertEqual(hid.held_keys, frozenset({"left", "space"}))
+
+
 class HidControllerTests(unittest.TestCase):
     def test_press_emits_down_then_up(self):
         sender = FakeSender()

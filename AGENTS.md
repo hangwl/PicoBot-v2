@@ -57,7 +57,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
   is flash hops — jump, then the mid-air re-press — with **1–2 attacks
   woven after the flash triggers** (never before: it eats the re-press
   window). Walk only for short final approaches. Delays are log-normal
-  (`timing.human_between`/`human_delay`), never flat `uniform`.
+  (`timing.human_between`/`human_delay`), never flat `uniform`, and
+  scaled by the session `TEMPO` (means only — clamps still hold).
+  `HidController` spaces consecutive key events; don't bypass it with
+  raw sends.
 - **Loop ordering is a policy** (`patrol_policy`): `weighted` roulette
   (∝ 1/cost^temp, default) or `greedy` cheapest-next — both ban
   unreachable anchors and execute the plan strictly.

@@ -171,3 +171,14 @@ fixed that — all 15 captured reads exact afterwards.
   went missing for 2.5s — undrawn ground, UI over the minimap or a
   loading screen all produced ropes and blind jumps. A Down probe now
   confirms the hang, and a missing dot only waits.
+- **Input timing** (2026-09-30): gaps inside moves were already
+  lognormal, but nothing spaced consecutive key events (only the ~8ms
+  serial round-trip, nearly constant), holds were Gaussian and the same
+  for every key, there were no reaction times, and every session had
+  identical statistics. Added a drifting session tempo, per-event
+  spacing in `HidController`, key-dependent lognormal holds, and
+  reactions at unexpected events. A virtual-clock simulation of the real
+  move code showed the flash re-press unchanged and the up-flash within
+  ~8ms of before once the Up lead sleep gives back its gap (without that
+  it landed ~25ms late). Tempo differs per process, so timing medians
+  must be compared in one process with `TEMPO` pinned.

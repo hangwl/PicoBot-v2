@@ -239,4 +239,5 @@ while True:
 
                 except Exception as e:
                     print(f"Could not parse command: '{command_line}'. Error: {e}")
-    time.sleep(0.01)
+    # 1ms keeps input timing fine-grained (10ms rounded every event).
+    time.sleep(0.001)
