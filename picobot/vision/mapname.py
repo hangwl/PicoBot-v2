@@ -61,13 +61,79 @@ def normalize_name(text: Optional[str]) -> str:
     return re.sub(r"[^0-9a-z]+", "", text.lower())
 
 
+SIBLING_CAP = 0.6       # a sibling map's title scores at most this
+
+
+def _tokens(text: str):
+    return re.findall(r"[a-z]+|\d+", text.lower())
+
+
+def _word_in(word: str, words, joined: str) -> bool:
+    """``word`` appears in ``words`` allowing an OCR misread, or inside
+    ``joined`` (the OCR dropped a space and merged two words)."""
+    from difflib import SequenceMatcher
+
+    if word in joined:
+        return True
+    return any(
+        w in word or SequenceMatcher(None, word, w).ratio() >= 0.75
+        for w in words
+    )
+
+
+def looks_like_sibling(ocr_text: Optional[str], candidate: Optional[str]) -> bool:
+    """True when two titles name *different* maps of one family rather
+    than one title misread: a different number (``Ramparts 2`` vs ``3``),
+    an extra real word (``Storehouse Entrance`` vs ``Storehouse``), or a
+    complete read that stops where the stored title goes on. OCR noise
+    stays forgiven: short junk tokens (region-icon residue), split or
+    merged words, and a title clipped mid-word (``Happir``)."""
+    o, c = _tokens(ocr_text or ""), _tokens(candidate or "")
+    if not o or not c:
+        return False
+    o_nums = [t for t in o if t.isdigit()]
+    c_nums = [t for t in c if t.isdigit()]
+    if o_nums and c_nums and o_nums != c_nums:
+        return True
+    from difflib import SequenceMatcher
+
+    c_words = [t for t in c if not t.isdigit()]
+    o_words = [t for t in o if not t.isdigit()]
+    c_joined, o_joined = "".join(c), "".join(o)
+    # Words before the stored title starts are a region prefix or icon
+    # residue ("Lake of Oblivion" + stored "Weathered Land of …").
+    start = next(
+        (i for i, t in enumerate(o)
+         if SequenceMatcher(None, t, c[0]).ratio() >= 0.75), 0)
+    tail = o[start:]
+    for n, w in enumerate(tail):
+        if w.isdigit() or len(w) < 4 or _word_in(w, c_words, c_joined):
+            continue
+        if n == len(tail) - 1 and any(
+            SequenceMatcher(None, w, cw[: len(w)]).ratio() >= 0.75
+            for cw in c_words
+        ):
+            continue                        # clipped mid-word ("Happir")
+        return True                         # an extra real word
+    last = o[-1]
+    if len(last) >= 3:
+        idx = [i for i, t in enumerate(c) if t == last]
+        if idx:
+            rest = c[idx[-1] + 1:]
+            if any(t.isdigit() or (len(t) >= 4 and not _word_in(t, o_words, o_joined))
+                   for t in rest):
+                return True                 # complete read, stored title goes on
+    return False
+
+
 def title_score(ocr_text: Optional[str], candidate: Optional[str]) -> float:
     """0–1 similarity of an OCR'd title to a stored name.
 
     Best of: substring containment (weighted by how much of the OCR text
     the candidate covers), prefix similarity for titles the client
     clipped (``Happir`` vs ``Happiness``), and whole-string similarity
-    for misreads.
+    for misreads. A sibling map's title (:func:`looks_like_sibling`) is
+    capped at ``SIBLING_CAP`` — similar is not the same map.
     """
     from difflib import SequenceMatcher
 
@@ -82,6 +148,8 @@ def title_score(ocr_text: Optional[str], candidate: Optional[str]) -> float:
     if len(ocr) >= 6 and len(ocr) < len(cand):
         prefix = SequenceMatcher(None, ocr, cand[: len(ocr)]).ratio()
         score = max(score, 0.85 * prefix + 0.15 * len(ocr) / len(cand))
+    if score > SIBLING_CAP and looks_like_sibling(ocr_text, candidate):
+        score = SIBLING_CAP
     return min(1.0, score)
 
 

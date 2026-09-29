@@ -233,3 +233,14 @@ fixed that — all 15 captured reads exact afterwards.
   could never trigger. Now: dual-stack, exclusive bind with port
   fallback, Content-Length, per-connection timeout, every request and
   error logged as an `http` event, `/health`, and real URLs at startup.
+- **Wrong map from a right read** (2026-09-29): standing in "Identisk
+  Tisk Food Storehouse Entrance", the bot resolved a stored map aliased
+  "Tisk Food Storehouse" at 100% — that file's recorded title *was* the
+  Entrance's (saved while standing there). Behind it, the fuzzy matcher
+  treated sibling maps as misreads: "…Storehouse" vs "…Storehouse
+  Entrance" and "Ramparts 2" vs "3" scored ~0.96 (above the 0.93 bar),
+  real captures show "Limina End of the World 1-2" resolving to a stored
+  2-6, and with both siblings stored the exact title failed the 0.05
+  margin. Siblings (different number, extra real word, complete read
+  that stops early) are now capped at 0.6, exact titles win outright,
+  and the recorded title is visible and fixable on the Map page.

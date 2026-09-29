@@ -24,6 +24,7 @@ and follows the same view.
 | `bot|start` / `bot|stop` / `bot|query` | bot lifecycle; `query` replies with a `bot` event |
 | `map|list` | re-send the maps payload |
 | `map|set|<name>` | pin a map ("" = auto-detect) |
+| `map|title|record\|clear[|<name>]` | set a map's recorded title to the title on screen now (refused if another map has it), or clear it; blank name = the resolved map |
 | `dash|view|<minimap\|window\|title>` | switch the streamed view |
 | `dash|fps|<n>` | stream rate (1–30) |
 | `dash|subscribe|frames` | opt in to binary view frames |
@@ -69,7 +70,7 @@ Text, `dash|` + JSON:
 | `hello` | `{protocol: 1}` — first message on connect |
 | `evt` | `{kind, level, msg, t}` — log lines |
 | `history` | `{items: [evt…]}` — replay on connect |
-| `maps` | `{maps, active, detected, via, title, score, reading, platforms_n, anchors_n, platform_fit, ropes}` — `ropes`: learned ropes `{key, x, top, bottom}` (minimap px); — `platform_fit`: per drawn platform `{x0, x1, row, n, key, offset?, spread?, coverage?}` (minimap px; offset = median feet − row, + = drawn too high); re-sent at most every 5s while samples arrive |
+| `maps` | `{maps, active, detected, via, title, score, reading, platforms_n, anchors_n, platform_fit, ropes, recorded_title}` — `recorded_title`: the resolved map's stored title; — `ropes`: learned ropes `{key, x, top, bottom}` (minimap px); — `platform_fit`: per drawn platform `{x0, x1, row, n, key, offset?, spread?, coverage?}` (minimap px; offset = median feet − row, + = drawn too high); re-sent at most every 5s while samples arrive |
 | `class` | `{active, profiles: {name: {travel, air_attacks, teleport_key}}, policy, temp, measured, measure_plan, measured_moves}` — `measure_plan` is the class's measurement moves, `measured_moves` those measured, `measured` their count; re-sent when a measurement ends |
 | `measure` | `{running, move, plan, results: {move: {dx} \| {rise} \| {skipped}}}` — on every change of a run, on `measure|status`, and on class switches |
 | `skills` | `{source, inherited, skills}` — the book the bot uses: `source` is the active profile or `global`; `inherited` = the profile has no kit of its own and uses the global book |

@@ -177,6 +177,15 @@ class MapStore:
         sharing a street name score — and lead the runner-up by
         ``margin``; otherwise the result is ``(None, best_score)``.
         """
+        from ..vision.mapname import normalize_name
+
+        # The exact title wins outright — a sibling's near score must not
+        # make it "ambiguous".
+        want = normalize_name(ocr_text)
+        if want:
+            for e in self.load_all():
+                if normalize_name(e.map_name) == want:
+                    return e, 1.0
         scored = sorted(
             (
                 (max(title_score(ocr_text, e.map_name),

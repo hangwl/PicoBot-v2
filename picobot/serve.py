@@ -920,6 +920,49 @@ class BotHost:
             return
         self._layout_segments(msg, "platforms", "platform")
 
+    def _map_title(self, msg: str) -> None:
+        """map|title|record|clear[|<name>] — set a map's recorded title
+        to the title on screen now, or clear it. Blank name = the map the
+        identity resolved."""
+        from .vision.mapname import normalize_name
+
+        parts = msg.split("|")
+        op = parts[2] if len(parts) > 2 else ""
+        name = parts[3].strip() if len(parts) > 3 else ""
+        entry = self.maps.get(name) if name else self._resolved_entry()
+        if entry is None:
+            self.bus.emit("error", "pick the map first (no map resolved)")
+            return
+        if op == "clear":
+            if not entry.map_name:
+                self.bus.emit("map", f"{entry.name} has no recorded title")
+                return
+            entry.map_name = None
+            self._save_entry(entry)
+            self.bus.emit("map", f"{entry.name}: recorded title cleared")
+            return
+        if op != "record":
+            return
+        title = self.identity.current.title
+        if not title:
+            self.bus.emit("error", "no title read yet — press Re-detect and wait")
+            return
+        other = next(
+            (e for e in self.maps.load_all()
+             if e.name != entry.name
+             and normalize_name(e.map_name) == normalize_name(title)),
+            None,
+        )
+        if other is not None:
+            self.bus.emit(
+                "error",
+                f"that title is already recorded for {other.name} — clear it there first",
+            )
+            return
+        entry.map_name = title
+        self._save_entry(entry)
+        self.bus.emit("map", f"{entry.name}: recorded title set to \"{title}\"")
+
     def _layout_rope(self, msg: str) -> None:
         """layout|rope|del|<x0,y0,x1,y1>[|<name>] removes one learned rope
         (its stored line); layout|rope|clear|undo[|<name>] as for
@@ -1157,6 +1200,8 @@ class BotHost:
             self._patrol_policy_set(msg.split("|", 2)[2])
         elif msg.startswith("patrol|temp|"):
             self._patrol_policy_set(temp=msg.split("|", 2)[2])
+        elif msg.startswith("map|title|"):
+            self._map_title(msg)
         elif msg.startswith("map|set|"):
             self._set_map(msg.split("|", 2)[2])
         elif msg == "measure|start":
@@ -1228,6 +1273,9 @@ class BotHost:
                 self._live_region(),
             ),
             "ropes": self._rope_rows(entry),
+            # The stored title identity matches on — visible so a
+            # mislabelled map (a title recorded on the wrong screen) shows.
+            "recorded_title": entry.map_name if entry else None,
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
 

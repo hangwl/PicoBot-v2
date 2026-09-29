@@ -244,6 +244,7 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
           {s.reading ? " · reading title…" : ""}
         </dd></div>
         <div><dt>Title</dt><dd>{s.title || "–"}</dd></div>
+        <div><dt>Recorded</dt><dd>{s.recordedTitle || "–"}</dd></div>
         <div><dt>Layout</dt><dd>{s.platformsN} platforms · {s.anchorsN} anchors</dd></div>
       </dl>
       <div class="actions">
@@ -273,6 +274,26 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
           ? "Draw platforms and place anchors with the tools under the view."
           : "Draw platforms and place anchors from the desktop dashboard."}
         {" "}Near-flat drags are levelled and same-row overlaps merged.
+      </p>
+      {(s.detected || target) && (
+        <div class="actions">
+          <button disabled={creating || bad || !s.title}
+                  onClick={() => layoutAct(`map|title|record|${target}`)}>
+            Record title from screen
+          </button>
+          <button disabled={creating || bad || !s.recordedTitle}
+                  onClick={() => {
+                    if (confirm("Clear this map's recorded title? It won't be auto-detected until one is recorded again."))
+                      layoutAct(`map|title|clear|${target}`);
+                  }}>
+            Clear title
+          </button>
+        </div>
+      )}
+      <p class="hint">
+        The map is detected by matching the title on screen to its
+        recorded title. If they belong to different maps, pin the right map
+        and record the title while standing in it.
       </p>
       {s.platformsN > 0 && (
         <div class="actions">

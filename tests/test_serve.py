@@ -786,6 +786,52 @@ class HostCommandTests(unittest.TestCase):
             self.assertEqual(ropes, [{"key": "0.3,0.6,0.3,0.3", "x": 60,
                                       "top": 45, "bottom": 90}])
 
+    def _title_host(self, tmp, title="Identisk Tisk Food Storehouse Entrance"):
+        store = self._use_store(tmp)
+        store.save(MapEntry(name="room", map_name=title))
+        store.save(MapEntry(name="entr"))
+        store.reload()
+        self.host.identity._current = type(self.host.identity.current)(
+            name=None, via=None, title=title)
+        return store
+
+    def test_record_title_from_screen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._title_host(tmp)
+            entry = MapStore(tmp).get("room")
+            entry.map_name = None
+            self.host.maps.save(entry)
+            self.host.maps.reload()
+            self.host._handle_command("map|title|record|entr")
+            self.assertEqual(MapStore(tmp).get("entr").map_name,
+                             "Identisk Tisk Food Storehouse Entrance")
+
+    def test_record_title_refuses_one_recorded_elsewhere_and_clear(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._title_host(tmp)
+            self.host._handle_command("map|title|record|entr")
+            self.assertIsNone(MapStore(tmp).get("entr").map_name)
+            self.assertIn("already recorded for room", " ".join(self.sent))
+            self.host._handle_command("map|title|clear|room")
+            self.assertIsNone(MapStore(tmp).get("room").map_name)
+            # Saving re-resolves identity from its last real read; this
+            # test has none, so put the on-screen title back.
+            self.host.identity._current = type(self.host.identity.current)(
+                title="Identisk Tisk Food Storehouse Entrance")
+            self.host._handle_command("map|title|record|entr")
+            self.assertEqual(MapStore(tmp).get("entr").map_name,
+                             "Identisk Tisk Food Storehouse Entrance")
+
+    def test_maps_event_carries_the_recorded_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._title_host(tmp)
+            with patch.object(self.host, "_resolved_entry",
+                              return_value=store.get("room")):
+                self.host._send_maps()
+            last = [json.loads(m[5:]) for m in self.sent if '"event": "maps"' in m][-1]
+            self.assertEqual(last["recorded_title"],
+                             "Identisk Tisk Food Storehouse Entrance")
+
     def test_maps_event_carries_platform_fit(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

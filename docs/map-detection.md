@@ -29,8 +29,12 @@ Why not pixel fingerprints: see [learnings.md](learnings.md).
 
 - `name` — **your alias** (file name, dashboard selector label).
 - `map_name` — **the OCR'd in-game title only**; this is what identity
-  matches. Captured by OCR on arrival, or backfilled by **Save
-  layout** when missing. Never overwrite it with the alias.
+  matches. Backfilled by **Save layout** when missing — so saving while
+  standing on a *different* map records the wrong title. Setup → Map
+  shows it as **Recorded** next to the title on screen; **Record title
+  from screen** (`map|title|record[|<name>]`, refused if another map
+  already has that title) and **Clear title** fix it. Never overwrite it
+  with the alias.
 - `minimap_region` — the panel rect at save. Re-applied once the title
   verifies the map, so normalized anchors/platforms line up with the
   layout they were recorded in.
@@ -110,9 +114,18 @@ Reads from a superseded request are discarded (generation counter).
 containment (weighted by coverage), prefix similarity for clipped titles
 (`Happir` ↔ `Happiness`), and whole-string similarity for misreads.
 Accept only when the best score ≥ 0.93 *and* leads the runner-up by
-0.05 — sibling maps on the same street score ~0.85–0.90 against each
-other, so a lone sibling can't claim another's title and truncated reads
-stay unresolved rather than guessing.
+0.05 — so truncated reads stay unresolved rather than guessing. An
+exact (normalized) title always wins, whatever its runner-up scored.
+
+Sibling maps are *not* misreads (`looks_like_sibling`, score capped at
+0.6): a different number (`Ramparts 2` ↔ `3`, `World 1-2` ↔ `2-6`), an
+extra real word (`Storehouse Entrance` ↔ `Storehouse`), or a complete
+read that stops where the stored title goes on. Still forgiven: short
+junk tokens (region-icon residue), words before the stored title starts
+(a region prefix), split or merged words, and a title clipped mid-word
+(`Happir`). Without this, "Limina End of the World 1-2" resolved to a
+stored 2-6 (0.952), and a map whose title contains another's matched
+it.
 
 **Requests**: startup, arrival, pin change, title-band change,
 panel moved (only if no title yet). Never per-frame.

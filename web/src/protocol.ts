@@ -94,6 +94,7 @@ export interface AppState {
   detected: string;
   via: string;
   title: string;
+  recordedTitle: string;
   score: number | null;
   reading: boolean;
   platformsN: number;
@@ -141,6 +142,7 @@ const initial: AppState = {
   detected: "",
   via: "",
   title: "",
+  recordedTitle: "",
   score: null,
   reading: false,
   platformsN: 0,
@@ -451,6 +453,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         detected: (p.detected as string) ?? "",
         via: (p.via as string) ?? "",
         title: (p.title as string) ?? "",
+        recordedTitle: (p.recorded_title as string) ?? "",
         score: (p.score as number | null) ?? null,
         reading: Boolean(p.reading),
         platformsN: (p.platforms_n as number) ?? 0,

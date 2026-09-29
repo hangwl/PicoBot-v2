@@ -46,6 +46,42 @@ class TitleMatchTests(unittest.TestCase):
                 store.match_name(_LAKE + "Happiness")
             )
 
+    def test_entrance_and_room_are_different_maps(self):
+        # "... Storehouse Entrance" is not a misread "... Storehouse".
+        room = "Identisk Tisk Food Storehouse"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="room", map_name=room))
+            self.assertIsNone(store.match_name(room + " Entrance"))
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="entrance", map_name=room + " Entrance"))
+            self.assertIsNone(store.match_name(room))
+
+    def test_exact_title_wins_even_with_its_sibling_stored(self):
+        room = "Identisk Tisk Food Storehouse"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="room", map_name=room))
+            store.save(MapEntry(name="entrance", map_name=room + " Entrance"))
+            self.assertEqual(store.match_name(room + " Entrance").name, "entrance")
+            self.assertEqual(store.match_name(room).name, "room")
+
+    def test_numbered_siblings_are_different_maps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="w26", map_name="Limina End of the World 2-6"))
+            # Seen in real captures: 1-2 resolved to the stored 2-6 (0.952).
+            self.assertIsNone(store.match_name("Limina End of the World 1-2"))
+            self.assertEqual(
+                store.match_name("Limina End of the World 2-6").name, "w26")
+
+    def test_region_prefix_and_icon_junk_still_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MapStore(tmp)
+            store.save(MapEntry(name="arc", map_name="Arcana Cavern Lower Path"))
+            self.assertEqual(store.match_name("QY Arcana Cavern Lower Path").name, "arc")
+
     def test_short_alias_cannot_substring_match(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = MapStore(tmp)
