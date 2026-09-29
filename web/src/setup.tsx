@@ -801,7 +801,8 @@ function UpFlashSweep({ s }: { s: AppState }) {
       <p class="hint">
         Stand on a drawn platform with open space overhead. The character
         jumps about 27 times, re-pressing at set delays, and records how
-        high each one peaks. Saved for analysis — travel doesn't use it yet.
+        high each one peaks. Patrol up flashes then re-press where the
+        peak is highest — re-run Measure moves afterwards.
       </p>
       {rows.length > 0 && (
         <ul class="rows sweep">

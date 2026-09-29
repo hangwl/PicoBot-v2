@@ -208,6 +208,11 @@ Bot-controlled movement looks like a player farming, not a macro:
   longer adds a fixed stall to every move.
 - Re-press gaps are tunable: `flash_repress_seconds` (jump → flash) and
   `combo_repress_seconds` (between chained flashes).
+- The **up flash** is timed from the first jump's key-down: the re-press
+  lands inside the plateau of the class's up-flash timing sweep (the
+  contiguous delays within 1 px of the highest peak), log-normally varied
+  around its middle; without a sweep, 0.16–0.30 s around 0.22 s. Up goes
+  down ~40 ms before the re-press.
 - **Every flash move attacks**: gap flashes, double flashes, up flashes
   and up-then-side flashes all weave 1–2 attacks once the flash has
   triggered (`_after_flash`). Attacks never fire outside a flash move in

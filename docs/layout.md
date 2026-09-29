@@ -74,8 +74,10 @@ overhead, the character does a plain jump (the baseline) and up flashes
 re-pressed at fixed delays from the first key-down (0.08–0.44 s), three
 rounds interleaved. Each delay gets its mean peak ± spread, time to the
 top, airtime and the actual re-press gap. It's saved under `profiles` in
-the reach file for analysis — the planner doesn't use it yet, and it
-doesn't change the up flash's envelope. Landing on a platform stops the
+the reach file. Patrol up flashes then re-press inside its plateau (the
+delays whose peak is within 1 px of the best); the sweep itself doesn't
+change the up flash's envelope — run **Measure moves** afterwards to
+measure the peak at the new timing. Landing on a platform stops the
 sweep (the start point would drift); a stopped sweep keeps its rows.
 
 ## Drawing layout (dashboard)

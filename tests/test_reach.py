@@ -96,6 +96,23 @@ class ReachModelTests(unittest.TestCase):
             self.assertEqual(again.get("flash").dx, 27)
             self.assertEqual(again.snapshot(), m.snapshot())
 
+    def test_plateau_is_the_flat_top_around_the_best_peak(self):
+        m = _model()
+        self.assertIsNone(m.plateau("up_flash"))
+        m.set_profile("up_flash", [
+            {"delay": None, "n": 3, "rise": 7.3},
+            {"delay": 0.08, "n": 3, "rise": 23.0},
+            {"delay": 0.16, "n": 3, "rise": 24.7},
+            {"delay": 0.20, "n": 3, "rise": 25.7},
+            {"delay": 0.25, "n": 3, "rise": 26.0},
+            {"delay": 0.30, "n": 3, "rise": 26.0},
+            {"delay": 0.36, "n": 3, "rise": 24.3},
+            {"delay": 0.44, "n": 0, "rise": None},
+        ])
+        lo, mid, hi = m.plateau("up_flash")
+        self.assertEqual((lo, hi), (0.20, 0.30))
+        self.assertAlmostEqual(mid, 0.25)
+
     def test_profiles_persist_without_touching_the_envelope(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "reach.json"

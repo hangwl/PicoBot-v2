@@ -428,26 +428,30 @@ class SmartBot(BotBase):
     ) -> None:
         """Jump, then Up + jump mid-air — the upward flash jump. Holding a
         ``direction`` adds the sideways drift of a diagonal takeoff.
-        ``delay`` times the second jump from the first key-down (seconds);
-        ``mark(name)`` is told when each jump goes down."""
+        ``delay`` times the second jump from the first key-down (seconds;
+        default: around the measured sweet spot); ``mark(name)`` is told
+        when each jump goes down."""
         jk = self._flash_key()
         if direction:
             self.hid.key_down(direction)
         try:
-            if delay is None:
-                self.hid.press(jk)
-                self._lead_sleep(self._repress(self.config.flash_repress_seconds * 0.8))
-                self.hid.key_down("up")
-                self.hid.press(jk)
-                self.hid.key_up("up")
-            else:
-                self._timed_rejump(jk, delay, mark)
+            self._timed_rejump(
+                jk, self._up_rejump_delay() if delay is None else delay, mark)
             self._after_flash(0.36)
         finally:
             if direction:
                 self.hid.key_up(direction)
 
     UP_LEAD = 0.04       # Up goes down this long before the timed re-press
+    # (lo, mid, hi) re-press delay before a timing sweep has been run.
+    UP_REJUMP = (0.16, 0.22, 0.30)
+
+    def _up_rejump_delay(self) -> float:
+        """Up-flash re-press delay: human-varied inside the sweep's
+        plateau (where the peak is highest and flat), else a default."""
+        reach = getattr(self, "_reach", None)
+        lo, mid, hi = (reach.plateau("up_flash") if reach else None) or self.UP_REJUMP
+        return human_between(mid, lo, hi, sigma=0.15)
 
     def _timed_rejump(self, jk: str, delay: float, mark=None) -> None:
         """Jump, then Up + jump ``delay`` seconds after the first key-down."""

@@ -460,11 +460,38 @@ class FlashAttackTests(unittest.TestCase):
         for fn, args, jumps in (
             ("_flash_hop", (), 2),
             ("_double_flash", (), 3),
-            ("_up_flash", (None,), 2),
             ("_up_side_flash", ("right",), 3),
         ):
             presses = self._presses(fn, *args)
             self.assertEqual(presses, ["space"] * jumps + ["a"], fn)
+
+    def test_up_flash_is_timed_and_attacks_after(self):
+        bot = _weave_bot((50, 50))
+        bot._up_flash(None)
+        self.assertEqual(bot.hid.downs, ["space", "up", "space"])
+        self.assertEqual(bot.hid.presses, ["a"])
+
+    def test_up_flash_delay_stays_on_the_measured_plateau(self):
+        from picobot.bot.reach import ReachModel, base_reach
+
+        bot = _weave_bot((50, 50))
+        bot._reach = ReachModel(base_reach(bot.config))
+        bot._reach.set_profile("up_flash", [
+            {"delay": 0.12, "n": 3, "rise": 23.0},
+            {"delay": 0.20, "n": 3, "rise": 25.7},
+            {"delay": 0.25, "n": 3, "rise": 26.0},
+            {"delay": 0.30, "n": 3, "rise": 26.0},
+            {"delay": 0.44, "n": 3, "rise": 18.3},
+        ])
+        delays = [bot._up_rejump_delay() for _ in range(200)]
+        self.assertTrue(all(0.20 <= d <= 0.30 for d in delays))
+        self.assertGreater(len({round(d, 3) for d in delays}), 10)   # varies
+
+    def test_up_flash_default_delay_without_a_sweep(self):
+        bot = _weave_bot((50, 50))
+        bot._reach = None
+        lo, _, hi = SmartBot.UP_REJUMP
+        self.assertTrue(all(lo <= bot._up_rejump_delay() <= hi for _ in range(50)))
 
     def test_timed_up_flash_holds_up_into_the_second_jump(self):
         bot = _weave_bot((50, 50))

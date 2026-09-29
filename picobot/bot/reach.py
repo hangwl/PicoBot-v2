@@ -73,8 +73,7 @@ class ReachModel:
         self._fail_streak: Dict[str, int] = {}
         # Measurement move name (e.g. "teleport_up") -> epoch seconds.
         self.measured: Dict[str, float] = {}
-        # Timing sweeps, e.g. "up_flash" -> {"at": epoch, "rows": [...]}:
-        # recorded for analysis, not used by the planner.
+        # Timing sweeps, e.g. "up_flash" -> {"at": epoch, "rows": [...]}.
         self.profiles: Dict[str, dict] = {}
         self.path = Path(path) if path else None
         self._dirty = False
@@ -208,6 +207,26 @@ class ReachModel:
         self.profiles[move] = {"at": time.time(), "rows": list(rows)}
         self.version += 1
         self._dirty = True
+
+    def plateau(self, move: str, slack: float = 1.0) -> Optional[Tuple[float, float, float]]:
+        """(lo, mid, hi) re-press delays around the sweep's highest peak:
+        the contiguous run of delays within ``slack`` px of it."""
+        rows = sorted(
+            (r for r in (self.profiles.get(move) or {}).get("rows", [])
+             if r.get("delay") is not None and r.get("n") and r.get("rise") is not None),
+            key=lambda r: r["delay"],
+        )
+        if not rows:
+            return None
+        best = max(range(len(rows)), key=lambda i: (rows[i]["rise"], -i))
+        floor = rows[best]["rise"] - slack
+        lo = hi = best
+        while lo > 0 and rows[lo - 1]["rise"] >= floor:
+            lo -= 1
+        while hi < len(rows) - 1 and rows[hi + 1]["rise"] >= floor:
+            hi += 1
+        a, b = float(rows[lo]["delay"]), float(rows[hi]["delay"])
+        return a, (a + b) / 2.0, b
 
     # -- Persistence ----------------------------------------------------------------
     def load(self) -> None:
