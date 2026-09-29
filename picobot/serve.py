@@ -829,7 +829,8 @@ class BotHost:
                 a.x, a.y = m[0]
 
     @staticmethod
-    def _resnap_anchors(entry, old_segs, new_segs, w: int, h: int) -> int:
+    def _resnap_anchors(entry, old_segs, new_segs, w: int, h: int,
+                        follow_px: float = 4.0) -> dict:
         """Move anchors with the platform they stand on when its line
         moves (levelled, merged, redrawn). Each keeps its x and its own
         float above the line. Returns ``{name: (before, after)}``."""
@@ -866,7 +867,7 @@ class BotHost:
             cands = [
                 row_at(p, ax) for p in new
                 if p[0] - 3 <= ax <= p[2] + 3
-                and abs(row_at(p, ax) - old_row) <= 4
+                and abs(row_at(p, ax) - old_row) <= follow_px
             ]
             if not cands:
                 continue
@@ -907,7 +908,64 @@ class BotHost:
         return w, h
 
     def _layout_platform(self, msg: str) -> None:
+        if msg.startswith("layout|plat|feet|"):
+            self._platform_to_feet(msg)
+            return
         self._layout_segments(msg, "platforms", "platform")
+
+    def _platform_to_feet(self, msg: str) -> None:
+        """layout|plat|feet|<x0,y0,x1,y1>[|<name>] — move one drawn line by
+        the platform-fit offset, onto where the feet settle. Its anchors
+        follow; undoable like any platform edit."""
+        parts = msg.split("|")
+        if len(parts) < 4:
+            return
+        name = parts[4].strip() if len(parts) > 4 else ""
+        try:
+            want = self.platfit.key([float(v) for v in parts[3].split(",")])
+        except (TypeError, ValueError):
+            return
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        segs = list(entry.platforms or [])
+        idx = next((i for i, s in enumerate(segs) if self.platfit.key(s) == want), None)
+        if idx is None:
+            self.bus.emit("error", "that platform changed — reopen the map page and try again")
+            return
+        dy = self.platfit.offset(entry.name, segs[idx])
+        if dy is None:
+            self.bus.emit("error", "not enough samples on that platform yet")
+            return
+        if abs(dy) < 0.5:
+            self.bus.emit("map", f"{entry.name}: that platform already sits at the feet")
+            return
+        size = self._minimap_size()
+        if size is None:
+            self.bus.emit("error", "no minimap frame — can't move the platform")
+            return
+        w, h = size
+        old = segs[idx]
+        new = [old[0], round(old[1] + dy / h, 4), old[2], round(old[3] + dy / h, 4)]
+        moved_to = list(segs)
+        moved_to[idx] = new
+        stack = self._layout_undo.setdefault((entry.name, "platforms"), [])
+        moved = self._resnap_anchors(entry, segs, moved_to, w, h,
+                                     follow_px=abs(dy) + 1.0)
+        stack.append((segs, moved))
+        del stack[:-50]
+        entry.platforms = moved_to
+        self._save_entry(entry)
+        self.platfit.move(entry.name, old, new, dy)
+        row = (old[1] + old[3]) / 2 * h
+        self.bus.emit(
+            "map",
+            f"{entry.name}: moved the platform at y {row:.0f} "
+            f"{'down' if dy > 0 else 'up'} {abs(dy):.1f}px onto the feet"
+            + (f"; {len(moved)} anchor(s) followed" if moved else ""),
+        )
+        self._send_maps()
 
 
     def _platforms_px(self, entry) -> list:

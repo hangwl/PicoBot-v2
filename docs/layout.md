@@ -86,8 +86,12 @@ truth, no per-section map names.
   with exactly one platform within 8px). Each platform lists its median
   offset: feet *below* the line mean it was drawn too high — the bot
   then can't tell it stands there (the planner allows 8px above a line
-  but only 2px below). It only reports; redraw the line at the feet.
-  Samples live in host memory and reset when a platform is redrawn.
+  but only 2px below). A flagged row (5+ samples, 1.5px+ off) has
+  **Move to feet**: the line shifts by the median offset (slope kept),
+  its anchors follow, the samples carry over (so it reads as fitting
+  right away), and **Undo platform** reverts it. Nothing moves on its
+  own. Samples live in host memory and reset when a platform is
+  redrawn.
 - Ropes are **not drawn** — they're learned: when the bot hangs stable
   at a spot that is on no drawn platform for over 2 seconds, it records
   a rope segment from that spot up to the platform above (persisted in

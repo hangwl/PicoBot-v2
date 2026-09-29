@@ -694,6 +694,58 @@ class HostCommandTests(unittest.TestCase):
             self.assertFalse(self.host._layout_undo.get(("m1", "platforms")))
             self.assertTrue(any("already tidy" in m for m in self.sent))
 
+    def _feet_samples(self, seg, residuals, name="m1"):
+        key = self.host.platfit.key(seg)
+        self.host.platfit._samples.setdefault(name, {})[key] = [
+            (50.0 + i, r) for i, r in enumerate(residuals)]
+
+    def test_move_to_feet_shifts_the_line_and_its_anchors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            seg = [0.1, 40 / 150, 0.9, 40 / 150]
+            self._with_anchors(tmp, [seg], [("a0", 60, 36)])
+            self._feet_samples(seg, [6, 6, 7, 6, 5, 6])       # feet 6px below
+            key = self.host.platfit.key(seg)
+            self.host._handle_command(
+                "layout|plat|feet|" + ",".join(f"{v:g}" for v in key) + "|m1")
+            (x0, y0, x1, y1), = self._plats_px(tmp)
+            self.assertAlmostEqual(y0, 46.0, delta=0.1)
+            self.assertAlmostEqual(y1, 46.0, delta=0.1)
+            # Beyond the usual 4px follow limit, the anchor still follows.
+            self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 42.0, delta=0.2)
+            # Samples carried over: the moved line now reads as fitting.
+            got = self.host.platfit.summary(
+                "m1", MapStore(tmp).get("m1").platforms, (0, 0, 200, 150))
+            self.assertAlmostEqual(got[0]["offset"], 0.0, delta=0.1)
+            self.assertTrue(any("onto the feet" in m for m in self.sent))
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertAlmostEqual(self._plats_px(tmp)[0][1], 40.0, delta=0.1)
+            self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 36.0, delta=0.2)
+
+    def test_move_to_feet_refuses_without_enough_samples_or_a_stale_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            seg = [0.1, 40 / 150, 0.9, 40 / 150]
+            self._with_anchors(tmp, [seg], [])
+            self._feet_samples(seg, [6, 6])                    # too few
+            key = ",".join(f"{v:g}" for v in self.host.platfit.key(seg))
+            self.host._handle_command(f"layout|plat|feet|{key}|m1")
+            self.host._handle_command("layout|plat|feet|0.2,0.5,0.3,0.5|m1")
+            self.assertAlmostEqual(self._plats_px(tmp)[0][1], 40.0, delta=0.1)
+            msgs = " ".join(self.sent)
+            self.assertIn("not enough samples", msgs)
+            self.assertIn("platform changed", msgs)
+
+    def test_move_to_feet_leaves_a_fitting_line_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            seg = [0.1, 40 / 150, 0.9, 40 / 150]
+            self._with_anchors(tmp, [seg], [])
+            self._feet_samples(seg, [0, 0, 1, 0, 0])
+            key = ",".join(f"{v:g}" for v in self.host.platfit.key(seg))
+            self.host._handle_command(f"layout|plat|feet|{key}|m1")
+            self.assertIn("already sits at the feet", " ".join(self.sent))
+
     def test_maps_event_carries_platform_fit(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

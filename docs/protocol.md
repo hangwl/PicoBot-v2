@@ -51,6 +51,9 @@ resolves through map identity (title-OCR verified).
 - `layout|plat|undo|clear|tidy[|<name>]` — undo restores the list before
   the last edit; tidy levels near-flat segments and merges same-row
   overlaps (new drags are tidied automatically)
+- `layout|plat|feet|<x0,y0,x1,y1>[|<name>]` — move that stored line (the
+  platform-fit row's `key`) by its median feet offset; anchors follow;
+  refused with too few samples or when the line changed since
 - `layout|anchor|<x>,<y>[|<name>]`, `layout|anchor|del|<x>,<y>`,
   `layout|anchor|undo|clear[|<name>]`
 - `layout|save|clear|reset[|<name>]`
@@ -64,7 +67,7 @@ Text, `dash|` + JSON:
 | `hello` | `{protocol: 1}` — first message on connect |
 | `evt` | `{kind, level, msg, t}` — log lines |
 | `history` | `{items: [evt…]}` — replay on connect |
-| `maps` | `{maps, active, detected, via, title, score, reading, platforms_n, anchors_n, platform_fit}` — `platform_fit`: per drawn platform `{x0, x1, row, n, offset?, spread?, coverage?}` (minimap px; offset = median feet − row, + = drawn too high); re-sent at most every 5s while samples arrive |
+| `maps` | `{maps, active, detected, via, title, score, reading, platforms_n, anchors_n, platform_fit}` — `platform_fit`: per drawn platform `{x0, x1, row, n, key, offset?, spread?, coverage?}` (minimap px; offset = median feet − row, + = drawn too high); re-sent at most every 5s while samples arrive |
 | `class` | `{active, profiles: {name: {travel, air_attacks, teleport_key}}, policy, temp, measured, measure_plan, measured_moves}` — `measure_plan` is the class's measurement moves, `measured_moves` those measured, `measured` their count; re-sent when a measurement ends |
 | `measure` | `{running, move, plan, results: {move: {dx} \| {rise} \| {skipped}}}` — on every change of a run, on `measure|status`, and on class switches |
 | `skills` | `{source, inherited, skills}` — the book the bot uses: `source` is the active profile or `global`; `inherited` = the profile has no kit of its own and uses the global book |

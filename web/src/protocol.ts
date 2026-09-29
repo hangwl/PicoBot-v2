@@ -69,6 +69,8 @@ export interface PlatformFitRow {
   offset?: number;
   spread?: number;
   coverage?: number;
+  /** The stored line (normalized x0,y0,x1,y1) — names it in commands. */
+  key: string;
 }
 
 export interface HostPort {

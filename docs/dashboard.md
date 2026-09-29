@@ -50,7 +50,9 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     how it was resolved, the accepted title and score; Save layout /
     Re-detect / Forget (confirmed); Tidy platforms / Undo platform; and
     the **platform fit** list — per platform, whether the feet settle on
-    its line or it was drawn too high / too low.
+    its line or it was drawn too high / too low, with **Move to feet**
+    on flagged rows. Layout actions show the host's reply under the
+    buttons.
   - **Class** — pick or create a profile (name, movement, air attacks,
     teleport key). Switching applies live and stops the bot first.
   - **Skills** — the active skill book (the profile's kit when one is

@@ -291,7 +291,13 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
           {reply.msg}
         </p>
       )}
-      {s.platformFit.length > 0 && <PlatformFitList rows={s.platformFit} />}
+      {s.platformFit.length > 0 && (
+        <PlatformFitList
+          rows={s.platformFit}
+          onMove={(key) => layoutAct(`layout|plat|feet|${key}|${target}`)}
+          disabled={creating || bad}
+        />
+      )}
     </div>
   );
 }
@@ -308,23 +314,33 @@ function fitStatus(r: PlatformFitRow): [string, string] {
     : [`Feet ${-off}px above: drawn too low`, "warn"];
 }
 
-function PlatformFitList({ rows }: { rows: PlatformFitRow[] }) {
+function PlatformFitList({ rows, onMove, disabled }: {
+  rows: PlatformFitRow[];
+  onMove: (key: string) => void;
+  disabled: boolean;
+}) {
   return (
     <div class="fit">
       <h3>Platform fit</h3>
       <p class="hint">
         Where the character's feet settle on each platform while the bot
         runs. A line drawn too high stops the bot from seeing it stands
-        there; redraw it at the feet. Tidy only levels and merges lines —
-        it doesn't move them.
+        there. Move to feet shifts a flagged line (and its anchors) onto
+        where the feet settle; Undo platform reverts it.
       </p>
       <ul class="rows">
         {rows.map((r) => {
           const [text, tone] = fitStatus(r);
           return (
-            <li key={`${r.row}-${r.x0}-${r.x1}`}>
+            <li key={r.key}>
               <b>y {Math.round(r.row)} · x {r.x0}–{r.x1}</b>
               <span class={`pill ${tone}`}>{text}</span>
+              {tone === "warn" && (
+                <button class="small" disabled={disabled}
+                        onClick={() => onMove(r.key)}>
+                  Move to feet
+                </button>
+              )}
             </li>
           );
         })}

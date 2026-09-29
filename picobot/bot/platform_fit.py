@@ -20,6 +20,7 @@ Seg = Tuple[float, float, float, float]
 # tolerates feet 2px below a line, so level only up to 4px. Wobble is a
 # pixel amount, not an angle — a long gentle ramp is a real slope.
 FLAT_PX = 4.0
+FIT_MIN = 5          # samples before a platform's offset is trusted
 MERGE_PX = 2.0       # rows this close are the same ledge ...
 TOUCH_PX = 0.5       # ... when the pieces overlap or meet (a gap is real)
 
@@ -174,6 +175,8 @@ class PlatformFit:
             item = {
                 "x0": round(x0), "x1": round(x1), "row": round(row, 1),
                 "n": len(samples),
+                # The stored line, for commands that act on this row.
+                "key": ",".join(f"{v:g}" for v in self.key(s)),
             }
             if samples:
                 res = [r for _, r in samples]
@@ -188,12 +191,30 @@ class PlatformFit:
         out.sort(key=lambda d: (d["row"], d["x0"]))
         return out
 
+    def offset(self, map_name: str, seg) -> Optional[float]:
+        """Median feet offset (px) for one platform, once trusted."""
+        with self._lock:
+            samples = list(self._samples.get(map_name, {}).get(self.key(seg), []))
+        if len(samples) < FIT_MIN:
+            return None
+        return statistics.median(r for _, r in samples)
+
+    def move(self, map_name: str, old_seg, new_seg, dy_px: float) -> None:
+        """A platform's line moved by ``dy_px``: keep its samples, with
+        their offsets measured from the new line."""
+        with self._lock:
+            per = self._samples.get(map_name, {})
+            samples = per.pop(self.key(old_seg), None)
+            if samples:
+                per[self.key(new_seg)] = [(x, r - dy_px) for x, r in samples]
+
     def forget(self, map_name: str) -> None:
         with self._lock:
             self._samples.pop(map_name, None)
 
 
 __all__ = [
+    "FIT_MIN",
     "PlatformFit",
     "merge_level",
     "straighten",
