@@ -35,6 +35,8 @@ class Patrol:
         self.seg = 0
         self.leg_i = 0
         self.fails = 0
+        self.arrived = 0
+        self._halted = False
         self._nav: Optional[Navigator] = None
         self._replan_at = 0.0
         self._break_logged = 0.0
@@ -43,6 +45,35 @@ class Patrol:
 
     # -- Tick -------------------------------------------------------------------------
     def tick(self) -> None:
+        try:
+            self._tick()
+        finally:
+            self._status()
+
+    def _status(self) -> None:
+        """Where the loop stands, for the dashboard's Home status."""
+        bot = self.bot
+        names = [a.name for a in bot.effective_rotation().anchors]
+
+        def name(i: int) -> str:
+            return names[i] if 0 <= i < len(names) else "?"
+
+        cur = self.plan[self.seg] if self.seg < len(self.plan) else None
+        legs = cur[1] if cur else None
+        on_leg = bool(legs) and self.leg_i < len(legs)
+        bot.viz["patrol"] = {
+            "target": name(cur[0]) if cur else None,
+            "leg": self.leg_i + 1 if on_leg else None,
+            "legs": len(legs) if legs else None,
+            "move": legs[self.leg_i].kind if on_leg else None,
+            "misses": self.fails,
+            "next": [name(i) for i, _, _ in self.plan[self.seg + 1:self.seg + 4]],
+            "arrived": self.arrived,
+            "halted": self._halted,
+        }
+
+    def _tick(self) -> None:
+        self._halted = False
         bot = self.bot
         img = bot.minimap_frame()
         pos = bot.minimap.player_pos(img) if img is not None else None
@@ -336,6 +367,7 @@ class Patrol:
         bot = self.bot
         self._stat("visit", idx)
         self.fails = 0
+        self.arrived += 1
         bot._anchor_idx = idx
         bot._weave_dir = None
         bot._weave_bounds = None
@@ -365,6 +397,7 @@ class Patrol:
 
     def _break(self) -> None:
         """No planned path: halt all actions until planning succeeds."""
+        self._halted = True
         bot = self.bot
         now = time.time()
         if now - self._break_logged > 5.0:

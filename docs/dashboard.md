@@ -46,13 +46,18 @@ A sticky top bar always shows the bot's state (Farming / Traveling /
 Paused / Stopped / Offline, with a coloured dot), the map and the link.
 
 - **Home** — the live view, view switcher (Panel / Window / Title) and
-  fps, a status list (map + how it was identified, class kit, route
-  size, last skill cast) and one large Start/Stop button.
+  fps, a status list and one large Start/Stop button. While the bot runs
+  the status shows the patrol: the anchor it's heading to, the move being
+  run (leg n of m) and misses toward it, the next anchors, and anchors
+  reached this run — or that it's halted with no planned path. Stopped,
+  it shows the map and how it was identified. Class kit, last skill and
+  summons follow.
 - **Control** — rune solving on one screen: hazard banner, a compact
   view, the arrow pad, quick keys (jump key, ctrl, shift, enter) and a
-  key-name field (limited to the Pico's `KEY_MAP` names), and **Align
-  platform to feet** when the map has platforms (walk onto a platform with
-  the pad, tap it; the host's reply shows under it). Keys mirror the
+  key-name field (limited to the Pico's `KEY_MAP` names), and a
+  collapsible **Layout from here** card when the map has platforms,
+  holding **Align platform to feet** (walk onto a platform with the pad,
+  tap it; the host's reply shows under it). Keys mirror the
   finger: `key|down` on touch, `key|up` on lift, so a tap is a tap, a
   hold is a hold, and several fingers chord (hold left, tap jump). Held
   keys are released when the page is hidden or loses focus; the host

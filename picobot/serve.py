@@ -1169,7 +1169,8 @@ class BotHost:
         if bot is None:
             return {"state": "IDLE"}
         return {"state": bot.viz.get("state"), "hazard": bot.viz.get("hazard"),
-                "summons": bot.viz.get("summons")}
+                "summons": bot.viz.get("summons"),
+                "patrol": bot.viz.get("patrol")}
 
     def _provide_frame(self, mode: str):
         bot = self.bot

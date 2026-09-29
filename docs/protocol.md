@@ -86,8 +86,12 @@ Text, `dash|` + JSON:
 
 Binary frame: `PBF1` magic + u32 BE JSON length + JSON meta + JPEG.
 Meta carries `mode`, `w`, `h`, `ox`/`oy` (panel offset), `state` (bot
-FSM state), `hazard` and `summons` (`{placed: [{skill, anchor, left}],
-charges: {skill: [have, max]}}`) in every view, `player`, and map identity (`map`, `map_via`,
+FSM state), `hazard`, `summons` (`{placed: [{skill, anchor, left}],
+charges: {skill: [have, max]}}`) and `patrol` (`{target, leg, legs, move,
+misses, next: [anchor], arrived, halted}` — the loop's current target,
+the leg being run, misses toward it, the next anchors, anchors reached
+this run, and whether it's halted with no plan) in every view,
+`player`, and map identity (`map`, `map_via`,
 `map_conf`, `map_title`, `layout`, `no_rotation`). Overlays (platforms,
 ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
 view shifted by `ox`/`oy`, in the Window view shifted to where the

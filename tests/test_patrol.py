@@ -145,6 +145,37 @@ class PatrolTests(unittest.TestCase):
         self.assertGreater(rows["a1"]["misses"], 0)                 # can't reach MID
         self.assertIn("unreachable after retries", rows["a1"]["skips"])
 
+    def test_status_tracks_target_next_and_arrivals(self):
+        bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (100, 100), (180, 100)])
+        bot.config.patrol_policy = "greedy"
+        p = Patrol(bot, rng=random.Random(0))
+        p.tick()
+        st = bot.viz["patrol"]
+        self.assertEqual(st["target"], "a0")
+        self.assertEqual(st["next"][:2], ["a1", "a2"])
+        self.assertEqual((st["misses"], st["arrived"], st["halted"]), (0, 0, False))
+        for _ in range(8):
+            p.tick()
+        st = bot.viz["patrol"]
+        self.assertGreaterEqual(st["arrived"], 2)
+        self.assertIn(st["target"], {"a0", "a1", "a2"})
+
+    def test_status_counts_misses_and_shows_a_halt(self):
+        bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)
+        p = Patrol(bot, rng=random.Random(0))
+        from picobot.bot.navgraph import Leg
+
+        p.plan = [(1, [Leg("up_flash", 60, 100, 80, 84, 1.0)], 0)]
+        p.tick()
+        st = bot.viz["patrol"]
+        self.assertEqual((st["target"], st["misses"]), ("a1", 1))
+        self.assertIn(st["move"], {"walk", "up_flash"})      # re-routed leg
+        halted = PatrolBot([FLOOR, (60, 40, 100, 40)], (10, 100), [(80, 40)])
+        q = Patrol(halted, rng=random.Random(0))
+        q.tick()
+        self.assertTrue(halted.viz["patrol"]["halted"])
+        self.assertIsNone(halted.viz["patrol"]["target"])
+
     def test_repeated_misses_ban_the_anchor(self):
         bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)
         p = Patrol(bot, rng=random.Random(0))

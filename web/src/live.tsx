@@ -7,6 +7,7 @@ import {
   type AppState,
   type CanvasMode,
   type LogFilter,
+  type PatrolStatus,
   type ViewMode,
   go,
   send,
@@ -103,10 +104,12 @@ export function RunButton({ s }: { s: AppState }) {
 export function StatusList({ s }: { s: AppState }) {
   const last = [...s.logs].reverse().find((it) => it.kind === "skill");
   const conf = s.score != null ? ` ${Math.round(s.score * 100)}%` : "";
+  const p = s.botRunning ? s.patrol : null;
   const rows: [string, string][] = [
-    ["Map", s.detected ? `${s.detected}${s.via ? ` · ${s.via}` : ""}${conf}` : "Not identified"],
+    ...(p ? patrolRows(p) : [["Map", s.detected
+      ? `${s.detected}${s.via ? ` · ${s.via}` : ""}${conf}`
+      : "Not identified"] as [string, string]]),
     ["Class", kitLabel(s.classActive, s.profiles[s.classActive])],
-    ["Route", `${s.anchorsN} anchors · ${s.platformsN} platforms`],
     ["Last skill", last ? `${last.msg}${last.t ? ` · ${ago(last.t)}` : ""}` : "–"],
     ...(s.summons && Object.keys(s.summons.charges).length
       ? [["Summons", summonLine(s.summons)] as [string, string]]
@@ -119,6 +122,27 @@ export function StatusList({ s }: { s: AppState }) {
       ))}
     </dl>
   );
+}
+
+const MOVE_NAME: Record<string, string> = {
+  walk: "walking", jump: "jump", flash: "flash", double_flash: "double flash",
+  up_flash: "up flash", up_side_flash: "up-side flash", rope_lift: "rope lift",
+  down_jump: "down-jump", drop: "drop", teleport: "teleport",
+  climb_up: "rope climb", climb_down: "rope descent",
+};
+
+function patrolRows(p: PatrolStatus): [string, string][] {
+  if (p.halted || !p.target) return [["Patrol", "No planned path — taking a break"]];
+  const parts = [`to ${p.target}`];
+  if (p.move) {
+    parts.push(`${MOVE_NAME[p.move] ?? p.move}` +
+      (p.legs && p.legs > 1 ? ` (${p.leg}/${p.legs})` : ""));
+  }
+  if (p.misses) parts.push(`${p.misses} missed`);
+  const rows: [string, string][] = [["Patrol", parts.join(" · ")]];
+  if (p.next.length) rows.push(["Then", p.next.join(" → ")]);
+  rows.push(["Reached", `${p.arrived} anchor${p.arrived === 1 ? "" : "s"} this run`]);
+  return rows;
 }
 
 function summonLine(sm: NonNullable<AppState["summons"]>): string {
@@ -376,7 +400,12 @@ export function Pad({ s }: { s: AppState }) {
         <p class="hint warn">The Pico has no key called "{custom.trim()}".</p>
       )}
       <p class="hint">Keys stay down while you hold them.</p>
-      {s.platformsN > 0 && <AlignHere s={s} />}
+      {s.platformsN > 0 && (
+        <details class="card here">
+          <summary>Layout from here</summary>
+          <AlignHere s={s} />
+        </details>
+      )}
     </section>
   );
 }

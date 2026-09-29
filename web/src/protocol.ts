@@ -109,6 +109,18 @@ export interface SummonState {
   charges: Record<string, [number, number]>;
 }
 
+/** Where the running patrol loop stands (frame meta). */
+export interface PatrolStatus {
+  target: string | null;
+  leg: number | null;
+  legs: number | null;
+  move: string | null;
+  misses: number;
+  next: string[];
+  arrived: number;
+  halted: boolean;
+}
+
 /** Patrol stats for one anchor this host session. */
 export interface AnchorStatRow {
   name: string;
@@ -165,6 +177,7 @@ export interface AppState {
   botState: string;
   hazard: string;
   summons: SummonState | null;
+  patrol: PatrolStatus | null;
   logs: EvtItem[];
   logFilter: LogFilter;
   viewMode: ViewMode;
@@ -218,6 +231,7 @@ const initial: AppState = {
   botState: "–",
   hazard: "none",
   summons: null,
+  patrol: null,
   logs: [],
   logFilter: "info",
   viewMode: "minimap",
@@ -443,6 +457,7 @@ function onFrame(buf: ArrayBuffer) {
   set({
     hazard,
     summons: (meta.summons as SummonState | undefined) ?? state.summons,
+    patrol: (meta.patrol as PatrolStatus | undefined) ?? null,
     botState: meta.state ? String(meta.state) : "–",
     viewMode: (meta.mode as ViewMode) ?? state.viewMode,
   });
