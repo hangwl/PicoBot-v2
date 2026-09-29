@@ -1,0 +1,9 @@
+[package]
+name = "picobot-io"
+description = "Windows-facing I/O: serial HID link, window lookup, screen capture, OCR."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+picobot-core = { path = "../core" }

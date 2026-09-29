@@ -1,0 +1,14 @@
+[package]
+name = "picobot-host"
+description = "The PicoBot host: bot thread, map monitor, dashboard server, frame streamer."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "picobot"
+path = "src/main.rs"
+
+[dependencies]
+picobot-core = { path = "../core" }
+picobot-io = { path = "../io" }

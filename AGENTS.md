@@ -138,6 +138,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Frame pipeline | `remote/streamer.py` (`assemble_panel`, `annotate`) |
 | Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup list + readiness), `pages/*.tsx` (one file per Setup page), `ui.tsx` (shared bits: `Field`, `Section`, `useReply`/`Reply` for the host's answer under a button), `keys.ts` (held keys); protocol in `docs/protocol.md` |
 | Debug frame capture | `vision/framelog.py` → `debug/frames/` |
+| Rust host (in progress, `feat/rust`) | `rust/` workspace: `core` (pure logic), `io` (Windows I/O), `host` (binary) — plan and milestones in `docs/rust-migration.md`; `scripts/cpu-sample.ps1` compares hosts |
 
 See `docs/` for the full picture: `architecture.md`, `map-detection.md`,
 `layout.md`, `bot-behavior.md`, `dashboard.md`, `configuration.md`,
