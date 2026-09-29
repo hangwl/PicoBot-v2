@@ -681,6 +681,19 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|plat|undo|m1")
             self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 36.0, delta=0.2)
 
+    def test_direction_only_difference_is_already_tidy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            entry = MapStore(tmp).get("m1")
+            entry.platforms = [[0.5, 0.3, 0.1, 0.3]]        # drawn right-to-left
+            self.host.maps.save(entry)
+            self.host.maps.reload()
+            self.save_mock.reset_mock()
+            self.host._handle_command("layout|plat|tidy|m1")
+            self.assertEqual(MapStore(tmp).get("m1").platforms, [[0.5, 0.3, 0.1, 0.3]])
+            self.assertFalse(self.host._layout_undo.get(("m1", "platforms")))
+            self.assertTrue(any("already tidy" in m for m in self.sent))
+
     def test_maps_event_carries_platform_fit(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

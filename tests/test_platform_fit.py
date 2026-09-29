@@ -104,6 +104,12 @@ class PlatformFitTests(unittest.TestCase):
             clock[0] += 0.15
         self.assertTrue(all(p["n"] == 0 for p in fit.summary("m", segs, self.REGION)))
 
+    def test_samples_do_not_depend_on_drawing_direction(self):
+        fit, clock = self._fit()
+        self._stand(fit, clock, (60, 53))
+        flipped = [[0.6, 0.5, 0.1, 0.5], self.SEGS[1]]
+        self.assertEqual(fit.summary("m", flipped, self.REGION)[0]["n"], 1)
+
     def test_far_from_any_line_is_skipped(self):
         fit, clock = self._fit()
         self._stand(fit, clock, (60, 30))

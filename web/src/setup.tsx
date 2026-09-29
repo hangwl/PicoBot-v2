@@ -206,6 +206,17 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
   const target = creating ? newName.trim() : s.activeMap;
   const bad = target.includes("|");
   const conf = s.score != null ? ` · ${Math.round(s.score * 100)}%` : "";
+  // Show the host's answer to a layout action here, not only in the Log:
+  // the first map/error event after the press (by log sequence, so the
+  // phone's clock doesn't matter).
+  const [askedAfter, setAskedAfter] = useState<number | null>(null);
+  const layoutAct = (cmd: string) => {
+    setAskedAfter(s.logs.length ? s.logs[s.logs.length - 1].id ?? 0 : 0);
+    send(cmd);
+  };
+  const reply = askedAfter === null ? undefined : s.logs.find(
+    (it) => (it.id ?? 0) > askedAfter && (it.kind === "map" || it.kind === "error"),
+  );
   return (
     <div class="form">
       <Field label="Map" hint="Auto-detect follows the in-game title.">
@@ -265,15 +276,20 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
       </p>
       {s.platformsN > 0 && (
         <div class="actions">
-          <button onClick={() => send(`layout|plat|tidy|${target}`)}
+          <button onClick={() => layoutAct(`layout|plat|tidy|${target}`)}
                   disabled={creating || bad}>
             Tidy platforms
           </button>
-          <button onClick={() => send(`layout|plat|undo|${target}`)}
+          <button onClick={() => layoutAct(`layout|plat|undo|${target}`)}
                   disabled={creating || bad}>
             Undo platform
           </button>
         </div>
+      )}
+      {reply && (
+        <p class={`hint ${reply.kind === "error" ? "warn" : ""}`} role="status">
+          {reply.msg}
+        </p>
       )}
       {s.platformFit.length > 0 && <PlatformFitList rows={s.platformFit} />}
     </div>
@@ -299,7 +315,8 @@ function PlatformFitList({ rows }: { rows: PlatformFitRow[] }) {
       <p class="hint">
         Where the character's feet settle on each platform while the bot
         runs. A line drawn too high stops the bot from seeing it stands
-        there; redraw it at the feet.
+        there; redraw it at the feet. Tidy only levels and merges lines —
+        it doesn't move them.
       </p>
       <ul class="rows">
         {rows.map((r) => {

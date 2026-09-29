@@ -112,7 +112,9 @@ class PlatformFit:
 
     @staticmethod
     def key(seg: Sequence[float]) -> Seg:
-        return tuple(round(float(v), 4) for v in seg)  # type: ignore[return-value]
+        """Orientation-free: a line drawn right-to-left is the same line."""
+        x0, y0, x1, y1 = (round(float(v), 4) for v in seg)
+        return (x0, y0, x1, y1) if x0 <= x1 else (x1, y1, x0, y0)
 
     def observe(self, map_name: Optional[str], segs_norm, region, pos) -> None:
         """Feed one player position (minimap px) with the map's drawn

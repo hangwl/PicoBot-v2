@@ -761,8 +761,14 @@ class BotHost:
                 self.bus.emit("error", f"no minimap frame — can't tidy {label}")
                 return
             tidied = self._tidy(segs, *size)
-            if tidied == segs:
-                self.bus.emit("map", f"{entry.name}: {label}s already tidy")
+            if self._same_lines(tidied, segs):
+                # A right-to-left drag rewritten left-to-right is the same
+                # line — not an edit (no undo step, fit samples kept).
+                self.bus.emit(
+                    "map",
+                    f"{entry.name}: {label}s already tidy — nothing to level "
+                    "or merge (tidy doesn't move lines to the feet)",
+                )
                 return
             moved = self._resnap_anchors(entry, segs, tidied, *size)
             stack.append((segs, moved))
@@ -871,6 +877,16 @@ class BotHost:
             a.y = round((new_row - float_px) / h, 4)
             moved[a.name] = (before, (a.x, a.y))
         return moved
+
+    @staticmethod
+    def _same_lines(a, b) -> bool:
+        def norm(segs):
+            out = []
+            for s in segs or []:
+                x0, y0, x1, y1 = (round(float(v), 4) for v in s)
+                out.append((x0, y0, x1, y1) if x0 <= x1 else (x1, y1, x0, y0))
+            return sorted(out)
+        return norm(a) == norm(b)
 
     @staticmethod
     def _tidy(segs, w: int, h: int) -> list:
