@@ -7,3 +7,4 @@ publish.workspace = true
 
 [dependencies]
 picobot-core = { path = "../core" }
+serialport = "4"

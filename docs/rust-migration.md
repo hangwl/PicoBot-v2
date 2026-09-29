@@ -97,6 +97,17 @@ conversion.
   Python planner exactly. On the real maps (`examples/nav_bench.rs` vs
   `tools/nav_bench.py`, identical route checksums): graph build 83 µs vs
   962 µs, a route 17 µs vs 135 µs.
+- **M4** — done (`picobot-io`): `serial::SerialLink` — numbered commands
+  with one-shot reply channels, FIFO matching for older firmware, `ka`
+  keepalive when idle (v2 only), a lost port closes the link and fails
+  waiters at once, callbacks called with no lock held; `discover_data_port`
+  / `list_ports`; `hid::HidController` — human key spacing, held keys
+  tracked from the first attempt, unconfirmed presses still released, and
+  `Drop` releases everything. Transport is two traits (read a line, write
+  a line), so `tests/link.rs` runs against an in-memory firmware (late
+  replies, silence, NACK, older protocol, port loss). `examples/pico_ping`
+  handshakes with the real Pico (no key presses): it answers `PICO_READY
+  v2`.
 
 ## Milestones
 
