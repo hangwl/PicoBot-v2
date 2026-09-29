@@ -3,7 +3,14 @@ import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import { Icon, type IconName } from "./icons";
 import { kitLabel } from "./live";
-import { type AppState, type PlatformFitRow, type RopeRow, go, send } from "./protocol";
+import {
+  type AnchorStatRow,
+  type AppState,
+  type PlatformFitRow,
+  type RopeRow,
+  go,
+  send,
+} from "./protocol";
 
 // -- Readiness -------------------------------------------------------------------
 function allMeasured(s: AppState): boolean {
@@ -312,6 +319,13 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
           {reply.msg}
         </p>
       )}
+      {s.anchorStats.length > 0 && (
+        <AnchorStatsList
+          rows={s.anchorStats}
+          onReset={() => layoutAct(`map|stats|reset|${target}`)}
+          disabled={creating || bad}
+        />
+      )}
       {s.ropes.length > 0 && (
         <RopeList
           rows={s.ropes}
@@ -331,6 +345,55 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
           disabled={creating || bad}
         />
       )}
+    </div>
+  );
+}
+
+function anchorNote(r: AnchorStatRow, anyVisited: boolean): [string, string] {
+  const skips = Object.entries(r.skips);
+  const skipped = skips.reduce((n, [, c]) => n + c, 0);
+  const parts = [`${r.visits} visit${r.visits === 1 ? "" : "s"}`];
+  if (r.last) {
+    const ago = Math.max(0, Math.round(Date.now() / 1000 - r.last));
+    parts.push(ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)} min ago`);
+  }
+  if (r.misses) parts.push(`${r.misses} missed`);
+  if (skipped) {
+    parts.push(`skipped ${skipped}× (${skips.map(([why, c]) => `${why}${c > 1 ? ` ×${c}` : ""}`).join(", ")})`);
+  }
+  const bad = skipped > 0 || (r.visits > 0 && r.misses / (r.visits + r.misses) > 1 / 3)
+    || (anyVisited && r.visits === 0);
+  return [parts.join(" · "), bad ? "warn" : r.visits ? "ok" : ""];
+}
+
+function AnchorStatsList({ rows, onReset, disabled }: {
+  rows: AnchorStatRow[];
+  onReset: () => void;
+  disabled: boolean;
+}) {
+  const anyVisited = rows.some((r) => r.visits > 0);
+  return (
+    <div class="fit">
+      <h3>Anchors</h3>
+      <p class="hint">
+        Every anchor is planned once per loop, so one that falls behind is
+        being skipped or missed — usually a platform line or rope to fix,
+        not the loop policy. Counts cover this host session.
+      </p>
+      <ul class="rows">
+        {rows.map((r) => {
+          const [text, tone] = anchorNote(r, anyVisited);
+          return (
+            <li key={r.name}>
+              <b>{r.name}</b>
+              <span class={`pill ${tone}`}>{text}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <div class="actions">
+        <button disabled={disabled} onClick={onReset}>Reset anchor stats</button>
+      </div>
     </div>
   );
 }

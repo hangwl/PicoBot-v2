@@ -89,6 +89,15 @@ export interface SummonState {
   charges: Record<string, [number, number]>;
 }
 
+/** Patrol stats for one anchor this host session. */
+export interface AnchorStatRow {
+  name: string;
+  visits: number;
+  last: number | null;
+  misses: number;
+  skips: Record<string, number>;
+}
+
 export interface HostPort {
   device: string;
   desc?: string;
@@ -109,6 +118,7 @@ export interface AppState {
   anchorsN: number;
   platformFit: PlatformFitRow[];
   ropes: RopeRow[];
+  anchorStats: AnchorStatRow[];
   classActive: string;
   profiles: Record<string, ProfileKit>;
   policy: string;
@@ -158,6 +168,7 @@ const initial: AppState = {
   anchorsN: 0,
   platformFit: [],
   ropes: [],
+  anchorStats: [],
   classActive: "",
   profiles: {},
   policy: "weighted",
@@ -471,6 +482,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         anchorsN: (p.anchors_n as number) ?? 0,
         platformFit: (p.platform_fit as PlatformFitRow[]) ?? [],
         ropes: (p.ropes as RopeRow[]) ?? [],
+        anchorStats: (p.anchor_stats as AnchorStatRow[]) ?? [],
       });
       return;
     case "class":

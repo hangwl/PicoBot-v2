@@ -252,3 +252,10 @@ fixed that — all 15 captured reads exact afterwards.
   per anchor (one live summon each; a skill's oldest instance goes when
   it has `charges` out), and a cast needs the character standing on a
   platform. The tracker is timing only — the bot can't see summons.
+- **"Far anchors get visited less"** (2026-09-29): the loop visits every
+  reachable anchor once, so the roulette temperature can't change visit
+  frequency — only order. Simulated on EZFZ: temp 3 gives 15s loops and
+  24–29s worst revisit gaps, temp 0.05 gives 20s and 34–36s — *raising*
+  it revisits far anchors sooner. The logs pointed at skips (no route,
+  missed landings) instead, so per-anchor stats went on the Map page
+  rather than a heat-map policy.

@@ -220,6 +220,17 @@ class SmartBot(BotBase):
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
 
+    def _anchor_stat(self, kind: str, anchor: str, why: str = "") -> None:
+        stats = getattr(self, "anchor_stats", None)
+        if stats is None:
+            return
+        entry = self._current_map_entry()
+        name = entry.name if entry else None
+        if kind == "visit":
+            stats.visit(name, anchor)
+        else:
+            stats.skip(name, anchor, why)
+
     def _note_pos(self, pos) -> None:
         """Feed the host's platform-fit diagnostic (if attached)."""
         fit = getattr(self, "platfit", None)
@@ -1390,6 +1401,7 @@ class SmartBot(BotBase):
             if target.face:
                 self.hid.press(target.face)
             self.log(f"Checkpoint: {target.name}")
+            self._anchor_stat("visit", target.name)
         else:
             self._weave_attack()
             return
@@ -1400,6 +1412,7 @@ class SmartBot(BotBase):
             self._ckpt_deadline = now + 20.0
         elif now > self._ckpt_deadline:
             self.log(f"Checkpoint {target.name} unreachable — skipping")
+            self._anchor_stat("skip", target.name, "unreachable after 20s")
             self._route.pop(0)
             self._ckpt_ban[idx] = now + 30.0
             self._ckpt_idx = None

@@ -35,6 +35,14 @@ loop:
   anchor's non-summon `on_arrive` skills and places at most one summon
   (see Summons) in passing, then the bot moves on — no linger, no dwell
   timers.
+- **Loop policy and temperature**: every reachable anchor is visited
+  exactly once per loop; `patrol_weight_temp` only orders the loop.
+  Higher temperature → nearer-first sweeps → shorter loops, so *every*
+  anchor (far ones too) comes around sooner; lower → more random,
+  longer loops. An anchor that falls behind is being skipped or missed —
+  Setup → Map → **Anchors** lists visits, last visit, missed landings
+  and skips by reason per anchor (this host session; **Reset anchor
+  stats** after fixing geometry).
 - **Bans**: no route, unreachable-at-plan-time (including anchors not
   on any drawn platform — "re-place it"), or 3 missed landings → skipped
   for 30s, so one bad anchor can't shrink or stall the patrol.

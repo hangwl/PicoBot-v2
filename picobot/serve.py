@@ -193,6 +193,10 @@ class BotHost:
 
         # Where the feet settle on each drawn platform (diagnostic only).
         self.platfit = PlatformFit(on_change=self._platfit_changed)
+        from .bot.anchor_stats import AnchorStats
+
+        # Per-anchor visits / misses / skips, across bot runs.
+        self.anchor_stats = AnchorStats(on_change=self._platfit_changed)
         self._platfit_sent = 0.0
         # (map, field) -> snapshots of the segment list before each edit.
         self._layout_undo: dict = {}
@@ -358,6 +362,7 @@ class BotHost:
                 event_bus=bus,
             )
             self.bot.platfit = self.platfit
+            self.bot.anchor_stats = self.anchor_stats
             if self._bot_stop.is_set():
                 return
             self.bus.emit("bot", "started")
@@ -1201,6 +1206,13 @@ class BotHost:
             self._patrol_policy_set(msg.split("|", 2)[2])
         elif msg.startswith("patrol|temp|"):
             self._patrol_policy_set(temp=msg.split("|", 2)[2])
+        elif msg == "map|stats|reset" or msg.startswith("map|stats|reset|"):
+            name = msg.split("|", 3)[3].strip() if msg.count("|") > 2 else ""
+            entry = self.maps.get(name) if name else self._resolved_entry()
+            if entry is not None:
+                self.anchor_stats.reset(entry.name)
+                self.bus.emit("map", f"{entry.name}: anchor stats reset")
+                self._send_maps()
         elif msg.startswith("map|title|"):
             self._map_title(msg)
         elif msg.startswith("map|set|"):
@@ -1277,6 +1289,10 @@ class BotHost:
             # The stored title identity matches on — visible so a
             # mislabelled map (a title recorded on the wrong screen) shows.
             "recorded_title": entry.map_name if entry else None,
+            "anchor_stats": self.anchor_stats.rows(
+                entry.name if entry else None,
+                [a.name for a in entry.rotation.anchors] if entry else [],
+            ),
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
 
@@ -1306,8 +1322,8 @@ class BotHost:
         return feed.minimap.region if feed is not None else None
 
     def _platfit_changed(self, _map_name: str) -> None:
-        """New standing sample (bot thread): refresh the dashboard, at
-        most every few seconds."""
+        """A new fit sample or anchor stat (bot thread): refresh the
+        dashboard, at most every few seconds."""
         now = time.monotonic()
         if now - self._platfit_sent >= 5.0:
             self._platfit_sent = now

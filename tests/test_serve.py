@@ -832,6 +832,25 @@ class HostCommandTests(unittest.TestCase):
             self.assertEqual(last["recorded_title"],
                              "Identisk Tisk Food Storehouse Entrance")
 
+    def test_maps_event_carries_anchor_stats_and_reset_clears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self._with_anchors(tmp, [], [("a0", 20, 40), ("a1", 80, 40)])
+            self.host.anchor_stats.visit("m1", "a0")
+            self.host.anchor_stats.skip("m1", "a1", "no route")
+            entry = MapStore(tmp).get("m1")
+            with patch.object(self.host, "_resolved_entry", return_value=entry):
+                self.host._send_maps()
+                rows = [json.loads(m[5:]) for m in self.sent
+                        if '"event": "maps"' in m][-1]["anchor_stats"]
+                self.assertEqual([r["name"] for r in rows], ["a0", "a1"])
+                self.assertEqual(rows[0]["visits"], 1)
+                self.assertEqual(rows[1]["skips"], {"no route": 1})
+                self.host._handle_command("map|stats|reset")
+                rows = [json.loads(m[5:]) for m in self.sent
+                        if '"event": "maps"' in m][-1]["anchor_stats"]
+                self.assertEqual(rows[1]["skips"], {})
+
     def test_maps_event_carries_platform_fit(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

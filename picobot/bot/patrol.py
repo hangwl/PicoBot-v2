@@ -138,6 +138,7 @@ class Patrol:
             self._ban(graph, pos, idx, "no route")
         elif status == "failed":
             self.fails += 1
+            self._stat("miss", idx)
             bot.log(
                 f"Patrol: missed a landing toward {rot.anchors[idx].name}"
                 f" ({self.fails})"
@@ -228,6 +229,7 @@ class Patrol:
                     else "no route from here"
                 )
                 bot.log(f"Patrol: skipping {rot.anchors[i].name} for a while ({why})")
+                self._stat("skip", i, why)
                 bot._ckpt_ban[i] = now + 30.0
                 remaining.remove(i)
             if not remaining:
@@ -314,8 +316,25 @@ class Patrol:
         a = bot.effective_rotation().anchors[idx]
         return (bot._rx(a.x), bot._ry(a.y))
 
+    def _stat(self, kind: str, idx: int, why: str = "") -> None:
+        """Record a visit / miss / skip for the dashboard's anchor stats."""
+        bot = self.bot
+        stats = getattr(bot, "anchor_stats", None)
+        if stats is None:
+            return
+        entry = bot._current_map_entry()
+        name = bot.effective_rotation().anchors[idx].name
+        map_name = entry.name if entry else None
+        if kind == "visit":
+            stats.visit(map_name, name)
+        elif kind == "miss":
+            stats.miss(map_name, name)
+        else:
+            stats.skip(map_name, name, why)
+
     def _arrive(self, idx: int, anchor) -> None:
         bot = self.bot
+        self._stat("visit", idx)
         self.fails = 0
         bot._anchor_idx = idx
         bot._weave_dir = None
@@ -329,6 +348,7 @@ class Patrol:
     def _ban(self, graph, pos: Point, idx: int, why: str) -> None:
         bot = self.bot
         bot.log(f"Patrol: skipping {bot.effective_rotation().anchors[idx].name} for a while ({why})")
+        self._stat("skip", idx, why)
         bot._ckpt_ban[idx] = time.time() + 30.0
         if self.seg < len(self.plan) and self.plan[self.seg][0] == idx:
             self.plan.pop(self.seg)
@@ -341,6 +361,7 @@ class Patrol:
                 bot._ckpt_ban[nxt] = time.time() + 30.0
                 self.plan.pop(self.seg)
                 bot.log(f"Patrol: skipping {bot.effective_rotation().anchors[nxt].name} for a while (no route)")
+                self._stat("skip", nxt, "no route")
 
     def _break(self) -> None:
         """No planned path: halt all actions until planning succeeds."""

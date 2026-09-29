@@ -129,6 +129,22 @@ class PatrolTests(unittest.TestCase):
         p = Patrol(bot, rng=random.Random(0))
         self.assertEqual(p._pick_next({0: 1.0, 1: 10.0}, [0, 1]), 0)
 
+    def test_anchor_stats_record_visits_misses_and_skips(self):
+        from picobot.bot.anchor_stats import AnchorStats
+        from picobot.bot.maps import MapEntry
+
+        bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)
+        bot._map = MapEntry(name="m")
+        bot._current_map_entry = lambda: bot._map
+        bot.anchor_stats = AnchorStats()
+        p = Patrol(bot, rng=random.Random(2))
+        for _ in range(12):
+            p.tick()
+        rows = {r["name"]: r for r in bot.anchor_stats.rows("m", ["a0", "a1"])}
+        self.assertGreater(rows["a0"]["visits"], 0)
+        self.assertGreater(rows["a1"]["misses"], 0)                 # can't reach MID
+        self.assertIn("unreachable after retries", rows["a1"]["skips"])
+
     def test_repeated_misses_ban_the_anchor(self):
         bot = PatrolBot([FLOOR, MID], (60, 100), [(20, 100), (80, 84)], up=5, rope=0)
         p = Patrol(bot, rng=random.Random(0))
