@@ -603,6 +603,48 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command("layout|plat|undo|m1")
             self.assertEqual(len(MapStore(tmp).get("m1").platforms), 2)
 
+    def _with_anchors(self, tmp, platforms, anchors):
+        entry = MapStore(tmp).get("m1")
+        entry.platforms = platforms
+        entry.rotation.anchors = [Anchor(n, x / 200, y / 150) for n, x, y in anchors]
+        self.host.maps.save(entry)
+        self.host.maps.reload()
+
+    def _anchor_px(self, tmp):
+        return {a.name: (round(a.x * 200, 1), round(a.y * 150, 1))
+                for a in MapStore(tmp).get("m1").rotation.anchors}
+
+    def test_tidy_moves_anchors_with_their_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            # Wobbly line: y 40 at x=20 → y 44 at x=180 (levels at 42).
+            # a0 floats 5px above it at x=20; a1 stands on another platform.
+            self._with_anchors(
+                tmp,
+                [[0.1, 40 / 150, 0.9, 44 / 150], [0.1, 100 / 150, 0.9, 100 / 150]],
+                [("a0", 20, 35), ("a1", 100, 96)],
+            )
+            self.host._handle_command("layout|plat|tidy|m1")
+            got = self._anchor_px(tmp)
+            self.assertAlmostEqual(got["a0"][1], 37.0, delta=0.2)   # 42 - 5
+            self.assertEqual(got["a0"][0], 20.0)                    # x kept
+            self.assertEqual(got["a1"], (100.0, 96.0))               # untouched
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 35.0, delta=0.2)
+
+    def test_merging_a_drag_moves_anchors_on_the_merged_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self._with_anchors(tmp, [[0.05, 40 / 150, 0.5, 40 / 150]],
+                               [("a0", 50, 36)])
+            # Overlapping drag 1px lower and longer: merged row ~40.5.
+            self.host._handle_command("layout|plat|90,41,190,41|m1")
+            (x0, y0, x1, y1), = self._plats_px(tmp)
+            a0 = self._anchor_px(tmp)["a0"]
+            self.assertAlmostEqual(a0[1], y0 - 4, delta=0.2)          # float kept
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertAlmostEqual(self._anchor_px(tmp)["a0"][1], 36.0, delta=0.2)
+
     def test_maps_event_carries_platform_fit(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

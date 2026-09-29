@@ -72,8 +72,11 @@ truth, no per-section map names.
   at its mean height — real slopes stay — and level segments on the same
   row (within 2px) that overlap or touch merge into one. **Tidy
   platforms** (Setup → Map) applies the same to a map drawn earlier.
-  **Undo** restores the list as it was before the last edit (so undoing
-  a merge brings back what was there), **Clear** wipes.
+  Anchors move with their line: when a platform is levelled, merged or
+  tidied, each anchor standing on it keeps its x and its float above the
+  line. **Undo** restores the list — and those anchors — as they were
+  before the last edit (so undoing a merge brings back what was there),
+  **Clear** wipes.
 - **Platform fit** (Setup → Map) — while the bot runs, it records where
   the feet settle on each drawn platform (a standstill of ±1px for 0.3s,
   with exactly one platform within 8px). Each platform lists its median

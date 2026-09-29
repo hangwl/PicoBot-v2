@@ -732,7 +732,8 @@ class BotHost:
         stack = self._layout_undo.setdefault((entry.name, field), [])
         if payload == "undo":
             if stack:
-                segs = stack.pop()          # before the last edit (merges too)
+                segs, anchors = stack.pop()  # before the last edit (merges too)
+                self._restore_anchors(entry, anchors)
             elif segs:
                 segs.pop()
             else:
@@ -746,7 +747,7 @@ class BotHost:
             )
             return
         if payload == "clear":
-            stack.append(segs)
+            stack.append((segs, self._anchor_snapshot(entry)))
             setattr(entry, field, None)
             self._save_entry(entry)
             self.bus.emit("map", f"{label} cleared for {entry.name}")
@@ -760,12 +761,14 @@ class BotHost:
             if tidied == segs:
                 self.bus.emit("map", f"{entry.name}: {label}s already tidy")
                 return
-            stack.append(segs)
+            stack.append((segs, self._anchor_snapshot(entry)))
+            moved = self._resnap_anchors(entry, segs, tidied, *size)
             setattr(entry, field, tidied or None)
             self._save_entry(entry)
             self.bus.emit(
                 "map",
-                f"{entry.name}: tidied {label}s ({len(segs)} → {len(tidied)})",
+                f"{entry.name}: tidied {label}s ({len(segs)} → {len(tidied)})"
+                + (f", moved {moved} anchor(s) with their lines" if moved else ""),
             )
             return
         try:
@@ -794,14 +797,74 @@ class BotHost:
             round(seg[0] / w, 4), round(seg[1] / h, 4),
             round(seg[2] / w, 4), round(seg[3] / h, 4),
         ])
+        stack.append((before, self._anchor_snapshot(entry)))
+        del stack[:-50]
         if field == "platforms":
             # Hand drags are never level: straighten, merge same-row overlaps.
             segs = self._tidy(segs, w, h)
-        stack.append(before)
-        del stack[:-50]
+            self._resnap_anchors(entry, before, segs, w, h)
         setattr(entry, field, segs)
         self._save_entry(entry)
         self.bus.emit("map", f"{entry.name}: {label} {len(segs)} drawn")
+
+    @staticmethod
+    def _anchor_snapshot(entry) -> dict:
+        return {a.name: (a.x, a.y) for a in entry.rotation.anchors}
+
+    @staticmethod
+    def _restore_anchors(entry, snap: dict) -> None:
+        for a in entry.rotation.anchors:
+            if a.name in snap:
+                a.x, a.y = snap[a.name]
+
+    @staticmethod
+    def _resnap_anchors(entry, old_segs, new_segs, w: int, h: int) -> int:
+        """Move anchors with the platform they stand on when its line
+        moves (levelled, merged, redrawn). Each keeps its x and its own
+        float above the line. Returns how many moved."""
+        def rows(segs):
+            out = []
+            for s in segs or []:
+                x0, y0, x1, y1 = s[0] * w, s[1] * h, s[2] * w, s[3] * h
+                if x1 < x0:
+                    x0, y0, x1, y1 = x1, y1, x0, y0
+                out.append((x0, y0, x1, y1))
+            return out
+
+        def row_at(p, x):
+            x0, y0, x1, y1 = p
+            t = 0.0 if x1 == x0 else min(1.0, max(0.0, (x - x0) / (x1 - x0)))
+            return y0 + t * (y1 - y0)
+
+        old, new = rows(old_segs), rows(new_segs)
+        moved = 0
+        for a in entry.rotation.anchors:
+            ax, ay = a.x * w, a.y * h
+            # The platform it stands on — the planner's rule: up to 8px
+            # above the line, 2px below.
+            best = None
+            for p in old:
+                if not p[0] - 3 <= ax <= p[2] + 3:
+                    continue
+                d = row_at(p, ax) - ay
+                if -2 <= d <= 8 and (best is None or d < best[0]):
+                    best = (d, row_at(p, ax))
+            if best is None:
+                continue
+            float_px, old_row = best
+            cands = [
+                row_at(p, ax) for p in new
+                if p[0] - 3 <= ax <= p[2] + 3
+                and abs(row_at(p, ax) - old_row) <= 4
+            ]
+            if not cands:
+                continue
+            new_row = min(cands, key=lambda r: abs(r - old_row))
+            if abs(new_row - old_row) < 0.05:
+                continue
+            a.y = round((new_row - float_px) / h, 4)
+            moved += 1
+        return moved
 
     @staticmethod
     def _tidy(segs, w: int, h: int) -> list:
