@@ -175,6 +175,171 @@ pub fn skills_to_json(skills: &[Skill]) -> Value {
     )
 }
 
+/// Charges left, and when the next one returns (None when full).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Charges {
+    have: u32,
+    next: Option<f64>,
+}
+
+/// Named skills plus their cooldown state. Times are seconds on one clock
+/// (the caller's `now`), which keeps every rule testable.
+#[derive(Debug, Clone, Default)]
+pub struct SkillBook {
+    skills: Vec<Skill>,
+    charges: std::collections::HashMap<String, Charges>,
+}
+
+impl SkillBook {
+    pub fn new(skills: Vec<Skill>) -> Self {
+        SkillBook {
+            skills,
+            charges: Default::default(),
+        }
+    }
+
+    pub fn skills(&self) -> &[Skill] {
+        &self.skills
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Skill> {
+        self.skills.iter().find(|s| s.name == name)
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    pub fn len(&self) -> usize {
+        self.skills.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
+    }
+
+    /// Merge definitions over the book (by name; new ones go last).
+    pub fn overlay(&mut self, skills: &[Skill]) {
+        for s in skills {
+            match self.skills.iter_mut().find(|x| x.name == s.name) {
+                Some(slot) => *slot = s.clone(),
+                None => self.skills.push(s.clone()),
+            }
+        }
+    }
+
+    /// Keep `other`'s cooldowns and charges for skills of the same name,
+    /// so a rebuilt book doesn't make everything ready at once.
+    pub fn carry_from(mut self, other: &SkillBook) -> Self {
+        for (name, state) in &other.charges {
+            if let Some(max) = self.get(name).map(|s| s.charges) {
+                let have = state.have.min(max);
+                self.charges.insert(
+                    name.clone(),
+                    Charges {
+                        have,
+                        next: state.next,
+                    },
+                );
+            }
+        }
+        self
+    }
+
+    /// Charges after recharging up to `now`: one returns per cooldown
+    /// while below the maximum.
+    fn sync(&mut self, idx: usize, now: f64) -> Charges {
+        let skill = &self.skills[idx];
+        let mut c = self.charges.get(&skill.name).copied().unwrap_or(Charges {
+            have: skill.charges,
+            next: None,
+        });
+        while c.have < skill.charges {
+            match c.next {
+                Some(t) if now >= t => {
+                    c.have += 1;
+                    c.next = (c.have < skill.charges).then_some(t + skill.cooldown);
+                }
+                _ => break,
+            }
+        }
+        self.charges.insert(skill.name.clone(), c);
+        c
+    }
+
+    fn index(&self, name: &str) -> Option<usize> {
+        self.skills.iter().position(|s| s.name == name)
+    }
+
+    pub fn charges(&mut self, name: &str, now: f64) -> u32 {
+        let Some(i) = self.index(name) else { return 0 };
+        if self.skills[i].cooldown <= 0.0 {
+            return self.skills[i].charges;
+        }
+        self.sync(i, now).have
+    }
+
+    /// Seconds until usable (0 with a charge left).
+    pub fn remaining(&mut self, name: &str, now: f64) -> f64 {
+        let Some(i) = self.index(name) else {
+            return 0.0;
+        };
+        if self.skills[i].cooldown <= 0.0 {
+            return 0.0;
+        }
+        let c = self.sync(i, now);
+        match c.next {
+            Some(t) if c.have == 0 => (t - now).max(0.0),
+            _ => 0.0,
+        }
+    }
+
+    pub fn ready(&mut self, name: &str, now: f64) -> bool {
+        self.contains(name) && self.remaining(name, now) <= 0.0
+    }
+
+    pub fn mark_used(&mut self, name: &str, now: f64) {
+        let Some(i) = self.index(name) else { return };
+        let cooldown = self.skills[i].cooldown;
+        if cooldown <= 0.0 {
+            return;
+        }
+        let c = self.sync(i, now);
+        let next = c.next.unwrap_or(now + cooldown); // recharge starts with the first use
+        self.charges.insert(
+            name.to_owned(),
+            Charges {
+                have: c.have.saturating_sub(1),
+                next: Some(next),
+            },
+        );
+    }
+
+    fn ready_of(&mut self, kind: SkillKind, now: f64) -> Vec<Skill> {
+        // Two passes: `remaining` needs `&mut self` (it recharges), so it
+        // can't run inside an iterator that also borrows `self.skills`.
+        let candidates: Vec<usize> = (0..self.skills.len())
+            .filter(|&i| self.skills[i].kind == kind)
+            .collect();
+        let mut ready = Vec::new();
+        for i in candidates {
+            let name = self.skills[i].name.clone();
+            if self.remaining(&name, now) <= 0.0 {
+                ready.push(self.skills[i].clone());
+            }
+        }
+        ready
+    }
+
+    pub fn ready_attacks(&mut self, now: f64) -> Vec<Skill> {
+        self.ready_of(SkillKind::Attack, now)
+    }
+
+    pub fn due_buffs(&mut self, now: f64) -> Vec<Skill> {
+        self.ready_of(SkillKind::Buff, now)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +363,101 @@ mod tests {
     fn rejects_unknown_kind_and_missing_key() {
         assert!(Skill::from_json("x", &json!({"key": "a", "kind": "dance"})).is_err());
         assert!(Skill::from_json("x", &json!({"kind": "attack"})).is_err());
+    }
+}
+
+#[cfg(test)]
+mod book_tests {
+    use super::*;
+
+    fn skill(name: &str, cooldown: f64, kind: SkillKind, charges: u32) -> Skill {
+        Skill {
+            cooldown,
+            kind,
+            charges,
+            ..Skill::new(name, name)
+        }
+    }
+
+    #[test]
+    fn zero_cooldown_is_always_ready() {
+        let mut b = SkillBook::new(vec![skill("a", 0.0, SkillKind::Attack, 1)]);
+        b.mark_used("a", 0.0);
+        assert!(b.ready("a", 0.0));
+        assert!(!b.ready("nope", 0.0));
+    }
+
+    #[test]
+    fn cooldown_counts_down() {
+        let mut b = SkillBook::new(vec![skill("s", 60.0, SkillKind::Attack, 1)]);
+        b.mark_used("s", 100.0);
+        assert!(!b.ready("s", 110.0));
+        assert_eq!(b.remaining("s", 110.0), 50.0);
+        assert!(b.ready("s", 161.0));
+    }
+
+    #[test]
+    fn ready_attacks_and_due_buffs() {
+        let mut b = SkillBook::new(vec![
+            skill("spam", 0.0, SkillKind::Attack, 1),
+            skill("burst", 30.0, SkillKind::Attack, 1),
+            skill("holy", 120.0, SkillKind::Buff, 1),
+            skill("fountain", 57.0, SkillKind::Summon, 1),
+        ]);
+        let names = |v: Vec<Skill>| v.into_iter().map(|s| s.name).collect::<Vec<_>>();
+        assert_eq!(names(b.ready_attacks(0.0)), ["spam", "burst"]);
+        assert_eq!(names(b.due_buffs(0.0)), ["holy"]);
+        b.mark_used("burst", 0.0);
+        assert_eq!(names(b.ready_attacks(1.0)), ["spam"]);
+    }
+
+    #[test]
+    fn charges_return_one_per_cooldown() {
+        let mut b = SkillBook::new(vec![skill("s", 10.0, SkillKind::Summon, 2)]);
+        b.mark_used("s", 100.0);
+        b.mark_used("s", 101.0);
+        assert_eq!(b.charges("s", 101.0), 0);
+        assert_eq!(b.charges("s", 110.5), 1); // first back at 110
+        assert_eq!(b.charges("s", 119.0), 1);
+        assert_eq!(b.charges("s", 120.0), 2); // second at 120
+        assert_eq!(b.charges("s", 500.0), 2); // never above max
+    }
+
+    #[test]
+    fn use_while_recharging_keeps_the_timer() {
+        let mut b = SkillBook::new(vec![skill("s", 10.0, SkillKind::Summon, 2)]);
+        b.mark_used("s", 100.0); // timer -> 110
+        b.mark_used("s", 105.0); // still -> 110
+        assert_eq!(b.charges("s", 110.0), 1);
+    }
+
+    #[test]
+    fn rebuilt_book_keeps_cooldowns_and_caps_charges() {
+        let mut old = SkillBook::new(vec![
+            skill("burst", 30.0, SkillKind::Attack, 1),
+            skill("orb", 60.0, SkillKind::Summon, 3),
+        ]);
+        old.mark_used("burst", 100.0);
+        old.charges("orb", 100.0);
+        let mut new = SkillBook::new(vec![
+            skill("burst", 30.0, SkillKind::Attack, 1),
+            skill("orb", 60.0, SkillKind::Summon, 1),
+            skill("fresh", 10.0, SkillKind::Attack, 1),
+        ])
+        .carry_from(&old);
+        assert!(!new.ready("burst", 110.0)); // still cooling
+        assert_eq!(new.charges("orb", 100.0), 1); // 3 capped to 1
+        assert!(new.ready("fresh", 100.0));
+    }
+
+    #[test]
+    fn overlay_replaces_by_name_and_appends() {
+        let mut b = SkillBook::new(vec![skill("a", 0.0, SkillKind::Attack, 1)]);
+        b.overlay(&[
+            skill("a", 5.0, SkillKind::Attack, 1),
+            skill("b", 5.0, SkillKind::Buff, 1),
+        ]);
+        assert_eq!(b.len(), 2);
+        assert_eq!(b.get("a").unwrap().cooldown, 5.0);
     }
 }

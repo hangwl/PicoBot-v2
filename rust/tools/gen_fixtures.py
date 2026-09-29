@@ -121,11 +121,103 @@ def reach() -> None:
     m.save(force=True)
 
 
+def traces() -> None:
+    """Seeded random operations through the Python logic, with every
+    result recorded: the Rust side replays them and must agree."""
+    import random
+
+    from picobot.bot.platform_fit import PlatformFit, tidy_segments
+    from picobot.bot.skills import SkillBook
+
+    rng = random.Random(7)
+    moves = ["jump", "flash", "double_flash", "up_flash", "up_side_flash",
+             "rope_lift", "teleport"]
+
+    # Reach learning.
+    m = ReachModel(base_reach(BotConfig()))
+    ops, states = [], []
+    for _ in range(400):
+        mv = rng.choice(moves)
+        if rng.random() < 0.05:
+            dx = rng.choice([None, round(rng.uniform(5, 60), 2)])
+            rise = rng.choice([None, round(rng.uniform(3, 40), 2)])
+            m.calibrate(mv, dx=dx, rise=rise)
+            ops.append(["calibrate", mv, dx, rise])
+        else:
+            e = m.get(mv)
+            planned = [round(rng.uniform(0, e.dx * 1.3), 2), round(rng.uniform(-5, e.rise * 1.3), 2)]
+            observed = [round(planned[0] + rng.uniform(-12, 8), 2),
+                        round(planned[1] + rng.uniform(-12, 8), 2)]
+            ok = rng.random() < 0.55
+            m.observe(mv, planned=tuple(planned), observed=tuple(observed), ok=ok)
+            ops.append(["observe", mv, planned, observed, ok])
+        fin = lambda v: None if v == float("inf") else round(v, 6)  # noqa: E731
+        states.append([[k, round(v.dx, 6), round(v.rise, 6),
+                        *((fin(m.ceiling[k].dx), fin(m.ceiling[k].rise))
+                          if k in m.ceiling else ())]
+                       for k, v in m.est.items()])
+    (OUT / "trace_reach.json").write_text(json.dumps({"ops": ops, "states": states}))
+
+    # Skill book: charges and cooldowns under random use.
+    specs = {"s1": {"key": "a", "cooldown": 10.0},
+             "s2": {"key": "b", "cooldown": 7.5, "kind": "summon", "charges": 3},
+             "s3": {"key": "c", "cooldown": 0.0},
+             "s4": {"key": "d", "cooldown": 30.0, "kind": "buff", "charges": 2}}
+    book = SkillBook({n: Skill.from_dict(n, s) for n, s in specs.items()})
+    now, steps = 0.0, []
+    for _ in range(400):
+        now = round(now + rng.uniform(0, 6), 3)
+        name = rng.choice(list(specs))
+        if rng.random() < 0.5:
+            book.mark_used(name, now=now)
+            steps.append(["use", name, now])
+        else:
+            steps.append(["check", name, now, book.charges(name, now=now),
+                          round(book.remaining(name, now=now), 6),
+                          sorted(s.name for s in book.ready_attacks(now=now)),
+                          sorted(s.name for s in book.due_buffs(now=now))])
+    (OUT / "trace_skills.json").write_text(json.dumps({"skills": specs, "steps": steps}))
+
+    # Tidy: random drags, some near-flat, some overlapping, some sloped.
+    cases = []
+    for _ in range(200):
+        segs = []
+        for _ in range(rng.randint(1, 6)):
+            y = rng.choice([40, 41, 60, 80.5])
+            x0 = round(rng.uniform(0, 150), 1)
+            segs.append([x0, round(y + rng.uniform(-3, 3), 1),
+                         round(x0 + rng.uniform(-40, 60), 1),
+                         round(y + rng.choice([rng.uniform(-3, 3), rng.uniform(-15, 15)]), 1)])
+        cases.append({"in": segs, "out": [list(s) for s in tidy_segments(segs)]})
+    (OUT / "trace_tidy.json").write_text(json.dumps(cases))
+
+    # Platform fit: a walk with pauses over three drawn lines.
+    segs = [[0.1, 0.5, 0.6, 0.5], [0.1, 0.8, 0.9, 0.8], [0.62, 0.3, 0.9, 0.34]]
+    region = (0, 0, 200, 100)
+    clock = [0.0]
+    fit = PlatformFit(clock=lambda: clock[0])
+    feed = []
+    for _ in range(600):
+        clock[0] = round(clock[0] + rng.uniform(0.05, 0.2), 3)
+        if rng.random() < 0.7 and feed:
+            pos = feed[-1][1]                      # standing still
+        else:
+            row = rng.choice([50, 80, 32])
+            pos = [rng.randint(15, 185), row + rng.randint(-9, 9)]
+        fit.observe("m", segs, region, tuple(pos))
+        feed.append([clock[0], pos])
+    (OUT / "trace_fit.json").write_text(json.dumps({
+        "segs": segs, "feed": feed,
+        "summary": fit.summary("m", segs, region),
+    }))
+
+
 if __name__ == "__main__":
     shutil.rmtree(OUT, ignore_errors=True)
     OUT.mkdir(parents=True)
     maps()
     config()
     reach()
+    traces()
     for p in sorted(OUT.rglob("*.json")):
         print(p.relative_to(OUT))

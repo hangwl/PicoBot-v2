@@ -64,8 +64,10 @@ cargo clippy --all-targets; cargo fmt
 ```
 
 Parity fixtures in `crates/core/tests/fixtures/` are written by the
-Python code and must round-trip byte-for-byte; `.gitattributes` keeps
-them out of line-ending conversion.
+Python code: data files must round-trip byte-for-byte (`tests/parity.rs`),
+and `trace_*.json` hold seeded operations with the Python results, which
+`tests/traces.rs` replays. `.gitattributes` keeps them out of line-ending
+conversion.
 
 ## Status
 
@@ -77,6 +79,15 @@ them out of line-ending conversion.
   `skills` (definitions), `reach` (file format), `json` (Python-compatible
   coercions and `json.dumps` output). Fixtures and the real data folder
   (12 maps, 2 reach files, config) round-trip byte-for-byte.
+- **M2** — done: `timing` (log-normal delays, session tempo with a
+  mean-reverting drift, injectable RNG/clock), `SkillBook` (charges,
+  cooldowns, carry-over), `summons`, `anchor_stats`, reach learning
+  (`observe` / `calibrate` / `limit` / `fits` / `plateau`, throttled save),
+  `platform_fit` (straighten, merge, tidy, fit diagnostic). Time is always
+  passed in (`now`) rather than read inside the logic. Behaviour traces —
+  seeded random operations run through the Python code with every result
+  recorded (400 reach steps, 400 skill-book checks, 200 tidy cases, a
+  platform-fit walk) — replay identically in Rust.
 
 ## Milestones
 
