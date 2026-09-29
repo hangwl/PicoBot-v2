@@ -124,6 +124,20 @@ conversion.
   0.21 vs 1.6 ms). Wall time is ~7 ms for both: the capture waits for the
   compositor's next frame, which costs no CPU. `CAPTUREBLT` is off by
   default (no measurable difference; the game isn't a layered window).
+- **M6** — done: `core::bot`. A `Body` trait holds the world the bot
+  needs (keys, frames, the player dot, hazards, focus, clock, map) and
+  provides the movement primitives as default methods; `BotState` is the
+  bot-owned state. On top: `Navigator` (legs, the takeoff-then-steady
+  landing rule, rope fallback), `Patrol` (planned loops, splices, bans,
+  rope learning, dashboard status), the grind routines (arrival skills,
+  summons, buffs, weave), `Machine` (GRIND / TRAVEL / PAUSE with resume),
+  `FlightRecorder` (a sampling thread) with `Flight` analysis, and
+  `MoveMeasurer` (per-move calibration and the up-flash timing sweep; it
+  runs blocking, so the host gives it a thread). Everything is generic over
+  the body: the tests run a physics sim (`tests/sim`) in place of the game,
+  with the Python navigator, patrol, machine, flight and measure suites
+  ported (81 tests), and a key-recording body checks the exact key
+  sequences the Pico would receive (7 more).
 
 ## Milestones
 

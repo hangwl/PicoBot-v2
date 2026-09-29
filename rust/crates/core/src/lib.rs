@@ -3,6 +3,7 @@
 //! `docs/rust-migration.md`).
 
 pub mod anchor_stats;
+pub mod bot;
 pub mod config;
 pub mod error;
 pub mod fileio;
