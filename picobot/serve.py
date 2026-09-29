@@ -186,6 +186,13 @@ class BotHost:
         self.bot_thread: Optional[threading.Thread] = None
         self._bot_stop = threading.Event()
         self.measurer = None
+        from .bot.platform_fit import PlatformFit
+
+        # Where the feet settle on each drawn platform (diagnostic only).
+        self.platfit = PlatformFit(on_change=self._platfit_changed)
+        self._platfit_sent = 0.0
+        # (map, field) -> snapshots of the segment list before each edit.
+        self._layout_undo: dict = {}
 
         callbacks = RemoteCallbacks(
             schedule=lambda fn: fn(),
@@ -340,6 +347,7 @@ class BotHost:
                 notify_callback=self.telegram.send_message,
                 event_bus=bus,
             )
+            self.bot.platfit = self.platfit
             if self._bot_stop.is_set():
                 return
             self.bus.emit("bot", "started")
@@ -721,11 +729,15 @@ class BotHost:
             self.bus.emit("error", err)
             return
         segs = list(getattr(entry, field) or [])
+        stack = self._layout_undo.setdefault((entry.name, field), [])
         if payload == "undo":
-            if not segs:
+            if stack:
+                segs = stack.pop()          # before the last edit (merges too)
+            elif segs:
+                segs.pop()
+            else:
                 self.bus.emit("map", f"{entry.name}: no {label} to undo")
                 return
-            segs.pop()
             setattr(entry, field, segs or None)
             self._save_entry(entry)
             self.bus.emit(
@@ -734,9 +746,27 @@ class BotHost:
             )
             return
         if payload == "clear":
+            stack.append(segs)
             setattr(entry, field, None)
             self._save_entry(entry)
             self.bus.emit("map", f"{label} cleared for {entry.name}")
+            return
+        if payload == "tidy":
+            size = self._minimap_size()
+            if size is None:
+                self.bus.emit("error", f"no minimap frame — can't tidy {label}")
+                return
+            tidied = self._tidy(segs, *size)
+            if tidied == segs:
+                self.bus.emit("map", f"{entry.name}: {label}s already tidy")
+                return
+            stack.append(segs)
+            setattr(entry, field, tidied or None)
+            self._save_entry(entry)
+            self.bus.emit(
+                "map",
+                f"{entry.name}: tidied {label}s ({len(segs)} → {len(tidied)})",
+            )
             return
         try:
             seg = [float(v) for v in payload.split(",")]
@@ -759,13 +789,37 @@ class BotHost:
                 or seg[1] > h or seg[3] > h:
             self.bus.emit("error", f"{label} drag is off the minimap")
             return
+        before = list(segs)
         segs.append([
             round(seg[0] / w, 4), round(seg[1] / h, 4),
             round(seg[2] / w, 4), round(seg[3] / h, 4),
         ])
+        if field == "platforms":
+            # Hand drags are never level: straighten, merge same-row overlaps.
+            segs = self._tidy(segs, w, h)
+        stack.append(before)
+        del stack[:-50]
         setattr(entry, field, segs)
         self._save_entry(entry)
         self.bus.emit("map", f"{entry.name}: {label} {len(segs)} drawn")
+
+    @staticmethod
+    def _tidy(segs, w: int, h: int) -> list:
+        """Straighten + merge normalized segments (thresholds are px)."""
+        from .bot.platform_fit import tidy_segments
+
+        px = [(s[0] * w, s[1] * h, s[2] * w, s[3] * h) for s in segs]
+        return [
+            [round(x0 / w, 4), round(y0 / h, 4), round(x1 / w, 4), round(y1 / h, 4)]
+            for x0, y0, x1, y1 in tidy_segments(px)
+        ]
+
+    def _minimap_size(self):
+        img = self._minimap_frame_img()
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        return w, h
 
     def _layout_platform(self, msg: str) -> None:
         self._layout_segments(msg, "platforms", "platform")
@@ -975,8 +1029,28 @@ class BotHost:
             # Setup-checklist state for the resolved map.
             "platforms_n": len(entry.platforms or []) if entry else 0,
             "anchors_n": len(entry.rotation.anchors) if entry else 0,
+            "platform_fit": self.platfit.summary(
+                entry.name if entry else None,
+                entry.platforms if entry else None,
+                self._live_region(),
+            ),
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _live_region(self):
+        bot = self.bot
+        if bot is not None and bot.minimap.region:
+            return bot.minimap.region
+        feed = self._feed
+        return feed.minimap.region if feed is not None else None
+
+    def _platfit_changed(self, _map_name: str) -> None:
+        """New standing sample (bot thread): refresh the dashboard, at
+        most every few seconds."""
+        now = time.monotonic()
+        if now - self._platfit_sent >= 5.0:
+            self._platfit_sent = now
+            self._send_maps()
 
     def _send_class(self) -> None:
         """Class profiles + patrol policy for the dashboard selectors."""
@@ -1432,6 +1506,7 @@ class BotHost:
             notify_callback=self.telegram.send_message,
             event_bus=self.bus,
         )
+        bot.platfit = self.platfit
         def on_status(status: dict) -> None:
             self._send_measure(status)
             if not status["running"]:

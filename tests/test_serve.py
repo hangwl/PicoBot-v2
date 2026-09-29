@@ -248,6 +248,10 @@ class HostCommandTests(unittest.TestCase):
         self.save_mock = self.save_patch.start()
         self.host = BotHost(None, "OldWin", config=AppConfig())
         self.host.identity.threaded = False
+        # Never read or write the project's real nav_reach.json.
+        from picobot.bot.reach import ReachModel, base_reach
+
+        self.host.reach = ReachModel(base_reach(self.host.bot_config))
         self.sent = []
         self.host.remote.broadcast = self.sent.append
 
@@ -551,6 +555,65 @@ class HostCommandTests(unittest.TestCase):
             self.assertEqual(len(MapStore(tmp).get("m1").platforms), 1)
             self.host._handle_command("layout|plat|clear|m1")
             self.assertIsNone(MapStore(tmp).get("m1").platforms)
+
+    def _plat_host(self, tmp):
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        feed.minimap.region = (0, 0, 200, 150)
+        self.host._feed = feed
+        self._use_store(tmp)
+        self.host.maps.save(MapEntry(name="m1"))
+
+    def _plats_px(self, tmp):
+        return [[round(v * (200 if i % 2 == 0 else 150), 1) for i, v in enumerate(s)]
+                for s in MapStore(tmp).get("m1").platforms or []]
+
+    def test_wobbly_drag_is_saved_level(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self.host._handle_command("layout|plat|10,40,100,42|m1")
+            (x0, y0, x1, y1), = self._plats_px(tmp)
+            self.assertEqual(y0, y1)
+            self.assertAlmostEqual(y0, 41.0, delta=0.1)
+
+    def test_overlapping_drags_merge_and_undo_restores(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self.host._handle_command("layout|plat|10,40,100,40|m1")
+            self.host._handle_command("layout|plat|90,41,160,41|m1")
+            merged = self._plats_px(tmp)
+            self.assertEqual(len(merged), 1)
+            self.assertAlmostEqual(merged[0][0], 10, delta=0.5)
+            self.assertAlmostEqual(merged[0][2], 160, delta=0.5)
+            self.host._handle_command("layout|plat|undo|m1")
+            back = self._plats_px(tmp)
+            self.assertEqual(len(back), 1)                 # the first drag, intact
+            self.assertAlmostEqual(back[0][2], 100, delta=0.5)
+
+    def test_tidy_command_cleans_existing_drawings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            entry = MapStore(tmp).get("m1")
+            entry.platforms = [[0.05, 0.3, 0.3, 0.31], [0.25, 0.3067, 0.6, 0.3]]
+            self.host.maps.save(entry)
+            self.host.maps.reload()
+            self.host._handle_command("layout|plat|tidy|m1")
+            self.assertEqual(len(MapStore(tmp).get("m1").platforms), 1)
+            self.host._handle_command("layout|plat|undo|m1")
+            self.assertEqual(len(MapStore(tmp).get("m1").platforms), 2)
+
+    def test_maps_event_carries_platform_fit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self.host._handle_command("layout|plat|10,40,100,40|m1")
+            with patch.object(self.host, "_resolved_entry",
+                              return_value=MapStore(tmp).get("m1")):
+                self.host._send_maps()
+            fit = [json.loads(m[5:]) for m in self.sent
+                   if '"event": "maps"' in m][-1]["platform_fit"]
+            self.assertEqual(len(fit), 1)
+            self.assertEqual(fit[0]["n"], 0)
 
     def test_platform_draw_ignores_accidental_click(self):
         img = np.zeros((150, 200, 3), dtype=np.uint8)

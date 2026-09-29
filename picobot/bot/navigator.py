@@ -266,7 +266,11 @@ class Navigator:
     # -- Perception ------------------------------------------------------------------
     def _pos(self) -> Optional[Point]:
         img = self.bot.minimap_frame()
-        return self.bot.minimap.player_pos(img) if img is not None else None
+        pos = self.bot.minimap.player_pos(img) if img is not None else None
+        note = getattr(self.bot, "_note_pos", None)
+        if note is not None and pos is not None:
+            note(pos)
+        return pos
 
     def _settle(self, quick: bool = False, timeout: float = 0.7) -> Optional[Point]:
         """Position once the player dot is stable (within ~1.5px for two

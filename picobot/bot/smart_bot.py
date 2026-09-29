@@ -217,6 +217,19 @@ class SmartBot(BotBase):
             (self.window.client_left + x, self.window.client_top + y, w, h)
         )
 
+    def _note_pos(self, pos) -> None:
+        """Feed the host's platform-fit diagnostic (if attached)."""
+        fit = getattr(self, "platfit", None)
+        if fit is None:
+            return
+        entry = self._current_map_entry()
+        fit.observe(
+            entry.name if entry else None,
+            entry.platforms if entry else None,
+            self.minimap.region,
+            pos,
+        )
+
     def player_pos(self, img=None) -> Optional[Tuple[int, int]]:
         if img is None:
             img = self.minimap_frame()
@@ -646,6 +659,7 @@ class SmartBot(BotBase):
                 if pos is None:
                     self.sleep(0.5)
                     continue
+                self._note_pos(pos)
                 cx, cy = pos
                 if hop_from is not None:
                     moved = abs(cx - hop_from)

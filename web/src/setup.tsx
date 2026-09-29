@@ -3,7 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import { Icon, type IconName } from "./icons";
 import { kitLabel } from "./live";
-import { type AppState, go, send } from "./protocol";
+import { type AppState, type PlatformFitRow, go, send } from "./protocol";
 
 // -- Readiness -------------------------------------------------------------------
 function allMeasured(s: AppState): boolean {
@@ -261,7 +261,57 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
         {wide
           ? "Draw platforms and place anchors with the tools under the view."
           : "Draw platforms and place anchors from the desktop dashboard."}
+        {" "}Near-flat drags are levelled and same-row overlaps merged.
       </p>
+      {s.platformsN > 0 && (
+        <div class="actions">
+          <button onClick={() => send(`layout|plat|tidy|${target}`)}
+                  disabled={creating || bad}>
+            Tidy platforms
+          </button>
+          <button onClick={() => send(`layout|plat|undo|${target}`)}
+                  disabled={creating || bad}>
+            Undo platform
+          </button>
+        </div>
+      )}
+      {s.platformFit.length > 0 && <PlatformFitList rows={s.platformFit} />}
+    </div>
+  );
+}
+
+const FIT_MIN = 5;
+
+function fitStatus(r: PlatformFitRow): [string, string] {
+  if (r.n < FIT_MIN || r.offset === undefined)
+    return [`Collecting (${r.n}/${FIT_MIN})`, ""];
+  const off = r.offset;
+  if (Math.abs(off) < 1.5) return [`Fits (${off > 0 ? "+" : ""}${off}px)`, "ok"];
+  return off > 0
+    ? [`Feet ${off}px below: drawn too high`, "warn"]
+    : [`Feet ${-off}px above: drawn too low`, "warn"];
+}
+
+function PlatformFitList({ rows }: { rows: PlatformFitRow[] }) {
+  return (
+    <div class="fit">
+      <h3>Platform fit</h3>
+      <p class="hint">
+        Where the character's feet settle on each platform while the bot
+        runs. A line drawn too high stops the bot from seeing it stands
+        there; redraw it at the feet.
+      </p>
+      <ul class="rows">
+        {rows.map((r) => {
+          const [text, tone] = fitStatus(r);
+          return (
+            <li key={`${r.row}-${r.x0}-${r.x1}`}>
+              <b>y {Math.round(r.row)} · x {r.x0}–{r.x1}</b>
+              <span class={`pill ${tone}`}>{text}</span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

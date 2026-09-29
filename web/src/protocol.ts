@@ -60,6 +60,17 @@ export interface MeasureState {
   results: Record<string, MoveResult>;
 }
 
+/** Where the feet settle on one drawn platform (minimap px). */
+export interface PlatformFitRow {
+  x0: number;
+  x1: number;
+  row: number;
+  n: number;
+  offset?: number;
+  spread?: number;
+  coverage?: number;
+}
+
 export interface HostPort {
   device: string;
   desc?: string;
@@ -77,6 +88,7 @@ export interface AppState {
   reading: boolean;
   platformsN: number;
   anchorsN: number;
+  platformFit: PlatformFitRow[];
   classActive: string;
   profiles: Record<string, ProfileKit>;
   policy: string;
@@ -122,6 +134,7 @@ const initial: AppState = {
   reading: false,
   platformsN: 0,
   anchorsN: 0,
+  platformFit: [],
   classActive: "",
   profiles: {},
   policy: "weighted",
@@ -430,6 +443,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         reading: Boolean(p.reading),
         platformsN: (p.platforms_n as number) ?? 0,
         anchorsN: (p.anchors_n as number) ?? 0,
+        platformFit: (p.platform_fit as PlatformFitRow[]) ?? [],
       });
       return;
     case "class":

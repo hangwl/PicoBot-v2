@@ -182,3 +182,12 @@ fixed that — all 15 captured reads exact afterwards.
   ~8ms of before once the Up lead sleep gives back its gap (without that
   it landed ~25ms late). Tempo differs per process, so timing medians
   must be compared in one process with `TEMPO` pinned.
+- **Hand-drawn platforms** (2026-09-30): drags are never level and
+  ledges get drawn as several overlapping pieces, and the planner's
+  standing test is asymmetric (8px above a line, 2px below), so a line
+  drawn just 3px too high makes the bot think it's off every platform.
+  Near-flat drags are now levelled and same-row overlaps merged at save
+  time; a fit diagnostic reports where the feet actually settle per
+  platform. Auto-correcting from those samples was deferred, and so was
+  drawing learned lines over the view — too cluttered on a map with many
+  platforms.

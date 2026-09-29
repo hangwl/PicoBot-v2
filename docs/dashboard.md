@@ -48,7 +48,9 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
   - **Map and layout** — pin a map, `Auto-detect` (live identity), or
     `New map…` (names the next layout save and pins it); detected map,
     how it was resolved, the accepted title and score; Save layout /
-    Re-detect / Forget (confirmed).
+    Re-detect / Forget (confirmed); Tidy platforms / Undo platform; and
+    the **platform fit** list — per platform, whether the feet settle on
+    its line or it was drawn too high / too low.
   - **Class** — pick or create a profile (name, movement, air attacks,
     teleport key). Switching applies live and stops the bot first.
   - **Skills** — the active skill book (the profile's kit when one is

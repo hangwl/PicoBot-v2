@@ -47,6 +47,9 @@ class Patrol:
         img = bot.minimap_frame()
         pos = bot.minimap.player_pos(img) if img is not None else None
         bot.viz["player"] = pos
+        note = getattr(bot, "_note_pos", None)
+        if note is not None and pos is not None:
+            note(pos)
         if pos is None:
             # Blind: never learn or leap on a guess (the dot may be under
             # UI, or the map loading) — wait until it is seen again.

@@ -67,7 +67,20 @@ truth, no per-section map names.
   them by hand — since minimap size differs per map, prefer fixing
   detection over pinning.
 - **Draw plats** — drag a segment along each platform line on the Panel
-  view; stays armed for successive drags. **Undo** pops, **Clear** wipes.
+  view; stays armed for successive drags. Hand drags are tidied as they
+  are saved: a near-flat drag (ends within 3px, or under 8°) is levelled
+  at its mean height — real slopes stay — and level segments on the same
+  row (within 2px) that overlap or touch merge into one. **Tidy
+  platforms** (Setup → Map) applies the same to a map drawn earlier.
+  **Undo** restores the list as it was before the last edit (so undoing
+  a merge brings back what was there), **Clear** wipes.
+- **Platform fit** (Setup → Map) — while the bot runs, it records where
+  the feet settle on each drawn platform (a standstill of ±1px for 0.3s,
+  with exactly one platform within 8px). Each platform lists its median
+  offset: feet *below* the line mean it was drawn too high — the bot
+  then can't tell it stands there (the planner allows 8px above a line
+  but only 2px below). It only reports; redraw the line at the feet.
+  Samples live in host memory and reset when a platform is redrawn.
 - Ropes are **not drawn** — they're learned: when the bot hangs stable
   at a spot that is on no drawn platform for over 2 seconds, it records
   a rope segment from that spot up to the platform above (persisted in
