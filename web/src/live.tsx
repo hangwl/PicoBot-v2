@@ -14,6 +14,7 @@ import {
   setView,
   useFrame,
 } from "./protocol";
+import { Reply, useReply } from "./ui";
 
 type Tone = "ok" | "warn" | "off";
 
@@ -382,22 +383,16 @@ export function Pad({ s }: { s: AppState }) {
 
 /** Snap the drawn platform under the character onto its feet. */
 export function AlignHere({ s }: { s: AppState }) {
-  const [askedAfter, setAskedAfter] = useState<number | null>(null);
-  const reply = askedAfter === null ? undefined : s.logs.find(
-    (it) => (it.id ?? 0) > askedAfter && (it.kind === "map" || it.kind === "error"),
-  );
+  const [reply, act] = useReply(s);
   const target = s.activeMap;
   return (
     <div class="align">
-      <button disabled={s.ws !== "on"} onClick={() => {
-        setAskedAfter(s.logs.length ? s.logs[s.logs.length - 1].id ?? 0 : 0);
-        send(target ? `layout|plat|here|${target}` : "layout|plat|here");
-      }}>
+      <button disabled={s.ws !== "on"} onClick={() =>
+        act(target ? `layout|plat|here|${target}` : "layout|plat|here")}>
         Align platform to feet
       </button>
-      <p class={`hint ${reply?.kind === "error" ? "warn" : ""}`} role="status">
-        {reply?.msg ?? "Stand still on a platform, then tap to move its drawn line onto your feet."}
-      </p>
+      <Reply reply={reply}
+             idle="Stand still on a platform, then tap to move its drawn line onto your feet." />
     </div>
   );
 }

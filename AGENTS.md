@@ -125,7 +125,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
 | Move measurement | `bot/measure.py`, `bot/flight.py` (dot arc sampler: peak, landing) |
 | Host + dashboard cmds | `serve.py`, `remote/control.py` |
 | Frame pipeline | `remote/streamer.py` (`assemble_panel`, `annotate`) |
-| Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup pages), `keys.ts` (held keys); protocol in `docs/protocol.md` |
+| Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup list + readiness), `pages/*.tsx` (one file per Setup page), `ui.tsx` (shared bits: `Field`, `Section`, `useReply`/`Reply` for the host's answer under a button), `keys.ts` (held keys); protocol in `docs/protocol.md` |
 | Debug frame capture | `vision/framelog.py` → `debug/frames/` |
 
 See `docs/` for the full picture: `architecture.md`, `map-detection.md`,
