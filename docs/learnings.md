@@ -196,3 +196,9 @@ fixed that — all 15 captured reads exact afterwards.
   2px" bridged real gaps (now overlap or meet only), and undo restored
   anchors by name although names are reused (now only anchors the edit
   moved, and only while they're still where it left them).
+- **Off-centre player box** (2026-09-30): `player_pos` returns the feet
+  (bottom row) on purpose, but the overlay drew a 9x9 box *centred* on
+  that point — on real 6x6 dots it missed the top row and hung 4px
+  below. Python's banker's rounding also put an even-width dot's centre
+  (x.5) on alternating sides. The overlay now frames the detected bounds;
+  x rounds half-up.

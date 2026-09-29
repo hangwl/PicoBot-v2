@@ -110,7 +110,7 @@ _CLASS_FIELDS = (
 # Frame-meta keys holding minimap-px coordinates.
 _MINIMAP_OVERLAYS = (
     "platforms", "ropes", "anchors", "nav_edges", "nav_plan", "nav_route",
-    "player", "target", "rune",
+    "player", "player_box", "target", "rune",
 )
 
 
@@ -138,6 +138,9 @@ def _offset_meta(snap: dict, dx: int, dy: int) -> None:
         pos = snap.get(key)
         if pos:
             snap[key] = (pos[0] + dx, pos[1] + dy)
+    box = snap.get("player_box")
+    if box:
+        snap["player_box"] = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
 
 
 class BotHost:
@@ -1001,6 +1004,9 @@ class BotHost:
             region = feed.minimap.region
             band_rect = feed.name_region()
             band = feed.name_img()
+        analyzer = bot.minimap if bot is not None else feed.minimap
+        if snap.get("player"):
+            snap["player_box"] = analyzer.player_box(tuple(snap["player"]))
         # The minimap view is the whole located panel: title strip on
         # top, map below, separated at the panel divider. Its right edge
         # reaches the title text's end so long names aren't clipped.

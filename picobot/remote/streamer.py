@@ -38,6 +38,25 @@ def _box(img: np.ndarray, cx: int, cy: int, r: int, color) -> None:
     img[y1 - 1, x0:x1] = color
 
 
+def _glyph(x: int, y: int) -> Tuple[int, int, int, int]:
+    """The 6x6 player dot standing at feet (x, y), inclusive bounds."""
+    return (x - 3, y - 5, x + 2, y)
+
+
+def _frame(img: np.ndarray, box, color, margin: int = 1) -> None:
+    """Outline inclusive bounds ``(x0, y0, x1, y1)`` with a margin."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    h, w = img.shape[:2]
+    x0, y0 = max(0, x0 - margin), max(0, y0 - margin)
+    x1, y1 = min(w - 1, x1 + margin), min(h - 1, y1 + margin)
+    if x0 > x1 or y0 > y1:
+        return
+    img[y0:y1 + 1, x0] = color
+    img[y0:y1 + 1, x1] = color
+    img[y0, x0:x1 + 1] = color
+    img[y1, x0:x1 + 1] = color
+
+
 def _cross(img: np.ndarray, cx: int, cy: int, r: int, color) -> None:
     h, w = img.shape[:2]
     for i in range(-r, r + 1):
@@ -119,11 +138,14 @@ def annotate(img: np.ndarray, meta: dict) -> np.ndarray:
     for kind, *seg in meta.get("nav_route") or []:
         _line(out, *seg, (0, 255, 255))                   # yellow route
         _line(out, seg[0] + 1, seg[1], seg[2] + 1, seg[3], (0, 255, 255))
+    # Anchors and the player are feet points: frame the dot above them
+    # (the glyph's bottom row sits on the feet), not a box centred on them.
     for x, y in meta.get("anchors") or []:
-        _box(out, int(x), int(y), 3, (255, 128, 0))      # blue anchors
+        _frame(out, _glyph(int(x), int(y)), (255, 128, 0))   # blue anchors
     pos = meta.get("player")
     if pos:
-        _box(out, int(pos[0]), int(pos[1]), 4, (0, 255, 0))  # green player
+        box = meta.get("player_box") or _glyph(int(pos[0]), int(pos[1]))
+        _frame(out, box, (0, 255, 0))                         # green player
     target = meta.get("target")
     if target:
         _cross(out, int(target[0]), int(target[1]), 4, (0, 0, 255))  # red

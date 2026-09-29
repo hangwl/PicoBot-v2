@@ -86,7 +86,12 @@ a fall).
 The dot is found by its colour (`minimap_colors.player`); pixels within
 2px of each other count as one marker, so a rope or platform line
 through the dot (which splits it) doesn't hide it. Groups under 6px are
-specks. The reported point is the marker's true bottom row (its feet).
+specks. The reported point is the marker's true bottom row (its feet);
+x rounds half-up so an even-width dot's centre always lands on the same
+side. The overlay frames the dot itself — its detected bounds with a 1px
+margin — not a box centred on the feet; anchors (also feet points) are
+framed where a 6x6 dot standing on them would be, so an arrived player
+lines up with its anchor.
 Detection tracks the dot per thread: when several yellow markers
 qualify, the one nearest the last position wins, and one missed frame
 repeats the last position before the dot counts as lost. With the dot

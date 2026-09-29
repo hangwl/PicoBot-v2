@@ -127,6 +127,22 @@ class MinimapAnalyzerTests(unittest.TestCase):
         a.set_region((0, 0, 200, 120))
         self.assertIsNone(a.player_pos(_blank()))
 
+    def test_player_box_is_the_dot_and_matches_the_glyph(self):
+        # A 6x6 dot: bounds reported as detected; the feet-based glyph
+        # (used for anchors and held positions) lands on the same pixels.
+        a = MinimapAnalyzer()
+        img = _blank()
+        img[70:76, 48:54] = (12, 240, 239)
+        feet = a.player_pos(img)
+        self.assertEqual(feet, (51, 75))           # half-up, not banker's
+        self.assertEqual(a.player_box(feet), (48, 70, 53, 75))
+        self.assertEqual(MinimapAnalyzer.glyph_box(feet), (48, 70, 53, 75))
+
+    def test_player_box_falls_back_to_the_glyph(self):
+        a = MinimapAnalyzer()
+        self.assertEqual(a.player_box((40, 60)), (37, 55, 42, 60))
+        self.assertIsNone(a.player_box(None))
+
     def test_player_pos_none_on_blank(self):
         analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
         self.assertIsNone(analyzer.player_pos(_blank()))

@@ -73,10 +73,15 @@ class AnnotateTests(unittest.TestCase):
             "target": (120, 50),
             "hazard": None,
         })
-        # anchor (blue 255,128,0), player (green), target (red)
-        self.assertTrue((out[50, 37] == (255, 128, 0)).any() or
-                        (out[47, 40] == (255, 128, 0)).any())
-        self.assertTrue((out[46, 80] == (0, 255, 0)).all())
+        # anchor (blue 255,128,0), player (green), target (red). Feet
+        # points: the 6x6 dot sits above them (x-3..x+2, y-5..y), framed
+        # with a 1px margin — the frame runs y-6..y+1, x-4..x+3.
+        self.assertTrue((out[44, 40] == (255, 128, 0)).all())      # anchor top
+        self.assertTrue((out[51, 40] == (255, 128, 0)).all())      # anchor bottom
+        self.assertTrue((out[44, 80] == (0, 255, 0)).all())        # player top
+        self.assertTrue((out[51, 80] == (0, 255, 0)).all())        # just below feet
+        self.assertFalse((out[52, 80] == (0, 255, 0)).all())       # not 4px below
+        self.assertTrue((out[48, 76] == (0, 255, 0)).all())        # left side
         self.assertTrue((out[50, 116] == (0, 0, 255)).all())
         # original untouched
         self.assertFalse(img.any())
@@ -280,6 +285,7 @@ class HostCommandTests(unittest.TestCase):
         feed = Mock()
         feed.minimap_img.return_value = img
         feed.minimap.player_pos.return_value = (100, 75)
+        feed.minimap.player_box.return_value = (97, 70, 102, 75)
         feed.minimap.region = (10, 75, 200, 150)
         feed.name_region.return_value = (0, 0, 300, 225)
         feed.name_img.return_value = PanelAssemblyTests._band()
@@ -289,6 +295,22 @@ class HostCommandTests(unittest.TestCase):
         self.assertEqual(snap["ox"], 0)
         self.assertGreater(snap["oy"], 0)
         self.assertEqual(snap["player"], (100, 75 + snap["oy"]))
+
+    def test_provide_frame_player_box_is_offset_with_the_panel(self):
+        from picobot.vision.minimap import MinimapAnalyzer
+
+        img = np.zeros((150, 200, 3), dtype=np.uint8)
+        feed = Mock()
+        feed.minimap_img.return_value = img
+        feed.minimap.player_pos.return_value = (100, 75)
+        feed.minimap.player_box = MinimapAnalyzer().player_box
+        feed.minimap.region = (10, 75, 200, 150)
+        feed.name_region.return_value = (0, 0, 300, 225)
+        feed.name_img.return_value = PanelAssemblyTests._band()
+        self.host._feed = feed
+        snap = self.host._provide_frame("minimap")
+        oy = snap["oy"]
+        self.assertEqual(snap["player_box"], (97, 70 + oy, 102, 75 + oy))
 
     def test_window_command_updates_and_persists(self):
         self.assertTrue(self.host._handle_command("host|window|NewWin"))

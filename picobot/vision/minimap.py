@@ -254,8 +254,9 @@ def dilate3(mask: np.ndarray) -> np.ndarray:
     return out
 
 
-def marker_blobs(mask: np.ndarray, min_px: int) -> List[Tuple[int, float, float, int]]:
-    """Marker candidates as ``(pixels, cx, cy, y_max)``, largest first.
+def marker_blobs(mask: np.ndarray, min_px: int) -> List[Tuple[int, float, float, int, int, int, int]]:
+    """Marker candidates as ``(pixels, cx, cy, y_max, x_min, y_min,
+    x_max)``, largest first.
 
     Pixels within 2px of each other form one marker — a 1px rope or
     platform line through the dot splits it into fragments, which a
@@ -275,14 +276,16 @@ def marker_blobs(mask: np.ndarray, min_px: int) -> List[Tuple[int, float, float,
         stack = [(sy, sx)]
         visited[sy, sx] = True
         n = sx_sum = sy_sum = 0
-        ymax = 0
+        ymax = xmax = 0
+        ymin, xmin = h, w
         while stack:
             y, x = stack.pop()
             if mask[y, x]:
                 n += 1
                 sx_sum += x
                 sy_sum += y
-                ymax = max(ymax, y)
+                ymax, ymin = max(ymax, y), min(ymin, y)
+                xmax, xmin = max(xmax, x), min(xmin, x)
             for ny in (y - 1, y, y + 1):
                 for nx in (x - 1, x, x + 1):
                     if (
@@ -292,7 +295,7 @@ def marker_blobs(mask: np.ndarray, min_px: int) -> List[Tuple[int, float, float,
                         visited[ny, nx] = True
                         stack.append((ny, nx))
         if n >= min_px:
-            out.append((n, sx_sum / n, sy_sum / n, ymax))
+            out.append((n, sx_sum / n, sy_sum / n, ymax, xmin, ymin, xmax))
     out.sort(key=lambda b: -b[0])
     return out
 
@@ -335,6 +338,8 @@ class MinimapAnalyzer:
         # Player tracking is per thread: the bot, the streamer and the
         # monitor may read the same analyzer.
         self._track = threading.local()
+        # (feet, bbox) of the last detected player dot, for the overlay.
+        self._last_player_box = None
         self._track_epoch = 0
 
     @property
@@ -488,6 +493,9 @@ class MinimapAnalyzer:
     MARKER_MIN_PX = 6
     # A lost dot is held this many consecutive frames (one flicker).
     PLAYER_HOLD_FRAMES = 1
+    # The client's player glyph (6x6), for boxes with no detection behind
+    # them (anchors, a held position).
+    DOT_W, DOT_H = 6, 6
 
     def _marker(
         self,
@@ -509,9 +517,15 @@ class MinimapAnalyzer:
             blob = min(blobs, key=lambda b: (b[1] - nx) ** 2 + (b[3] - ny) ** 2)
         else:
             blob = blobs[0]
-        _, cx, cy, ymax = blob
+        _, cx, cy, ymax, xmin, ymin, xmax = blob
         # The player glyph's bottom tip touches the platform.
-        return (int(round(cx)) + off, (ymax if feet else int(round(cy))) + off)
+        # Half-up, not round-half-even: an even-width dot's centre (x.5)
+        # must always land on the same side.
+        pos = (int(cx + 0.5) + off, (ymax if feet else int(cy + 0.5)) + off)
+        if feet:
+            self._last_player_box = (
+                pos, (xmin + off, ymin + off, xmax + off, ymax + off))
+        return pos
 
     def player_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10
@@ -533,6 +547,24 @@ class MinimapAnalyzer:
             return t.last
         t.last = None
         return None
+
+    @classmethod
+    def glyph_box(cls, feet: Tuple[int, int]) -> Tuple[int, int, int, int]:
+        """Where a player dot standing at ``feet`` covers: ``(x0, y0, x1,
+        y1)`` inclusive, bottom row on the feet."""
+        x, y = feet
+        return (x - cls.DOT_W // 2, y - cls.DOT_H + 1,
+                x + (cls.DOT_W - 1) // 2, y)
+
+    def player_box(self, feet: Optional[Tuple[int, int]]):
+        """The dot's pixel bounds for the overlay: the detected box when
+        ``feet`` is the last detection, else the glyph at ``feet``."""
+        if feet is None:
+            return None
+        last = self._last_player_box
+        if last is not None and tuple(last[0]) == tuple(feet):
+            return last[1]
+        return self.glyph_box(feet)
 
     def rune_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10
