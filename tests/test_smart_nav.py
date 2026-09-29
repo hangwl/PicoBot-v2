@@ -142,6 +142,38 @@ class RopeProbeTests(unittest.TestCase):
         self.assertIsNone(bot.probe_rope())
 
 
+class RopeGrabTests(unittest.TestCase):
+    def _bot(self, ys):
+        bot = _bot([(50, y) for y in ys])
+        order = []
+        bot.hid.key_down = lambda k: order.append(("down", k))
+        bot.hid.key_up = lambda k: order.append(("up", k))
+        bot.hid.press = lambda k, h=None: order.append(("press", k)) or True
+        slept = []
+        bot.sleep = lambda s: slept.append(s) or False
+        return bot, order, slept
+
+    def test_up_is_held_well_before_the_hop(self):
+        bot, order, slept = self._bot([60, 55, 40, 21])
+        with patch("time.time", side_effect=(i * 0.2 for i in range(1, 100000))):
+            self.assertTrue(bot.rope_up(20 / 150, direction="right"))
+        self.assertEqual(order[0], ("down", "up"))
+        self.assertEqual(order[1], ("down", "right"))
+        jump = order.index(("press", bot.config.jump_key))
+        self.assertGreater(jump, 1)
+        self.assertGreaterEqual(slept[0], 0.12)            # Up's lead time
+        self.assertIn(("up", "up"), order)
+        self.assertIn(("up", "right"), order)
+
+    def test_flash_grab_presses_the_jump_twice(self):
+        bot, order, _ = self._bot([60, 40, 21])
+        bot.config.flash_jump_key = None
+        with patch("time.time", side_effect=(i * 0.2 for i in range(1, 100000))):
+            bot.rope_up(20 / 150, direction="left", flash=True)
+        jumps = [e for e in order if e == ("press", bot.config.jump_key)]
+        self.assertEqual(len(jumps), 2)
+
+
 class ClimbJitterTests(unittest.TestCase):
     def _clocked(self):
         return patch("time.time", side_effect=(i * 0.2 for i in range(1, 100000)))

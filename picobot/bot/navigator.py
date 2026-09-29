@@ -13,7 +13,7 @@ import random
 import time
 from typing import Optional, Tuple
 
-from .navgraph import Leg, NavGraph
+from .navgraph import DRIFT_REACH, Leg, NavGraph
 from .reach import MOVES
 
 Point = Tuple[float, float]
@@ -147,10 +147,13 @@ class Navigator:
         elif kind == "down_jump":
             bot.down_jump()
         elif kind == "climb_up":
+            # A moving grab: hop (or flash, from a platform end further
+            # out) toward the rope with Up held — not a standing jump.
+            gap = abs(leg.x1 - leg.x0)
             direction = None
-            if abs(leg.x1 - leg.x0) > 2:
+            if gap > 2:
                 direction = "right" if leg.x1 > leg.x0 else "left"
-            if not bot.rope_up(leg.y1, direction=direction):
+            if not bot.rope_up(leg.y1, direction=direction, flash=gap > DRIFT_REACH):
                 self._rope_fallback(leg)
                 return "failed"
         elif kind == "climb_down":
@@ -181,14 +184,10 @@ class Navigator:
 
     def _rope_fallback(self, leg: Leg) -> None:
         """Mid-rope exit after a failed climb: hold a direction and jump —
-        there is no direct release from a rope."""
-        near = min(
-            self.graph.platforms,
-            key=lambda p: min(abs(p.x0 - leg.x0), abs(p.x1 - leg.x0)),
-        )
-        cx = min((abs(near.x0 - leg.x0), near.x0),
-                 (abs(near.x1 - leg.x0), near.x1))[1]
-        self.bot.rope_exit("right" if cx > leg.x0 else "left")
+        there is no direct release from a rope — toward a platform it can
+        land on."""
+        pos = self._pos() or (leg.x1, (leg.y0 + leg.y1) / 2.0)
+        self.bot.rope_exit(self.graph.exit_direction(pos[0], pos[1]))
 
     def _on_platform(self, pos: Point, want) -> bool:
         """Tolerant landing check: the drawn row may sit a few px off the

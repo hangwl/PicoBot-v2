@@ -252,6 +252,22 @@ class PatrolTests(unittest.TestCase):
             self.assertEqual(ropes[0][1], round(75 / 150, 4))   # bottom grew
             self.assertEqual(ropes[0][3], round(40 / 150, 4))   # top kept
 
+    def test_learned_rope_keeps_its_bottom_off_the_platform_below(self):
+        import tempfile
+
+        from picobot.bot.maps import MapStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self._rope_bot(tmp, pos=(61, 70))
+            # A rope saved earlier that runs all the way onto FLOOR (y=100).
+            bot._map.ropes = [[0.3, round(100 / 150, 4), 0.3, round(40 / 150, 4)]]
+            bot.maps.save(bot._map)
+            bot.probe_rope = Mock(return_value=True)
+            self._stuck_tick(bot, (61, 70))                # a new hang extends it
+            ropes = MapStore(tmp).get("m").ropes
+            self.assertEqual(len(ropes), 1)
+            self.assertEqual(ropes[0][1], round(95 / 150, 4))   # 100 - 5px gap
+
     def test_exit_leaps_toward_a_landable_platform(self):
         # Rope at x=60, y=60: a platform above to the left (unreachable
         # by a leap) and one below to the right.

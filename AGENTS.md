@@ -70,7 +70,12 @@ what was tried and what was learned in `docs/learnings.md` instead.
   than improvise. Anchors are pure pass-through waypoints (no linger).
   No wander state, dwell timers, breathers, or stationary attack loops.
   **Every flash move weaves attacks; no attack outside a flash move** in
-  moving paths.
+  moving paths — except a rope-grab flash, which weaves none (an attack
+  mid-air costs the grab).
+- **Rope grabs are moving grabs**: Up down well before takeoff, then a
+  hop (or flash) toward the rope from beside it — never a standing jump
+  unless the platform is too narrow. A rope's bottom stays
+  `ROPE_BOTTOM_GAP` above the platform under it.
 - **No wall zones**: drawn platform ends are the boundaries — travel
   room, weave bounds and graph edges all stop at the drawn span. Rope
   lift is preferred for rises when ready and grabs the **highest**

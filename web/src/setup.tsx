@@ -3,7 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import { Icon, type IconName } from "./icons";
 import { kitLabel } from "./live";
-import { type AppState, type PlatformFitRow, go, send } from "./protocol";
+import { type AppState, type PlatformFitRow, type RopeRow, go, send } from "./protocol";
 
 // -- Readiness -------------------------------------------------------------------
 function allMeasured(s: AppState): boolean {
@@ -291,6 +291,18 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
           {reply.msg}
         </p>
       )}
+      {s.ropes.length > 0 && (
+        <RopeList
+          rows={s.ropes}
+          onRemove={(key) => layoutAct(`layout|rope|del|${key}|${target}`)}
+          onClear={() => {
+            if (confirm(`Remove all ${s.ropes.length} learned ropes?`))
+              layoutAct(`layout|rope|clear|${target}`);
+          }}
+          onUndo={() => layoutAct(`layout|rope|undo|${target}`)}
+          disabled={creating || bad}
+        />
+      )}
       {s.platformFit.length > 0 && (
         <PlatformFitList
           rows={s.platformFit}
@@ -298,6 +310,38 @@ function MapPage({ s, wide }: { s: AppState; wide: boolean }) {
           disabled={creating || bad}
         />
       )}
+    </div>
+  );
+}
+
+function RopeList({ rows, onRemove, onClear, onUndo, disabled }: {
+  rows: RopeRow[];
+  onRemove: (key: string) => void;
+  onClear: () => void;
+  onUndo: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div class="fit">
+      <h3>Learned ropes</h3>
+      <p class="hint">
+        Ropes the bot found by hanging on them. Remove one it learned by
+        mistake; it's learned again if the bot really hangs there.
+      </p>
+      <ul class="rows">
+        {rows.map((r) => (
+          <li key={r.key}>
+            <b>x {r.x} · y {r.top}–{r.bottom}</b>
+            <button class="small" disabled={disabled} onClick={() => onRemove(r.key)}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div class="actions">
+        <button class="danger" disabled={disabled} onClick={onClear}>Remove all</button>
+        <button disabled={disabled} onClick={onUndo}>Undo rope</button>
+      </div>
     </div>
   );
 }

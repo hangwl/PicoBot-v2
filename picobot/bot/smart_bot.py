@@ -845,21 +845,34 @@ class SmartBot(BotBase):
         until_y: float,
         *,
         direction: Optional[str] = None,
+        flash: bool = False,
         timeout: float = 12.0,
     ) -> bool:
-        """Jump-grab a rope and climb it: hold ``direction`` (toward the
-        rope) and **up** through the jump, latch on contact, then climb
-        until y crosses ``until_y`` (the top platform's row; holding up
-        there mounts it). Fails on a missed grab, stall, lost dot, or
-        hazard — the caller recovers with ``rope_exit``."""
+        """Grab a rope on the move and climb it: **Up** goes down well
+        before the takeoff, then ``direction`` (toward the rope), then a
+        hop — or a flash jump (``flash``) from further out — so the
+        character sweeps through the rope's column with Up held and
+        latches. Then climb until y crosses ``until_y`` (the top
+        platform's row; holding Up there mounts it). Fails on a missed
+        grab, stall, lost dot, or hazard — the caller recovers with
+        ``rope_exit``. The approach flash weaves no attacks: an attack
+        mid-air would cost the grab."""
         target = self._ry(until_y)
-        self.log(f"Rope grab {'→ ' + direction if direction else ''}→ y≈{target}")
+        how = "flash" if flash and direction else ("hop" if direction else "jump")
+        self.log(f"Rope grab ({how}{' ' + direction if direction else ''}) → y≈{target}")
         deadline = time.time() + timeout
         self.hid.key_down("up")
-        if direction:
-            self.hid.key_down(direction)
         try:
+            # Up held early: it must already be down when the character
+            # reaches the rope, not pressed with the jump.
+            self.sleep(human_between(0.18, 0.12, 0.28))
+            if direction:
+                self.hid.key_down(direction)
+                self.sleep(human_between(0.05, 0.03, 0.09))   # already moving
             self.hid.press(self.config.jump_key)
+            if flash and direction:
+                self.sleep(self._repress(self.config.flash_repress_seconds))
+                self.hid.press(self._flash_key())
             self.sleep(human_between(0.12, 0.08, 0.18))
             grabbed = False
             last_y = None

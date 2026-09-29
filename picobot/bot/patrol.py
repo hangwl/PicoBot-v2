@@ -16,7 +16,7 @@ import random
 import time
 from typing import List, Optional, Tuple
 
-from .navgraph import Leg
+from .navgraph import ROPE_BOTTOM_GAP, Leg
 from .timing import human_reaction
 from .navigator import Navigator
 
@@ -167,14 +167,20 @@ class Patrol:
             return
         w, h = region[2], region[3]
         top = p.y_at(min(p.x1, max(p.x0, pos[0])))
-        bottom = pos[1]
+        # Keep the bottom end off the platform below (stacked tiers).
+        under = graph.below(pos[0], top, exclude=above)
+        limit = (graph.platforms[under].y_at(pos[0]) - ROPE_BOTTOM_GAP
+                 if under is not None else float("inf"))
+        bottom = min(pos[1], limit)
+        if bottom <= top + 1:
+            return
         ropes = list(entry.ropes or [])
         for i, r in enumerate(ropes):
             if abs((r[0] + r[2]) / 2 * w - pos[0]) >= 5:
                 continue
             lo, hi = max(r[1], r[3]) * h, min(r[1], r[3]) * h
-            nb, nt = max(lo, bottom), min(hi, top)
-            if nb <= lo + 0.5 and nt >= hi - 0.5:
+            nb, nt = min(max(lo, bottom), limit), min(hi, top)
+            if abs(nb - lo) <= 0.5 and nt >= hi - 0.5:
                 return                          # nothing new
             ropes[i] = [r[0], round(nb / h, 4), r[2], round(nt / h, 4)]
             entry.ropes = ropes
@@ -192,32 +198,7 @@ class Patrol:
         bot.event("map", f"rope learned at ({pos[0]:.0f}, {pos[1]:.0f})")
 
     def _exit_direction(self, graph, pos: Point) -> str:
-        """Which way to leap off a rope (or hop off undrawn ground): toward
-        the nearest platform it can land on — at or below the player,
-        never one above. Straight over a platform, toward its middle."""
-        x, y = pos
-        best = None
-        for p in graph.platforms:
-            near_x = min(p.x1, max(p.x0, x))
-            row = p.y_at(near_x)
-            if row < y - 4:
-                continue                        # above: a leap cannot reach it
-            gap = abs(near_x - x)
-            if gap == 0:
-                d = "right" if (p.x0 + p.x1) / 2 >= x else "left"
-            else:
-                d = "right" if near_x > x else "left"
-            key = (gap, row - y)
-            if best is None or key < best[0]:
-                best = (key, d)
-        if best is not None:
-            return best[1]
-        near = min(
-            graph.platforms,
-            key=lambda p: min(abs(p.x0 - x), abs(p.x1 - x)),
-        )
-        cx = min((abs(near.x0 - x), near.x0), (abs(near.x1 - x), near.x1))[1]
-        return "right" if cx > x else "left"
+        return graph.exit_direction(pos[0], pos[1])
 
     # -- Planning ----------------------------------------------------------------------
     def _greedy(self, graph, cur: Point, cur_i: Optional[int]):

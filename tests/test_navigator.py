@@ -105,8 +105,8 @@ class SimBot:
         self.rope_cd = 3.0
         return True
 
-    def rope_up(self, until_y, direction=None, timeout=12.0):
-        self.moves.append("rope_up")
+    def rope_up(self, until_y, direction=None, flash=False, timeout=12.0):
+        self.moves.append("rope_up" + ("+flash" if flash else ""))
         if getattr(self, "fail_rope", False):
             return False
         if direction:

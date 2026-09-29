@@ -169,6 +169,44 @@ class NavGraphTests(unittest.TestCase):
         self.assertFalse(any(l.kind == "climb_up" for l in g.transfer_legs()))
         self.assertIsNone(g.route((50, 100), (100, 40)))
 
+    def test_rope_grabs_are_moving_hops_from_beside_the_rope(self):
+        g = NavGraph([FLOOR, (80, 40, 120, 40)], reach(),
+                     ropes=[(100, 80, 100, 40)])
+        ups = [l for l in g.transfer_legs() if l.kind == "climb_up"]
+        self.assertTrue(ups)
+        for l in ups:
+            self.assertEqual(abs(l.x1 - l.x0), 6.0)     # never straight up
+
+    def test_rope_between_stacked_platforms_keeps_a_bottom_gap(self):
+        # Rope drawn all the way down onto the lower platform (y=100):
+        # its usable bottom stops 5px above it, so boarding is a grab.
+        low, high = FLOOR, (80, 40, 120, 40)
+        g = NavGraph([low, high], reach(), ropes=[(100, 100, 100, 40)])
+        downs = [l for l in g.transfer_legs() if l.kind == "climb_down"]
+        self.assertTrue(downs)                            # still lands below
+        ups = [l for l in g.transfer_legs() if l.kind == "climb_up"]
+        self.assertTrue(ups and all(l.y0 == 100.0 for l in ups))
+
+    def test_narrow_platform_falls_back_to_a_straight_grab(self):
+        ledge = (98, 100, 104, 100)                       # 6px wide
+        g = NavGraph([ledge, (80, 40, 120, 40)], reach(),
+                     ropes=[(101, 90, 101, 40)])
+        ups = [l for l in g.transfer_legs() if l.kind == "climb_up"]
+        self.assertEqual([abs(l.x1 - l.x0) for l in ups], [0.0])
+
+    def test_rope_past_a_platform_end_needs_the_flash_kit(self):
+        ledge = (20, 100, 85, 100)                        # ends 15px short
+        plats = [ledge, (80, 40, 120, 40)]
+        rope = [(100, 85, 100, 40)]
+        flash = NavGraph(plats, reach(), ropes=rope, allow_flash=True)
+        walk = NavGraph(plats, reach(), ropes=rope, allow_flash=False)
+        self.assertTrue(any(l.kind == "climb_up" for l in flash.transfer_legs()))
+        self.assertFalse(any(l.kind == "climb_up" for l in walk.transfer_legs()))
+
+    def test_exit_direction_prefers_a_landable_platform(self):
+        g = NavGraph([(20, 30, 50, 30), (70, 80, 150, 80)], reach())
+        self.assertEqual(g.exit_direction(60, 60), "right")
+
     def test_rope_needs_platforms_at_both_ends(self):
         g = NavGraph([FLOOR], reach(), ropes=[(98, 100, 102, 40)])
         self.assertEqual(g.transfer_legs(), [])      # nothing to climb to

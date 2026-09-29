@@ -913,6 +913,44 @@ class BotHost:
             return
         self._layout_segments(msg, "platforms", "platform")
 
+    def _layout_rope(self, msg: str) -> None:
+        """layout|rope|del|<x0,y0,x1,y1>[|<name>] removes one learned rope
+        (its stored line); layout|rope|clear|undo[|<name>] as for
+        platforms."""
+        if not msg.startswith("layout|rope|del|"):
+            self._layout_segments(msg, "ropes", "rope")
+            return
+        parts = msg.split("|")
+        if len(parts) < 4:
+            return
+        name = parts[4].strip() if len(parts) > 4 else ""
+        try:
+            want = self.platfit.key([float(v) for v in parts[3].split(",")])
+        except (TypeError, ValueError):
+            return
+        entry, err = self._layout_target(name)
+        if entry is None:
+            self.bus.emit("error", err)
+            return
+        ropes = list(entry.ropes or [])
+        idx = next((i for i, r in enumerate(ropes) if self.platfit.key(r) == want), None)
+        if idx is None:
+            self.bus.emit("error", "that rope changed — reopen the map page and try again")
+            return
+        stack = self._layout_undo.setdefault((entry.name, "ropes"), [])
+        stack.append((list(ropes), {}))       # a copy: ropes is edited below
+        del stack[:-50]
+        gone = ropes.pop(idx)
+        entry.ropes = ropes or None
+        self._save_entry(entry)
+        region = self._live_region()
+        where = (f" at x {gone[0] * region[2]:.0f}" if region else "")
+        self.bus.emit(
+            "map",
+            f"{entry.name}: removed the rope{where} ({len(ropes)} left) — "
+            "it is re-learned if the bot hangs there again",
+        )
+
     def _platform_to_feet(self, msg: str) -> None:
         """layout|plat|feet|<x0,y0,x1,y1>[|<name>] — move one drawn line by
         the platform-fit offset, onto where the feet settle. Its anchors
@@ -1131,6 +1169,8 @@ class BotHost:
             self._layout_clear(msg.split("|", 2)[2] if msg.count("|") > 1 else "")
         elif msg.startswith("layout|anchor|"):
             self._layout_anchor(msg)
+        elif msg.startswith("layout|rope|"):
+            self._layout_rope(msg)
         elif msg.startswith("layout|plat|"):
             self._layout_platform(msg)
         elif msg == "layout|reset":
@@ -1180,8 +1220,27 @@ class BotHost:
                 entry.platforms if entry else None,
                 self._live_region(),
             ),
+            "ropes": self._rope_rows(entry),
         }
         self.remote.broadcast("dash|" + json.dumps(payload))
+
+    def _rope_rows(self, entry) -> list:
+        """Learned ropes for the Map page: column and span (minimap px)
+        plus the stored line that names each in commands."""
+        region = self._live_region()
+        if entry is None or not entry.ropes or not region:
+            return []
+        w, h = region[2], region[3]
+        rows = []
+        for r in entry.ropes:
+            rows.append({
+                "key": ",".join(f"{v:g}" for v in self.platfit.key(r)),
+                "x": round((r[0] + r[2]) / 2 * w),
+                "top": round(min(r[1], r[3]) * h),
+                "bottom": round(max(r[1], r[3]) * h),
+            })
+        rows.sort(key=lambda d: (d["x"], d["top"]))
+        return rows
 
     def _live_region(self):
         bot = self.bot

@@ -93,11 +93,17 @@ truth, no per-section map names.
   own. Samples live in host memory and reset when a platform is
   redrawn.
 - Ropes are **not drawn** — they're learned: when the bot hangs stable
-  at a spot that is on no drawn platform for over 2 seconds, it records
-  a rope segment from that spot up to the platform above (persisted in
-  the map file, drawn as brown lines) and leaps off. Learned rope climbs
-  cost `rope_penalty` — a last resort, since platforms are normally
-  reachable via jumps/rope lift/teleport.
+  at a spot that is on no drawn platform for over 2 seconds (confirmed by
+  a Down probe), it records a rope segment from that spot up to the
+  platform above (persisted in the map file, drawn as brown lines) and
+  leaps off. A rope's bottom end never reaches the platform under it — it
+  stops 5px above (stacked tiers stay separate, and boarding is a grab).
+  Learned rope climbs cost `rope_penalty` — a last resort, since
+  platforms are normally reachable via jumps/rope lift/teleport.
+- **Learned ropes** (Setup → Map) lists each rope by column and span;
+  **Remove** drops one learned by mistake (it's re-learned if the bot
+  really hangs there again), **Remove all** clears them (confirmed),
+  **Undo rope** restores.
   Platforms are the *authoritative* walkable geometry: anchor snapping,
   nav target projection (~8px snap radius) and weave bounds consult
   them. Platform ends are the bot's boundaries — no wall zones needed.

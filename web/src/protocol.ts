@@ -73,6 +73,14 @@ export interface PlatformFitRow {
   key: string;
 }
 
+/** A learned rope: its column and span (minimap px). */
+export interface RopeRow {
+  key: string;
+  x: number;
+  top: number;
+  bottom: number;
+}
+
 export interface HostPort {
   device: string;
   desc?: string;
@@ -91,6 +99,7 @@ export interface AppState {
   platformsN: number;
   anchorsN: number;
   platformFit: PlatformFitRow[];
+  ropes: RopeRow[];
   classActive: string;
   profiles: Record<string, ProfileKit>;
   policy: string;
@@ -137,6 +146,7 @@ const initial: AppState = {
   platformsN: 0,
   anchorsN: 0,
   platformFit: [],
+  ropes: [],
   classActive: "",
   profiles: {},
   policy: "weighted",
@@ -446,6 +456,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         platformsN: (p.platforms_n as number) ?? 0,
         anchorsN: (p.anchors_n as number) ?? 0,
         platformFit: (p.platform_fit as PlatformFitRow[]) ?? [],
+        ropes: (p.ropes as RopeRow[]) ?? [],
       });
       return;
     case "class":

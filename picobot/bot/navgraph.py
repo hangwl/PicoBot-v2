@@ -45,6 +45,11 @@ COSTS = {
 CLIMB_SPEED = 30.0     # minimap px/s up or down a drawn rope
 JUMP_GRAB_REACH = 24.0  # rope bottom ends within this rise of a platform
 DRIFT_REACH = 8.0       # sideways drift a jump-grab can cover
+GRAB_HOP_PX = 6.0       # take off this far beside the rope: grab on a hop
+FLASH_GRAB_REACH = 20.0  # a flash jump off a platform end grabs this far out
+# A rope between stacked platforms never reaches the lower one: its bottom
+# end stays this far above (you jump to grab it, you don't walk into it).
+ROPE_BOTTOM_GAP = 5.0
 EXPLORE_PENALTY = 1.6
 LEVEL_PX = 4.0          # max rise for a "horizontal" gap move
 
@@ -262,19 +267,25 @@ class NavGraph:
             self._move(i, x, j, x, "rope_lift", 0.0, rise)
 
     def _link_ropes(self) -> None:
-        """Drawn ropes/ladders.
+        """Learned ropes/ladders.
 
-        Ropes hang from a platform (top end) with the bottom end usually
-        in the air: boarding is a jump-grab (hold direction + up, jump)
-        from any platform whose row is within ``JUMP_GRAB_REACH`` of the
-        rope's bottom end and whose span comes within ``DRIFT_REACH`` of
-        the rope's column. Climbing down grabs at the top and drops off
-        the rope's bottom end onto whatever platform is below it.
+        Ropes hang from a platform (top end) with the bottom end in the
+        air — at least ``ROPE_BOTTOM_GAP`` above the platform under it.
+        Boarding is always a moving grab: a hop toward the rope from
+        ``GRAB_HOP_PX`` beside it (Up held), or — for flash kits — a flash
+        jump off a platform end within ``FLASH_GRAB_REACH``. Climbing down
+        grabs at the top and drops off the bottom end onto whatever
+        platform is below it.
         """
         for x0, y0, x1, y1 in self.ropes:
             rx, bottom, top = (x0 + x1) / 2.0, max(y0, y1), min(y0, y1)
             hi = self.locate(rx, top)
             if hi is None:
+                continue
+            under = self.below(rx, top, exclude=hi)
+            if under is not None:
+                bottom = min(bottom, self.platforms[under].y_at(rx) - ROPE_BOTTOM_GAP)
+            if bottom <= top + 1.0:
                 continue
             # Down: grab at the top, descend past the bottom end, land.
             land = self.below(rx, bottom - 1.0)
@@ -284,18 +295,66 @@ class NavGraph:
                 cost = 0.5 + (bottom - top) / CLIMB_SPEED + self.rope_penalty
                 self._link(self._node(hi, rx), self._node(land, rx),
                            "climb_down", cost)
-            # Up: jump-grab from every platform in reach below the end.
+            # Up: a moving grab from every platform in reach below the end.
             for i, p in enumerate(self.platforms):
+                if i == hi:
+                    continue
                 row = p.y_at(min(p.x1, max(p.x0, rx)))
                 rise = row - bottom        # +: platform below the rope's end
                 if not 0.0 <= rise <= JUMP_GRAB_REACH:
                     continue
-                tx = min(p.x1 - 1.0, max(p.x0 + 1.0, rx))
-                if abs(rx - tx) > DRIFT_REACH:
+                tx = self._grab_takeoff(p, rx)
+                if tx is None:
                     continue
                 cost = 0.7 + (bottom - top) / CLIMB_SPEED + self.rope_penalty
                 self._link(self._node(i, tx), self._node(hi, rx),
                            "climb_up", cost)
+
+    def _grab_takeoff(self, p: "Platform", rx: float) -> Optional[float]:
+        """Where to take off on ``p`` to grab a rope at ``rx``: beside it
+        (the side with more platform left) so the grab is a hop toward
+        the rope; a platform end for a flash grab past the edge; straight
+        under it only when the platform is too narrow to step aside."""
+        if p.x0 + 1.0 <= rx <= p.x1 - 1.0:
+            sides = [
+                (rx - p.x0, rx - GRAB_HOP_PX),     # approach from the left
+                (p.x1 - rx, rx + GRAB_HOP_PX),     # approach from the right
+            ]
+            for room, tx in sorted(sides, reverse=True):
+                if p.x0 + 1.0 <= tx <= p.x1 - 1.0:
+                    return tx
+            return rx
+        end = p.x1 - 1.0 if rx > p.x1 else p.x0 + 1.0
+        gap = abs(rx - end)
+        if gap <= DRIFT_REACH:
+            return end
+        if gap <= FLASH_GRAB_REACH and self.allow_flash:
+            return end
+        return None
+
+    def exit_direction(self, x: float, y: float) -> str:
+        """Which way to leap off a rope (or hop off undrawn ground): toward
+        the nearest platform it can land on — at or below, never above.
+        Straight over a platform, toward its middle."""
+        best = None
+        for p in self.platforms:
+            near_x = min(p.x1, max(p.x0, x))
+            row = p.y_at(near_x)
+            if row < y - 4:
+                continue                        # above: a leap cannot reach it
+            gap = abs(near_x - x)
+            if gap == 0:
+                d = "right" if (p.x0 + p.x1) / 2 >= x else "left"
+            else:
+                d = "right" if near_x > x else "left"
+            key = (gap, row - y)
+            if best is None or key < best[0]:
+                best = (key, d)
+        if best is not None:
+            return best[1]
+        near = min(self.platforms, key=lambda p: min(abs(p.x0 - x), abs(p.x1 - x)))
+        cx = min((abs(near.x0 - x), near.x0), (abs(near.x1 - x), near.x1))[1]
+        return "right" if cx > x else "left"
 
     def _link_off_end(self, i: int, end: float, step: float) -> None:
         p = self.platforms[i]

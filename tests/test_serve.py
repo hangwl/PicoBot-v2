@@ -746,6 +746,46 @@ class HostCommandTests(unittest.TestCase):
             self.host._handle_command(f"layout|plat|feet|{key}|m1")
             self.assertIn("already sits at the feet", " ".join(self.sent))
 
+    def _with_ropes(self, tmp, ropes):
+        entry = MapStore(tmp).get("m1")
+        entry.ropes = ropes
+        self.host.maps.save(entry)
+        self.host.maps.reload()
+
+    def test_remove_one_learned_rope_and_undo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            a, b = [0.3, 0.6, 0.3, 0.3], [0.7, 0.8, 0.7, 0.5]
+            self._with_ropes(tmp, [a, b])
+            key = ",".join(f"{v:g}" for v in self.host.platfit.key(a))
+            self.host._handle_command(f"layout|rope|del|{key}|m1")
+            self.assertEqual(MapStore(tmp).get("m1").ropes, [b])
+            self.assertTrue(any("removed the rope" in m for m in self.sent))
+            self.host._handle_command("layout|rope|undo|m1")
+            self.assertEqual(MapStore(tmp).get("m1").ropes, [a, b])
+
+    def test_remove_rope_refuses_a_stale_key_and_clear_removes_all(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self._with_ropes(tmp, [[0.3, 0.6, 0.3, 0.3]])
+            self.host._handle_command("layout|rope|del|0.9,0.9,0.9,0.1|m1")
+            self.assertEqual(len(MapStore(tmp).get("m1").ropes), 1)
+            self.assertIn("rope changed", " ".join(self.sent))
+            self.host._handle_command("layout|rope|clear|m1")
+            self.assertIsNone(MapStore(tmp).get("m1").ropes)
+
+    def test_maps_event_lists_learned_ropes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._plat_host(tmp)
+            self._with_ropes(tmp, [[0.3, 0.6, 0.3, 0.3]])
+            with patch.object(self.host, "_resolved_entry",
+                              return_value=MapStore(tmp).get("m1")):
+                self.host._send_maps()
+            ropes = [json.loads(m[5:]) for m in self.sent
+                     if '"event": "maps"' in m][-1]["ropes"]
+            self.assertEqual(ropes, [{"key": "0.3,0.6,0.3,0.3", "x": 60,
+                                      "top": 45, "bottom": 90}])
+
     def test_maps_event_carries_platform_fit(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._plat_host(tmp)

@@ -212,3 +212,13 @@ fixed that — all 15 captured reads exact afterwards.
   handshakes hang while HTTP still answers. Fixed by only doing
   bookkeeping under the lock; a test wires log → broadcast like
   `serve.py` and fails on a deadlock.
+- **Rope grab misses** (2026-09-29): climb edges took off directly under
+  the rope (takeoff clamped to its column), so almost every grab was a
+  standing jump that only latches if the character is within a pixel or
+  two of the rope, and Up went down only ~25ms (one key gap) before the
+  jump. Grabs are now hops toward the rope from 6px beside it (flash off
+  a platform end further out) with Up held ~0.15–0.25s before takeoff.
+  Up is *not* held during the walk to the takeoff: Up over a portal
+  changes maps. Learned ropes between stacked tiers could run down onto
+  the lower platform (a merge kept the lowest end); the bottom now stays
+  5px above it, both when learning and when the graph is built.
