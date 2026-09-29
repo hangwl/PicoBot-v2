@@ -162,47 +162,105 @@ class PatrolTests(unittest.TestCase):
         bot._patrol_tick.assert_not_called()
         self.assertTrue(any("not on any drawn platform" in l for l in bot.log_lines))
 
-    def test_persistent_blind_dot_leaps_off_the_rope(self):
-        # The dot can stay invisible while hanging on a rope — after 2.5s
-        # blind, leap off toward the last known position's nearest platform.
+    def test_persistent_blind_dot_never_learns_or_leaps(self):
+        # A missing dot may be UI over the minimap or a map load — no
+        # guessing: no rope learned, no jump pressed.
         bot = PatrolBot([FLOOR], (60, 100), [(20, 100), (180, 100)])
         bot.rope_exit = Mock()
+        bot.probe_rope = Mock()
         bot._blind_wait = Mock()
-        p = Patrol(bot)
-        p._blind_since = time.monotonic() - 3.0     # blind window elapsed
         bot.minimap.player_pos = Mock(return_value=None)
-        p._last_pos = (60, 100)                     # last known position
-        p.tick()
-        bot.rope_exit.assert_called_once()
-        self.assertEqual(bot.weaves, 0)
+        p = Patrol(bot)
+        for _ in range(5):
+            p.tick()
+        bot.rope_exit.assert_not_called()
+        bot.probe_rope.assert_not_called()
+        self.assertEqual(bot._blind_wait.call_count, 5)
 
-    def test_stable_off_graph_position_learns_a_rope(self):
-        # Hanging on an (undrawn) game rope: stable + off-graph for >2s
-        # records a rope segment up to the platform above, persisted into
-        # the map file, and leaps off.
-        import tempfile
-
+    def _rope_bot(self, tmp, pos=(60, 60)):
         from picobot.bot.maps import MapEntry, MapStore
 
-        bot = PatrolBot([FLOOR, (40, 40, 160, 40)], (60, 60),
+        bot = PatrolBot([FLOOR, (40, 40, 160, 40)], pos,
                         [(20, 100), (180, 100)])
         bot._map = MapEntry(name="m")
         bot._current_map_entry = lambda: bot._map
+        bot.maps = MapStore(tmp)
+        bot.maps.save(bot._map)
+        bot.rope_exit = Mock()
+        bot._blind_wait = Mock()
+        return bot
+
+    def _stuck_tick(self, bot, pos):
+        p = Patrol(bot)
+        p._stuck_since = time.monotonic() - 3.0
+        p._stuck_pos = pos
+        p.tick()
+
+    def test_confirmed_hang_learns_a_rope(self):
+        # Stable + off-graph for >2s, and holding Down slides the
+        # character: a rope. Recorded up to the platform above, then leap.
+        import tempfile
+
+        from picobot.bot.maps import MapStore
+
         with tempfile.TemporaryDirectory() as tmp:
-            bot.maps = MapStore(tmp)
-            bot.maps.save(bot._map)
-            bot.rope_exit = Mock()
-            bot._blind_wait = Mock()
-            p = Patrol(bot)
-            p._stuck_since = time.monotonic() - 3.0
-            p._stuck_pos = (60, 60)
-            p.tick()
+            bot = self._rope_bot(tmp)
+            bot.probe_rope = Mock(return_value=True)
+            self._stuck_tick(bot, (60, 60))
             bot.rope_exit.assert_called_once()
             saved = MapStore(tmp).get("m")
             self.assertEqual(len(saved.ropes), 1)
             self.assertEqual(saved.ropes[0][0], 0.3)      # stuck x
             self.assertEqual(saved.ropes[0][3], round(40 / 150, 4))
         self.assertTrue(any("Learned a rope" in l for l in bot.log_lines))
+
+    def test_undrawn_ground_is_not_learned_as_a_rope(self):
+        import tempfile
+
+        from picobot.bot.maps import MapStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self._rope_bot(tmp)
+            bot.probe_rope = Mock(return_value=False)
+            self._stuck_tick(bot, (60, 60))
+            self.assertFalse(MapStore(tmp).get("m").ropes)
+            bot.rope_exit.assert_called_once()           # hop back
+        self.assertTrue(any("not a rope" in l for l in bot.log_lines))
+
+    def test_unreadable_probe_does_nothing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self._rope_bot(tmp)
+            bot.probe_rope = Mock(return_value=None)
+            self._stuck_tick(bot, (60, 60))
+            bot.rope_exit.assert_not_called()
+
+    def test_hangs_on_one_rope_extend_it(self):
+        import tempfile
+
+        from picobot.bot.maps import MapStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self._rope_bot(tmp)
+            bot.probe_rope = Mock(return_value=True)
+            self._stuck_tick(bot, (60, 60))
+            bot.pos = (61, 75)                         # lower on the same rope
+            self._stuck_tick(bot, (61, 75))
+            ropes = MapStore(tmp).get("m").ropes
+            self.assertEqual(len(ropes), 1)
+            self.assertEqual(ropes[0][1], round(75 / 150, 4))   # bottom grew
+            self.assertEqual(ropes[0][3], round(40 / 150, 4))   # top kept
+
+    def test_exit_leaps_toward_a_landable_platform(self):
+        # Rope at x=60, y=60: a platform above to the left (unreachable
+        # by a leap) and one below to the right.
+        above_left = (20, 30, 50, 30)
+        below_right = (70, 80, 150, 80)
+        bot = PatrolBot([above_left, below_right], (60, 60),
+                        [(20, 100), (180, 100)])
+        p = Patrol(bot)
+        self.assertEqual(p._exit_direction(bot.g, (60, 60)), "right")
 
     def test_anchor_off_platform_is_banned_with_message(self):
         bot = PatrolBot([FLOOR], (10, 100), [(20, 100), (95, 20)])

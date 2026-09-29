@@ -37,8 +37,6 @@ class Patrol:
         self._nav: Optional[Navigator] = None
         self._replan_at = 0.0
         self._break_logged = 0.0
-        self._blind_since = None
-        self._last_pos: Optional[Point] = None
         self._stuck_since: Optional[float] = None
         self._stuck_pos: Optional[Point] = None
 
@@ -47,27 +45,12 @@ class Patrol:
         bot = self.bot
         img = bot.minimap_frame()
         pos = bot.minimap.player_pos(img) if img is not None else None
-        if pos is not None:
-            self._last_pos = pos
         bot.viz["player"] = pos
         if pos is None:
-            # The dot can stay invisible while hanging on a rope (the
-            # glyph fragments over the rope line) — if it persists, leap
-            # off: direction + jump is the only way down.
-            now = time.monotonic()
-            since = self._blind_since
-            if since is None:
-                self._blind_since = now
-            elif now - since > 2.5:
-                self._blind_since = now
-                graph0 = bot._nav_graph()
-                last = getattr(self, "_last_pos", None)
-                if graph0 is not None and graph0.platforms and last:
-                    self._learn_rope(graph0, last)
-                    bot.rope_exit(self._exit_direction(graph0, last))
+            # Blind: never learn or leap on a guess (the dot may be under
+            # UI, or the map loading) — wait until it is seen again.
             bot._blind_wait()
             return
-        self._blind_since = None
         graph = bot._nav_graph()
         if graph is None:
             # No drawn platforms: straight-line patrol.
@@ -89,11 +72,20 @@ class Patrol:
                 self._stuck_since = now
                 self._stuck_pos = pos
             elif now - self._stuck_since > 2.0:
-                # Stable and off-graph: the bot is hanging on an (undrawn)
-                # game rope. Learn the spot, then leap off.
+                # Stable and off-graph: hanging on a game rope, or standing
+                # on ground that is not drawn. Down tells them apart.
                 self._stuck_since = now
-                self._learn_rope(graph, pos)
-                bot.rope_exit(self._exit_direction(graph, pos))
+                on_rope = bot.probe_rope()
+                if on_rope:
+                    self._learn_rope(graph, pos)
+                    bot.rope_exit(self._exit_direction(graph, pos))
+                elif on_rope is False:
+                    bot.log(
+                        f"Standing off the drawn platforms at "
+                        f"({pos[0]:.0f}, {pos[1]:.0f}) — not a rope; draw "
+                        "the platform there. Hopping back."
+                    )
+                    bot.rope_exit(self._exit_direction(graph, pos))
             bot._blind_wait()
             return
         if self._nav is None or self._nav.graph is not graph:
@@ -152,9 +144,10 @@ class Patrol:
                 self._splice(graph, pos, idx)
 
     def _learn_rope(self, graph, pos: Point) -> None:
-        """Record a rope-stuck position, connected to the platform above
-        it. Learned ropes are graph edges like drawn ones — and
-        ``rope_penalty`` keeps them a last resort."""
+        """Record a confirmed rope hang, connected to the platform above.
+        Hangs on the same rope (same column) extend one segment instead
+        of adding another. Learned ropes are graph edges like drawn ones
+        — and ``rope_penalty`` keeps them a last resort."""
         bot = self.bot
         entry = bot._current_map_entry()
         if entry is None:
@@ -168,27 +161,57 @@ class Patrol:
             return
         w, h = region[2], region[3]
         top = p.y_at(min(p.x1, max(p.x0, pos[0])))
-        seg = [round(pos[0] / w, 4), round(pos[1] / h, 4),
-               round(pos[0] / w, 4), round(top / h, 4)]
-        for r in entry.ropes or []:
-            if abs(r[0] * w - pos[0]) < 6 and abs(r[1] * h - pos[1]) < 8:
-                return                          # already learned
-        entry.ropes = (entry.ropes or []) + [seg]
+        bottom = pos[1]
+        ropes = list(entry.ropes or [])
+        for i, r in enumerate(ropes):
+            if abs((r[0] + r[2]) / 2 * w - pos[0]) >= 5:
+                continue
+            lo, hi = max(r[1], r[3]) * h, min(r[1], r[3]) * h
+            nb, nt = max(lo, bottom), min(hi, top)
+            if nb <= lo + 0.5 and nt >= hi - 0.5:
+                return                          # nothing new
+            ropes[i] = [r[0], round(nb / h, 4), r[2], round(nt / h, 4)]
+            entry.ropes = ropes
+            bot.maps.save(entry)
+            bot.log(f"Extended the rope at x {pos[0]:.0f} "
+                    f"(y {nt:.0f}-{nb:.0f})")
+            return
+        entry.ropes = ropes + [[
+            round(pos[0] / w, 4), round(bottom / h, 4),
+            round(pos[0] / w, 4), round(top / h, 4),
+        ]]
         bot.maps.save(entry)
         bot.log(f"Learned a rope at ({pos[0]:.0f}, {pos[1]:.0f}) — "
                 "climbs there are a last resort")
         bot.event("map", f"rope learned at ({pos[0]:.0f}, {pos[1]:.0f})")
 
     def _exit_direction(self, graph, pos: Point) -> str:
-        """Direction of the nearest graph platform from ``pos`` — the way
-        to leap when exiting a rope."""
+        """Which way to leap off a rope (or hop off undrawn ground): toward
+        the nearest platform it can land on — at or below the player,
+        never one above. Straight over a platform, toward its middle."""
+        x, y = pos
+        best = None
+        for p in graph.platforms:
+            near_x = min(p.x1, max(p.x0, x))
+            row = p.y_at(near_x)
+            if row < y - 4:
+                continue                        # above: a leap cannot reach it
+            gap = abs(near_x - x)
+            if gap == 0:
+                d = "right" if (p.x0 + p.x1) / 2 >= x else "left"
+            else:
+                d = "right" if near_x > x else "left"
+            key = (gap, row - y)
+            if best is None or key < best[0]:
+                best = (key, d)
+        if best is not None:
+            return best[1]
         near = min(
             graph.platforms,
-            key=lambda p: min(abs(p.x0 - pos[0]), abs(p.x1 - pos[0])),
+            key=lambda p: min(abs(p.x0 - x), abs(p.x1 - x)),
         )
-        cx = min((abs(near.x0 - pos[0]), near.x0),
-                 (abs(near.x1 - pos[0]), near.x1))[1]
-        return "right" if cx > pos[0] else "left"
+        cx = min((abs(near.x0 - x), near.x0), (abs(near.x1 - x), near.x1))[1]
+        return "right" if cx > x else "left"
 
     # -- Planning ----------------------------------------------------------------------
     def _greedy(self, graph, cur: Point, cur_i: Optional[int]):

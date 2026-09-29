@@ -1,7 +1,8 @@
 """Minimap analysis for PicoBot.
 
 Pure-NumPy detection over a screenshot of the game's minimap region.
-Markers use a per-pixel color distance mask plus a 3x3 erosion. The
+Markers use a per-pixel color distance mask; fragments of one marker
+(split by a rope or platform line) are grouped before sizing. The
 panel is located by its rounded white frame (:func:`find_frame`); map
 changes are detected from the loading blackout (``vision.transition``).
 Platform geometry is hand-drawn per map (``platforms`` on the map file).
@@ -237,6 +238,65 @@ def _largest_blob(mask: np.ndarray):
     return best[1], best[2], best[3]
 
 
+def dilate3(mask: np.ndarray) -> np.ndarray:
+    """3x3 binary dilation via shifted ORs."""
+    h, w = mask.shape
+    out = mask.copy()
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dy == 0 and dx == 0:
+                continue
+            src_y = slice(max(0, -dy), h - max(0, dy))
+            src_x = slice(max(0, -dx), w - max(0, dx))
+            dst_y = slice(max(0, dy), h - max(0, -dy))
+            dst_x = slice(max(0, dx), w - max(0, -dx))
+            out[dst_y, dst_x] |= mask[src_y, src_x]
+    return out
+
+
+def marker_blobs(mask: np.ndarray, min_px: int) -> List[Tuple[int, float, float, int]]:
+    """Marker candidates as ``(pixels, cx, cy, y_max)``, largest first.
+
+    Pixels within 2px of each other form one marker — a 1px rope or
+    platform line through the dot splits it into fragments, which a
+    plain component (or an erosion) would drop. Sizes and positions come
+    from the real pixels, so ``y_max`` is the marker's true bottom row.
+    """
+    ys, xs = np.nonzero(mask)
+    if xs.size == 0:
+        return []
+    grown = dilate3(mask)
+    h, w = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    out = []
+    for sy, sx in zip(ys.tolist(), xs.tolist()):
+        if visited[sy, sx]:
+            continue
+        stack = [(sy, sx)]
+        visited[sy, sx] = True
+        n = sx_sum = sy_sum = 0
+        ymax = 0
+        while stack:
+            y, x = stack.pop()
+            if mask[y, x]:
+                n += 1
+                sx_sum += x
+                sy_sum += y
+                ymax = max(ymax, y)
+            for ny in (y - 1, y, y + 1):
+                for nx in (x - 1, x, x + 1):
+                    if (
+                        0 <= ny < h and 0 <= nx < w
+                        and grown[ny, nx] and not visited[ny, nx]
+                    ):
+                        visited[ny, nx] = True
+                        stack.append((ny, nx))
+        if n >= min_px:
+            out.append((n, sx_sum / n, sy_sum / n, ymax))
+    out.sort(key=lambda b: -b[0])
+    return out
+
+
 def largest_blob_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
     """Centroid of the largest connected component, or None."""
     blob = _largest_blob(mask)
@@ -272,6 +332,10 @@ class MinimapAnalyzer:
         self.edge_lost_s = 1.0
         self._miss_logged = 0.0
         self._lock = threading.Lock()
+        # Player tracking is per thread: the bot, the streamer and the
+        # monitor may read the same analyzer.
+        self._track = threading.local()
+        self._track_epoch = 0
 
     @property
     def region(self) -> Optional[Region]:
@@ -293,6 +357,7 @@ class MinimapAnalyzer:
         """Install a known region — a map's stored layout or a hand-drawn
         rect (``explicit``)."""
         with self._lock:
+            self._track_epoch += 1
             self._region = tuple(int(v) for v in region)
             self._region_explicit = explicit
             self._region_source = "manual" if explicit else "stored"
@@ -300,6 +365,7 @@ class MinimapAnalyzer:
     def reset_region(self) -> None:
         """Drop the current region (any source); ``locate`` re-runs."""
         with self._lock:
+            self._track_epoch += 1
             self._region = None
             self._region_explicit = False
             self._region_source = None
@@ -324,6 +390,8 @@ class MinimapAnalyzer:
             event = self.transition.note(minimap_img)
             info["state"] = self.transition.state
             info["event"] = event
+            if event == "arrived":
+                self._track_epoch += 1       # new map: forget the dot
             if event == "arrived" and self._region_source != "config":
                 self._region = None
                 self._region_source = None
@@ -415,6 +483,12 @@ class MinimapAnalyzer:
             return img, 0
         return img[i:-i, i:-i], i
 
+    # Smallest group of matching pixels accepted as a marker (the real
+    # player dot is ~24px; specks of the same colour are 1–3px).
+    MARKER_MIN_PX = 6
+    # A lost dot is held this many consecutive frames (one flicker).
+    PLAYER_HOLD_FRAMES = 1
+
     def _marker(
         self,
         minimap_img: np.ndarray,
@@ -422,22 +496,43 @@ class MinimapAnalyzer:
         tolerance: int,
         *,
         feet: bool = False,
+        near: Optional[Tuple[int, int]] = None,
     ) -> Optional[Tuple[int, int]]:
+        """Largest marker of colour ``bgr`` — or, given ``near``, the
+        candidate closest to it (the tracked dot beats a bigger stray)."""
         inner, off = self._interior(minimap_img)
-        mask = erode3(color_mask(inner, bgr, tolerance))
-        blob = _largest_blob(mask)
-        if blob is None:
+        blobs = marker_blobs(color_mask(inner, bgr, tolerance), self.MARKER_MIN_PX)
+        if not blobs:
             return None
-        cx, cy, ymax = blob
+        if near is not None and len(blobs) > 1:
+            nx, ny = near[0] - off, near[1] - off
+            blob = min(blobs, key=lambda b: (b[1] - nx) ** 2 + (b[3] - ny) ** 2)
+        else:
+            blob = blobs[0]
+        _, cx, cy, ymax = blob
         # The player glyph's bottom tip touches the platform.
-        return (cx + off, (ymax if feet else cy) + off)
+        return (int(round(cx)) + off, (ymax if feet else int(round(cy))) + off)
 
     def player_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10
     ) -> Optional[Tuple[int, int]]:
-        return self._marker(
-            minimap_img, self.colors.player, tolerance, feet=True
+        """The player's feet, tracked per calling thread: the candidate
+        nearest the last position wins, and a single missed frame repeats
+        the last position instead of reporting the dot lost."""
+        t = self._track
+        if getattr(t, "epoch", None) != self._track_epoch:
+            t.epoch, t.last, t.misses = self._track_epoch, None, 0
+        pos = self._marker(
+            minimap_img, self.colors.player, tolerance, feet=True, near=t.last
         )
+        if pos is not None:
+            t.last, t.misses = pos, 0
+            return pos
+        t.misses += 1
+        if t.last is not None and t.misses <= self.PLAYER_HOLD_FRAMES:
+            return t.last
+        t.last = None
+        return None
 
     def rune_pos(
         self, minimap_img: np.ndarray, tolerance: int = 10
@@ -450,9 +545,9 @@ class MinimapAnalyzer:
     def has_other_players(
         self, minimap_img: np.ndarray, tolerance: int = 10
     ) -> bool:
-        inner, _ = self._interior(minimap_img)
-        mask = erode3(color_mask(inner, self.colors.other_player, tolerance))
-        return bool(mask.any())
+        return self._marker(
+            minimap_img, self.colors.other_player, tolerance
+        ) is not None
 
 
 __all__ = [
@@ -464,6 +559,7 @@ __all__ = [
     "erode3",
     "find_frame",
     "largest_blob_centroid",
+    "marker_blobs",
     "platform_covered",
     "platform_row_at",
     "platform_span_at",

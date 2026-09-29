@@ -117,6 +117,48 @@ class NavHysteresisTests(unittest.TestCase):
         self.assertNotIn("down", bot.hid.downs)        # no 3s down-hold
 
 
+class RopeProbeTests(unittest.TestCase):
+    """Down tells a rope hang from undrawn ground — never Up (portals)."""
+
+    def _probe(self, ys):
+        bot = _bot([(50, y) for y in ys])
+        bot.player_pos = Mock(side_effect=[(50, y) for y in ys])
+        return bot, bot.probe_rope()
+
+    def test_sliding_down_means_rope(self):
+        bot, got = self._probe([60, 66])
+        self.assertTrue(got)
+        self.assertEqual(bot.hid.downs, ["down"])
+        self.assertEqual(bot.hid.ups, ["down"])
+        self.assertNotIn("up", bot.hid.downs)
+
+    def test_no_movement_means_ground(self):
+        _, got = self._probe([60, 61])                # 1px jitter
+        self.assertFalse(got)
+
+    def test_lost_dot_is_unknown(self):
+        bot = _bot([(50, 60)])
+        bot.player_pos = Mock(side_effect=[(50, 60), None])
+        self.assertIsNone(bot.probe_rope())
+
+
+class ClimbJitterTests(unittest.TestCase):
+    def _clocked(self):
+        return patch("time.time", side_effect=(i * 0.2 for i in range(1, 100000)))
+
+    def test_jitter_is_not_a_latched_climb(self):
+        # y flickers 60/61 without real progress: never latched.
+        bot = _bot([(50, 60), (50, 61)] * 40)
+        with self._clocked():
+            self.assertFalse(bot.climb("up", 20 / 150))
+        bot.log.assert_any_call("Climb failed: rope never latched")
+
+    def test_real_progress_climbs(self):
+        bot = _bot([(50, 60), (50, 55), (50, 50), (50, 44), (50, 40), (50, 21)])
+        with self._clocked():
+            self.assertTrue(bot.climb("up", 20 / 150))
+
+
 class VerticalStuckTests(unittest.TestCase):
     """Targets recorded beyond reachable geometry must not loop forever.
 

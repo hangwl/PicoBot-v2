@@ -76,10 +76,21 @@ below) with every move whose **reach** covers the gap:
 | `climb_down` | grab at the top (hold down), descend past the rope's bottom end, land below | lands on the nearest platform under the rope's end |
 
 There is no direct release from a rope: after any failed climb the bot
-leaps off (hold direction + jump) toward the nearest platform and
-replans from where it lands. The same exit fires when the player dot
-stays invisible for ~2.5s — a fragmented glyph over a rope line is the
-usual cause (marker detection retries without erosion first).
+leaps off (hold direction + jump) toward the nearest platform it can
+land on — at or below it, never one above — and replans from where it
+lands. Climb checks ignore 1px of dot jitter (it is neither progress nor
+a fall).
+
+## Player dot
+
+The dot is found by its colour (`minimap_colors.player`); pixels within
+2px of each other count as one marker, so a rope or platform line
+through the dot (which splits it) doesn't hide it. Groups under 6px are
+specks. The reported point is the marker's true bottom row (its feet).
+Detection tracks the dot per thread: when several yellow markers
+qualify, the one nearest the last position wins, and one missed frame
+repeats the last position before the dot counts as lost. With the dot
+lost the bot only waits — it never learns ropes or jumps blind.
 
 Rope climbs cost `rope_penalty` (default 5s) on top of climb time —
 **ropes are a last resort**: platforms are normally reachable via jumps,
@@ -89,13 +100,15 @@ planner use them freely.
 ## Learning ropes from stuck events
 
 Ropes are not drawn. When the bot is off every drawn platform at a
-stable position for over 2 seconds — the signature of hanging on an
-(undrawn) game rope — it records a rope segment from that spot up to the
-platform above (persisted in the map file, drawn brown on the overlay),
-leaps off, and replans. Learned climbs carry the same `rope_penalty`, so
-they're used only when nothing else connects. The same learning fires
-when the player dot stays invisible for ~2.5s (a fragmented glyph over a
-rope line).
+stable position for over 2 seconds it holds **Down** briefly: on a rope
+the character slides down, on ground it only crouches (Down, not Up —
+Up on a portal changes maps). A confirmed hang records a rope segment
+from that spot up to the platform above (persisted in the map file,
+drawn brown on the overlay); later hangs on the same column extend that
+segment instead of adding another. Then it leaps off and replans. Ground
+that isn't drawn is logged ("not a rope; draw the platform there") and
+the bot hops back toward drawn ground. Learned climbs carry the same
+`rope_penalty`, so they're used only when nothing else connects.
 
 - Reach = sideways `dx` and upward `rise` in minimap px. Starting values
   are realistic guesses (`nav_*` config keys); the **Measure moves**

@@ -156,3 +156,18 @@ fixed that — all 15 captured reads exact afterwards.
   and rebuilds the feed after 5s of failures (with a visible warning),
   stuck sends close the client after 10s, and the page pings and
   reconnects after 12s of silence.
+
+## Movement and detection
+
+- **Dot lost on ropes** (2026-09-30): markers were found with a 3x3
+  erosion to drop specks. The real player dot is ~24px, which erodes to
+  4px — a 1px rope or platform line through it split it into fragments
+  the erosion erased, so the dot "vanished" on ropes. Grouping pixels
+  within 2px and requiring 6px drops specks without that failure; 78/79
+  real post-arrival frames still detect. The feet row is now the true
+  bottom (1px lower than the eroded one).
+- **Guessing ropes** (2026-09-30): a rope was learned (and a jump
+  pressed) whenever the dot sat still off the drawn platforms for 2s or
+  went missing for 2.5s — undrawn ground, UI over the minimap or a
+  loading screen all produced ropes and blind jumps. A Down probe now
+  confirms the hang, and a missing dot only waits.

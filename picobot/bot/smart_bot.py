@@ -798,6 +798,25 @@ class SmartBot(BotBase):
         finally:
             self.hid.key_up(direction)
 
+    def probe_rope(self) -> Optional[bool]:
+        """Is the player hanging on a rope? Hold Down briefly: on a rope
+        the character slides down (True); on ground it only crouches
+        (False). Down, not Up — Up on a portal would change maps. None
+        when the dot cannot be read."""
+        before = self.player_pos()
+        if before is None or not self.is_window_focused():
+            return None
+        self.hid.key_down("down")
+        try:
+            self.sleep(human_between(0.35, 0.25, 0.5))
+        finally:
+            self.hid.key_up("down")
+        self.sleep(human_between(0.12, 0.08, 0.2))
+        after = self.player_pos()
+        if after is None:
+            return None
+        return after[1] - before[1] >= 2
+
     def rope_up(
         self,
         until_y: float,
@@ -852,17 +871,19 @@ class SmartBot(BotBase):
                     self.sleep(human_between(0.3, 0.2, 0.45))
                     return True
                 if last_y is not None:
-                    if y < last_y:
+                    # 1px of detection jitter is neither progress nor a fall.
+                    if y <= last_y - 2:
                         grabbed = True          # climbing (or jump arc)
                         still = 0
-                    elif y == last_y:
+                    elif abs(y - last_y) <= 1:
                         still += 1              # latched and holding, or landed
                     else:
                         still = 0               # falling — keep waiting
                         if grabbed and y > target + 30:
                             self.log("Rope grab failed: fell off")
                             return False
-                last_y = y
+                if last_y is None or abs(y - last_y) > 1:
+                    last_y = y
                 if not grabbed and time.time() - (deadline - timeout) > 2.5:
                     self.log("Rope grab failed: never latched")
                     return False
@@ -934,12 +955,12 @@ class SmartBot(BotBase):
                     return True
                 if direction == "down" and y >= target_y - 2:
                     return True
-                if last_y is not None and y == last_y:
-                    still += 1
+                if last_y is not None and abs(y - last_y) <= 1:
+                    still += 1                  # jitter is not progress
                 else:
                     still = 0
-                    grabbed = True
-                last_y = y
+                    grabbed = last_y is not None or grabbed
+                    last_y = y
                 if not grabbed and time.time() - (deadline - timeout) > 2.5:
                     self.log("Climb failed: rope never latched")
                     return False

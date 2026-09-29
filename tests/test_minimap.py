@@ -70,8 +70,8 @@ class MinimapAnalyzerTests(unittest.TestCase):
     def test_player_pos_finds_dot(self):
         analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
         img = _dot(_blank(), 50, 50, (12, 240, 239), r=2)
-        # Feet-anchored: the r=2 square erodes to rows 49..51 → bottom 51.
-        self.assertEqual(analyzer.player_pos(img), (50, 51))
+        # Feet-anchored: the r=2 square covers rows 48..52 → bottom 52.
+        self.assertEqual(analyzer.player_pos(img), (50, 52))
 
     def test_player_pos_is_bottom_of_marker_not_center(self):
         # A 7px-tall marker glyph (like the client's player icon): its
@@ -82,7 +82,50 @@ class MinimapAnalyzerTests(unittest.TestCase):
         img = _blank()
         img[40:47, 48:53] = (12, 240, 239)   # 7px tall marker, bottom=46
         x, y = analyzer.player_pos(img)
-        self.assertEqual((x, y), (50, 45))   # erode shaves 1px off the tip
+        self.assertEqual((x, y), (50, 46))   # the true bottom row
+
+    def test_dot_split_by_a_rope_line_is_still_found(self):
+        # A 1px rope (or platform) line through the dot splits it into
+        # fragments; they must still read as one marker.
+        analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
+        img = _dot(_blank(), 50, 50, (12, 240, 239), r=2)
+        img[46:55, 50] = (90, 90, 90)
+        self.assertEqual(analyzer.player_pos(img), (50, 52))
+        img2 = _dot(_blank(), 50, 50, (12, 240, 239), r=2)
+        img2[50, 46:55] = (90, 90, 90)
+        self.assertEqual(MinimapAnalyzer().player_pos(img2), (50, 52))
+
+    def test_specks_are_not_the_player(self):
+        img = _blank()
+        img[10, 10] = img[11, 11] = (12, 240, 239)
+        self.assertIsNone(MinimapAnalyzer().player_pos(img))
+
+    def test_tracked_dot_beats_a_bigger_stray(self):
+        a = MinimapAnalyzer()
+        img = _dot(_blank(), 50, 50, (12, 240, 239), r=2)
+        a.player_pos(img)
+        _dot(img, 150, 90, (12, 240, 239), r=5)       # bigger yellow thing
+        self.assertEqual(a.player_pos(img), (50, 52))
+        self.assertEqual(MinimapAnalyzer().player_pos(img), (150, 95))
+
+    def test_one_missed_frame_is_held(self):
+        a = MinimapAnalyzer()
+        a.player_pos(_dot(_blank(), 50, 50, (12, 240, 239)))
+        self.assertEqual(a.player_pos(_blank()), (50, 52))   # flicker
+        self.assertIsNone(a.player_pos(_blank()))            # really gone
+
+    def test_tracking_is_per_thread_and_resets_on_region_change(self):
+        import threading
+
+        a = MinimapAnalyzer()
+        a.player_pos(_dot(_blank(), 50, 50, (12, 240, 239)))
+        seen = []
+        t = threading.Thread(target=lambda: seen.append(a.player_pos(_blank())))
+        t.start()
+        t.join()
+        self.assertEqual(seen, [None])       # another thread holds nothing
+        a.set_region((0, 0, 200, 120))
+        self.assertIsNone(a.player_pos(_blank()))
 
     def test_player_pos_none_on_blank(self):
         analyzer = MinimapAnalyzer(region=(0, 0, 200, 120))
@@ -361,7 +404,7 @@ class LargestBlobTests(unittest.TestCase):
         _dot(img, 2, 2, a.colors.player)           # on the rim
         self.assertIsNone(a.player_pos(img))
         _dot(img, 40, 40, a.colors.player)         # interior
-        self.assertEqual(a.player_pos(img), (40, 41))  # feet = bottom row
+        self.assertEqual(a.player_pos(img), (40, 42))  # feet = bottom row
 
     def test_rune_pos_reports_blob_centre_not_mean(self):
         a = MinimapAnalyzer()
