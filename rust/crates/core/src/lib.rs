@@ -8,6 +8,8 @@ pub mod error;
 pub mod fileio;
 pub mod json;
 pub mod maps;
+pub mod navgraph;
+pub mod planner;
 pub mod platform_fit;
 pub mod reach;
 pub mod rotation;

@@ -155,3 +155,126 @@ fn platform_fit_matches_python() {
     let got = serde_json::to_value(fit.summary(Some("m"), &segs, wh)).unwrap();
     assert_eq!(got, trace["summary"]);
 }
+
+#[test]
+fn navigation_graph_matches_python_on_random_maps() {
+    use picobot_core::navgraph::{Direction, GraphOptions, MoveKind, NavGraph};
+    use picobot_core::reach::Reach;
+
+    let seg = |v: &Value| -> [f64; 4] {
+        let a = v.as_array().unwrap();
+        [0, 1, 2, 3].map(|i| a[i].as_f64().unwrap())
+    };
+    let pair = |v: &Value| (v[0].as_f64().unwrap(), v[1].as_f64().unwrap());
+    let reach_of = |v: &Value| Reach {
+        dx: v[0].as_f64().unwrap_or(f64::INFINITY),
+        rise: v[1].as_f64().unwrap_or(f64::INFINITY),
+    };
+    let kind_of = |s: &str| match s {
+        "rope_lift" => MoveKind::RopeLift,
+        "teleport" => MoveKind::Teleport,
+        other => panic!("unexpected exclude {other}"),
+    };
+
+    for (gi, g) in load("trace_nav.json")
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let mut m = ReachModel::new(base_reach(&BotConfig::default()), None);
+        for (k, v) in g["base"].as_object().unwrap() {
+            m.base[Move::parse(k).unwrap() as usize] = reach_of(v);
+        }
+        for (k, v) in g["est"].as_object().unwrap() {
+            m.est[Move::parse(k).unwrap() as usize] = reach_of(v);
+        }
+        m.ceiling = g["ceiling"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (Move::parse(k).unwrap(), reach_of(v)))
+            .collect();
+        m.explore = g["explore"].as_f64().unwrap();
+        let plats: Vec<[f64; 4]> = g["platforms"].as_array().unwrap().iter().map(seg).collect();
+        let ropes: Vec<[f64; 4]> = g["ropes"].as_array().unwrap().iter().map(seg).collect();
+        let opts = GraphOptions {
+            rope_penalty: g["penalty"].as_f64().unwrap(),
+            allow_flash: g["allow_flash"].as_bool().unwrap(),
+            allow_teleport: g["allow_teleport"].as_bool().unwrap(),
+            ..Default::default()
+        };
+        let graph = NavGraph::new(&plats, &ropes, &m, opts);
+
+        // Every transfer edge, in Python's sorted order.
+        let mut edges: Vec<(String, [f64; 5])> = graph
+            .transfer_legs()
+            .iter()
+            .map(|l| (l.kind.as_str().to_owned(), [l.x0, l.y0, l.x1, l.y1, l.cost]))
+            .collect();
+        edges.sort_by(|a, b| {
+            a.0.cmp(&b.0).then_with(|| {
+                a.1.iter()
+                    .zip(&b.1)
+                    .map(|(x, y)| x.total_cmp(y))
+                    .find(|o| o.is_ne())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        });
+        let want = g["edges"].as_array().unwrap();
+        assert_eq!(edges.len(), want.len(), "graph {gi}: edge count");
+        for (e, w) in edges.iter().zip(want) {
+            assert_eq!(e.0, w[0].as_str().unwrap(), "graph {gi}: {e:?} vs {w}");
+            for (k, v) in e.1.iter().enumerate() {
+                assert!(
+                    close(*v, w[k + 1].as_f64().unwrap()),
+                    "graph {gi}: {e:?} vs {w}"
+                );
+            }
+        }
+
+        for r in g["routes"].as_array().unwrap() {
+            let exclude: Vec<MoveKind> = r["exclude"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|k| kind_of(k.as_str().unwrap()))
+                .collect();
+            let cost = graph.route_cost(pair(&r["from"]), pair(&r["to"]), &exclude);
+            match r["cost"].as_f64() {
+                None => assert!(
+                    cost.is_infinite(),
+                    "graph {gi}: route {r} found cost {cost}"
+                ),
+                Some(w) => assert!(close(cost, w), "graph {gi}: route {r} cost {cost}"),
+            }
+        }
+
+        for q in g["queries"].as_array().unwrap() {
+            let (x, y) = pair(&q["at"]);
+            let idx = |v: &Value| v.as_u64().map(|i| i as usize);
+            assert_eq!(graph.locate(x, y), idx(&q["locate"]), "graph {gi}: {q}");
+            assert_eq!(graph.above(x, y, None), idx(&q["above"]), "graph {gi}: {q}");
+            assert_eq!(graph.below(x, y, None), idx(&q["below"]), "graph {gi}: {q}");
+            let ha = graph.highest_above(x, y, 30.0, None);
+            match q["highest30"].as_array() {
+                None => assert!(ha.is_none(), "graph {gi}: {q}"),
+                Some(w) => {
+                    let (j, rise) = ha.unwrap_or_else(|| panic!("graph {gi}: {q}"));
+                    assert!(
+                        j as u64 == w[0].as_u64().unwrap() && close(rise, w[1].as_f64().unwrap()),
+                        "graph {gi}: {q}"
+                    );
+                }
+            }
+            if let Some(exit) = q["exit"].as_str() {
+                let want = if exit == "right" {
+                    Direction::Right
+                } else {
+                    Direction::Left
+                };
+                assert_eq!(graph.exit_direction(x, y), want, "graph {gi}: {q}");
+            }
+        }
+    }
+}

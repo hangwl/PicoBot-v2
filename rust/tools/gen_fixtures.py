@@ -212,6 +212,85 @@ def traces() -> None:
     }))
 
 
+def nav_trace() -> None:
+    """Random maps through the Python planner: every transfer edge, routes
+    between random points, and the geometry queries."""
+    import random
+
+    from picobot.bot.navgraph import NavGraph
+    from picobot.bot.reach import Reach
+
+    rng = random.Random(11)
+    r6 = lambda v: round(v, 6)  # noqa: E731
+    graphs = []
+    for gi in range(60):
+        plats = []
+        for _ in range(rng.randint(2, 8)):
+            y = rng.choice([30, 45, 52, 64, 70, 82, 100]) + rng.choice([0, 0, 0.5])
+            x0 = rng.randint(0, 150)
+            slope = rng.choice([0, 0, 0, rng.randint(-10, 10)])
+            plats.append([x0, y, x0 + rng.randint(8, 120), y + slope])
+        ropes = []
+        for _ in range(rng.choice([0, 0, 1, 2])):
+            x = rng.randint(10, 190)
+            top = rng.choice([30, 45, 52, 64])
+            ropes.append([x, top + rng.randint(15, 60), x + rng.choice([0, 0, 2]), top])
+        base = base_reach(BotConfig())
+        for k in base:
+            base[k] = Reach(round(base[k].dx * rng.uniform(0.6, 1.4), 2),
+                            round(base[k].rise * rng.uniform(0.6, 1.4), 2))
+        m = ReachModel(base, explore=rng.choice([1.0, 1.15, 1.3]))
+        for _ in range(rng.randint(0, 3)):
+            mv = rng.choice(list(base))
+            e = m.get(mv)
+            m.observe(mv, planned=(e.dx, e.rise), observed=(0, 0), ok=False)
+        kit = rng.choice([(True, False), (False, True), (False, False)])
+        penalty = rng.choice([0.0, 5.0])
+        g = NavGraph(plats, m, ropes=ropes, rope_penalty=penalty,
+                     allow_flash=kit[0], allow_teleport=kit[1])
+        edges = sorted([l.kind, r6(l.x0), r6(l.y0), r6(l.x1), r6(l.y1), r6(l.cost)]
+                       for l in g.transfer_legs())
+
+        def spot():
+            p = rng.choice(g.platforms) if g.platforms else None
+            if p is None or rng.random() < 0.15:
+                return [rng.randint(0, 200), rng.randint(20, 110)]
+            x = round(rng.uniform(p.x0, p.x1), 1)
+            return [x, round(p.y_at(x) - rng.choice([0, 0, 2, 4]), 1)]
+
+        routes = []
+        for _ in range(25):
+            a, b = spot(), spot()
+            ex = rng.choice([[], [], ["rope_lift"], ["rope_lift", "teleport"]])
+            legs = g.route(tuple(a), tuple(b), exclude=tuple(ex))
+            routes.append({
+                "from": a, "to": b, "exclude": ex,
+                "cost": None if legs is None else r6(sum(l.cost for l in legs)),
+            })
+        queries = []
+        for _ in range(25):
+            x, y = rng.randint(0, 200), rng.randint(20, 110)
+            ha = g.highest_above(x, y, 30.0)
+            queries.append({
+                "at": [x, y], "locate": g.locate(x, y), "above": g.above(x, y),
+                "below": g.below(x, y),
+                "highest30": None if ha is None else [ha[0], r6(ha[1])],
+                "exit": g.exit_direction(x, y) if g.platforms else None,
+            })
+        graphs.append({
+            "platforms": plats, "ropes": ropes, "penalty": penalty,
+            "allow_flash": kit[0], "allow_teleport": kit[1],
+            "explore": m.explore,
+            "base": {k: [v.dx, v.rise] for k, v in m.base.items()},
+            "est": {k: [v.dx, v.rise] for k, v in m.est.items()},
+            "ceiling": {k: [None if v.dx == float("inf") else v.dx,
+                            None if v.rise == float("inf") else v.rise]
+                        for k, v in m.ceiling.items()},
+            "edges": edges, "routes": routes, "queries": queries,
+        })
+    (OUT / "trace_nav.json").write_text(json.dumps(graphs))
+
+
 if __name__ == "__main__":
     shutil.rmtree(OUT, ignore_errors=True)
     OUT.mkdir(parents=True)
@@ -219,5 +298,6 @@ if __name__ == "__main__":
     config()
     reach()
     traces()
+    nav_trace()
     for p in sorted(OUT.rglob("*.json")):
         print(p.relative_to(OUT))

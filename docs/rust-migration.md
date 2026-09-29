@@ -88,6 +88,15 @@ conversion.
   seeded random operations run through the Python code with every result
   recorded (400 reach steps, 400 skill-book checks, 200 tidy cases, a
   platform-fit walk) — replay identically in Rust.
+- **M3** — done: `navgraph` (platforms, every edge kind incl. the up-flash
+  overshoot rule and learned ropes, Dijkstra routing with exclusions and
+  jitter, geometry queries, `graph_for`, `GraphCache`) and `planner` (loop
+  planning with weighted/greedy order; skips returned with reasons for
+  the caller to ban). The Python graph tests are ported; a trace of 60
+  random maps (2,807 edges, 1,500 routes, geometry queries) matches the
+  Python planner exactly. On the real maps (`examples/nav_bench.rs` vs
+  `tools/nav_bench.py`, identical route checksums): graph build 83 µs vs
+  962 µs, a route 17 µs vs 135 µs.
 
 ## Milestones
 
