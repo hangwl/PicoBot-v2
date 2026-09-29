@@ -14,6 +14,7 @@ Development happens on Windows (the game and the Pico live there):
 .venv\Scripts\python.exe -m picobot               # run host (WS :8765, HTTP :8000)
 .venv\Scripts\python.exe -m picobot --debug-frames   # + save debug captures to debug/frames/
 cd web; npm install; npm run build                 # build the dashboard (web/dist)
+cd rust; cargo test; cargo clippy --all-targets    # Rust host (feat/rust) — see docs/rust-migration.md
 ```
 
 - Use the venv interpreter, not bare `python`/`pytest`.

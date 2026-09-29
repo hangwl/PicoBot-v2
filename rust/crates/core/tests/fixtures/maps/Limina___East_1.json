@@ -1,0 +1,117 @@
+{
+  "name": "Limina \u2014 East 1",
+  "map_name": "Limina : 1-5 East",
+  "fingerprint": "legacy-fp",
+  "minimap_region": [
+    7,
+    68,
+    170,
+    97
+  ],
+  "walls": {
+    "left": 0.05,
+    "floor": 0.9
+  },
+  "platforms": [
+    [
+      0.1824,
+      0.4227,
+      0.3235,
+      0.4227
+    ],
+    [
+      0.1824,
+      0.8454,
+      0.8235,
+      0.8454
+    ]
+  ],
+  "ropes": [
+    [
+      0.3647,
+      0.6598,
+      0.3647,
+      0.7526
+    ]
+  ],
+  "rotation": {
+    "position_jitter_px": 6,
+    "travel_style": "flash",
+    "anchors": [
+      {
+        "name": "a0",
+        "pos": [
+          0.2647,
+          0.4845
+        ]
+      },
+      {
+        "name": "a1",
+        "pos": [
+          0.7235,
+          0.4536
+        ],
+        "on_arrive": [
+          "orb"
+        ],
+        "face": "left"
+      },
+      {
+        "name": "a2",
+        "pos": [
+          37.0,
+          64.0
+        ]
+      }
+    ],
+    "legs": [
+      {
+        "from": 0,
+        "to": 1,
+        "steps": [
+          {
+            "walk_to": [
+              0.5,
+              0.45
+            ],
+            "style": "flash"
+          },
+          {
+            "up_jump": true
+          },
+          {
+            "wait": 0.25
+          }
+        ]
+      },
+      {
+        "from": 1,
+        "to": 2,
+        "steps": [
+          {
+            "climb": {
+              "dir": "down",
+              "until_y": 0.8,
+              "x": 0.5
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "skills": {
+    "orb": {
+      "key": "d",
+      "kind": "summon",
+      "cooldown": 60.0,
+      "charges": 2,
+      "duration": 90.0
+    },
+    "burst": {
+      "key": "s",
+      "kind": "attack",
+      "cooldown": 28.0,
+      "hold": 0.3
+    }
+  }
+}

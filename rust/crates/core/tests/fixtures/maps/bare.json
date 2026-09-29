@@ -1,0 +1,16 @@
+{
+  "name": "bare",
+  "map_name": null,
+  "fingerprint": null,
+  "minimap_region": null,
+  "walls": null,
+  "platforms": null,
+  "ropes": null,
+  "rotation": {
+    "position_jitter_px": 4,
+    "travel_style": "mixed",
+    "anchors": [],
+    "legs": []
+  },
+  "skills": {}
+}

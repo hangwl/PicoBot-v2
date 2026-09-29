@@ -1,0 +1,26 @@
+{
+  "class_active": "erel",
+  "class_travel": "flash",
+  "air_attacks": true,
+  "jump_key": "space",
+  "flash_jump_key": "c",
+  "teleport_key": null,
+  "nav_threshold_px": 6,
+  "patrol_policy": "greedy",
+  "patrol_weight_temp": 1.5,
+  "player_color": [
+    10,
+    240,
+    240
+  ],
+  "reach_path": "nav_reach_erel.json",
+  "skills": {
+    "h": {
+      "key": "h",
+      "kind": "summon",
+      "cooldown": 5.0,
+      "charges": 2,
+      "duration": 90.0
+    }
+  }
+}

@@ -53,6 +53,31 @@ Crates (initial picks): `serde`/`serde_json`, `serialport`, `windows`
 + `jpeg-encoder` or `turbojpeg`, `tokio` + `axum` (HTTP + WS), `rand` +
 `rand_distr` (log-normal), `ort` (ONNX runtime for OCR), `tracing`.
 
+## Working on it
+
+```powershell
+cd rust
+cargo test                                   # all crates
+$env:PICOBOT_DATA = "..\..\PicoBot-v2"; cargo test -p picobot-core --test parity   # + real data
+cargo clippy --all-targets; cargo fmt
+..\.venv\Scripts\python.exe tools\gen_fixtures.py   # regenerate parity fixtures (Python writers)
+```
+
+Parity fixtures in `crates/core/tests/fixtures/` are written by the
+Python code and must round-trip byte-for-byte; `.gitattributes` keeps
+them out of line-ending conversion.
+
+## Status
+
+- **M0** — toolchain (Rust 1.98), workspace, CPU sampler. Baseline
+  numbers still to record.
+- **M1** — done: `config` (AppConfig + BotConfig with class profiles,
+  reach path), `maps` (MapEntry, MapStore with collision-safe names),
+  `rotation` (anchors, legs, steps, leg chaining, anchor removal),
+  `skills` (definitions), `reach` (file format), `json` (Python-compatible
+  coercions and `json.dumps` output). Fixtures and the real data folder
+  (12 maps, 2 reach files, config) round-trip byte-for-byte.
+
 ## Milestones
 
 Each milestone ports the matching Python tests first (they are the spec),

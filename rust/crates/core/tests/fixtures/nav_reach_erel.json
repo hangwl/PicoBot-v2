@@ -1,0 +1,67 @@
+{
+  "est": {
+    "jump": {
+      "dx": 10.0,
+      "rise": 4.0
+    },
+    "flash": {
+      "dx": 36.0,
+      "rise": 4.0
+    },
+    "double_flash": {
+      "dx": 48.0,
+      "rise": 4.0
+    },
+    "up_flash": {
+      "dx": 6.0,
+      "rise": 25.699999999999996
+    },
+    "up_side_flash": {
+      "dx": 30.0,
+      "rise": 20.8
+    },
+    "rope_lift": {
+      "dx": 3.0,
+      "rise": 90.0
+    },
+    "teleport": {
+      "dx": 25.0,
+      "rise": 12.0
+    }
+  },
+  "ceiling": {
+    "rope_lift": {
+      "dx": null,
+      "rise": 12.61
+    },
+    "double_flash": {
+      "dx": 48.5,
+      "rise": null
+    }
+  },
+  "measured": {
+    "flash": 1790701736.4730926,
+    "up_flash": 1790701736.4731126
+  },
+  "profiles": {
+    "up_flash": {
+      "at": 1790701736.4755235,
+      "rows": [
+        {
+          "delay": null,
+          "n": 3,
+          "gap": null,
+          "rise": 7.3,
+          "sd": 0.5
+        },
+        {
+          "delay": 0.2,
+          "n": 3,
+          "gap": 0.216,
+          "rise": 25.7,
+          "sd": 0.5
+        }
+      ]
+    }
+  }
+}
