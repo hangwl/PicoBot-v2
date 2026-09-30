@@ -9,6 +9,7 @@
 //! and `web/dist` (default: `PICOBOT_ROOT`, else the current folder). It
 //! shares them with the Python host — run one host at a time.
 
+mod botbody;
 mod bus;
 mod clients;
 mod feed;
@@ -199,5 +200,6 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     println!("shutting down");
+    host.shutdown();
     ExitCode::SUCCESS
 }

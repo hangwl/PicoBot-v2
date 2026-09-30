@@ -130,6 +130,22 @@ impl HidController {
     }
 }
 
+/// The bot presses keys through this.
+impl picobot_core::bot::Keys for HidController {
+    fn key_down(&mut self, key: &str) -> bool {
+        HidController::key_down(self, key)
+    }
+    fn key_up(&mut self, key: &str) -> bool {
+        HidController::key_up(self, key)
+    }
+    fn press(&mut self, key: &str, hold: Option<f64>) -> bool {
+        HidController::press(self, key, hold)
+    }
+    fn release_all(&mut self) {
+        HidController::release_all(self)
+    }
+}
+
 impl Drop for HidController {
     /// Whatever ends the controller's life — a stop, an error, a panic
     /// unwinding the bot thread — its keys come back up.

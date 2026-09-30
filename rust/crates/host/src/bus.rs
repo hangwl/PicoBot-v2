@@ -55,12 +55,12 @@ impl Bus {
         }
     }
 
-    pub fn emit(&self, kind: &str, msg: &str) -> Value {
-        self.emit_full(kind, msg, None, None)
+    pub fn emit(&self, kind: &str, msg: &str) {
+        self.emit_full(kind, msg, None, None);
     }
 
-    pub fn emit_level(&self, kind: &str, msg: &str, level: &str) -> Value {
-        self.emit_full(kind, msg, Some(level), None)
+    pub fn emit_level(&self, kind: &str, msg: &str, level: &str) {
+        self.emit_full(kind, msg, Some(level), None);
     }
 
     /// Record and fan out one event. Subscribers run after the lock is
@@ -126,9 +126,12 @@ mod tests {
     #[test]
     fn levels_default_by_kind_and_debug_has_its_own_buffer() {
         let bus = Bus::new(2, 1);
-        assert_eq!(bus.emit("hid", "k")["level"], "debug");
-        assert_eq!(bus.emit("error", "e")["level"], "error");
-        assert_eq!(bus.emit_level("x", "m", "bogus")["level"], "info");
+        assert_eq!(bus.emit_full("hid", "k", None, None)["level"], "debug");
+        assert_eq!(bus.emit_full("error", "e", None, None)["level"], "error");
+        assert_eq!(
+            bus.emit_full("x", "m", Some("bogus"), None)["level"],
+            "info"
+        );
         bus.emit("x", "a");
         bus.emit("hid", "k2");
         let msgs: Vec<String> = bus

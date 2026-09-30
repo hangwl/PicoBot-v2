@@ -155,6 +155,35 @@ fn provide(host: &Host, mode: &str, eyes: &mut Eyes, tracker: &mut PlayerTracker
     let cfg = host.bot_config();
     let (mut overlay, mut meta) = host.map_meta(region);
     meta.insert("state".into(), "IDLE".into());
+    let viz = host.bot_viz();
+    if let Some(v) = &viz {
+        meta.insert("state".into(), v.state.clone().into());
+        meta.insert("hazard".into(), v.hazard.clone().into());
+        let placed: Vec<Value> = v
+            .summons
+            .iter()
+            .map(|(skill, anchor, left)| json!({"skill": skill, "anchor": anchor, "left": left}))
+            .collect();
+        let charges: Map<String, Value> = v
+            .summon_charges
+            .iter()
+            .map(|(skill, have, max)| (skill.clone(), json!([have, max])))
+            .collect();
+        meta.insert(
+            "summons".into(),
+            json!({"placed": placed, "charges": charges}),
+        );
+        meta.insert(
+            "patrol".into(),
+            serde_json::to_value(&v.patrol).unwrap_or_default(),
+        );
+        overlay.hazard = v.hazard.clone();
+        overlay.target = v.target;
+        overlay.nav_plan = v.plan.clone().unwrap_or_default();
+        if let Some(route) = &v.route {
+            overlay.nav_route = route.clone();
+        }
+    }
     meta.insert(
         "layout".into(),
         mm.region_source().map(|s| s.as_str()).into(),
@@ -188,7 +217,12 @@ fn provide(host: &Host, mode: &str, eyes: &mut Eyes, tracker: &mut PlayerTracker
             let Some(img) = eyes.capture(region) else {
                 return Shot::Idle;
             };
-            if let Some(p) = mm.player_pos(&img, tracker) {
+            // The bot's own reading while it runs, else ours.
+            let dot = match &viz {
+                Some(v) => v.player.map(|p| (p.0 as i32, p.1 as i32)),
+                None => mm.player_pos(&img, tracker),
+            };
+            if let Some(p) = dot {
                 overlay.player = Some((p.0 as f64, p.1 as f64));
                 overlay.player_box = Some(mm.player_box(p));
                 meta.insert("player".into(), json!([p.0, p.1]));

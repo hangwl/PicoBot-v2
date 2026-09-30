@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use picobot_core::anchor_stats::AnchorStats;
+use picobot_core::bot::measure::plan_for;
+use picobot_core::bot::{MeasureStatus, Mode, Viz};
 use picobot_core::config::{AppConfig, BotConfig, ClassTravel};
 use picobot_core::identity::MapIdentity;
 use picobot_core::maps::{MapEntry, MapStore};
@@ -17,11 +19,13 @@ use picobot_core::navgraph::{GraphCache, GraphOptions, NavGraph};
 use picobot_core::platform_fit::{PlatformFit, SegKey};
 use picobot_core::reach::{base_reach, ReachModel};
 use picobot_core::rotation::resolve_coord;
+use picobot_core::skills::Skill;
 use picobot_core::timing::monotonic;
 use picobot_core::vision::Region;
 use picobot_io::serial::{discover_data_port, list_ports, SerialLink};
 use serde_json::{json, Map, Value};
 
+use crate::botbody::{epoch, spawn_bot, spawn_measure, BotRun};
 use crate::bus::Bus;
 use crate::clients::Clients;
 use crate::feed::Feed;
@@ -71,6 +75,14 @@ pub struct Host {
     maps_sent: AtomicU64,
     nav_show: AtomicBool,
     stall_warned: Mutex<f64>,
+    bot: Mutex<Option<BotRun>>,
+    measurer: Mutex<Option<BotRun>>,
+    last_measure: Mutex<Option<MeasureStatus>>,
+    bot_viz: Mutex<Option<Viz>>,
+    pending_skills: Mutex<Option<Vec<Skill>>>,
+    /// Bumped by every map save (the bot re-reads its entry).
+    map_edits: AtomicU64,
+    maps_pushed: Mutex<f64>,
 }
 
 fn dash(payload: Value) -> String {
@@ -119,6 +131,13 @@ impl Host {
             maps_sent: AtomicU64::new(0),
             nav_show: AtomicBool::new(false),
             stall_warned: Mutex::new(f64::NEG_INFINITY),
+            bot: Mutex::new(None),
+            measurer: Mutex::new(None),
+            last_measure: Mutex::new(None),
+            bot_viz: Mutex::new(None),
+            pending_skills: Mutex::new(None),
+            map_edits: AtomicU64::new(0),
+            maps_pushed: Mutex::new(f64::NEG_INFINITY),
             bus,
             clients,
             root,
@@ -379,20 +398,209 @@ impl Host {
         self.send_host_state();
     }
 
-    // -- Bot lifecycle (wired in M7c) ------------------------------------------------
+    // -- Bot and measurement -----------------------------------------------------------
+
+    fn slot_running(slot: &Mutex<Option<BotRun>>) -> bool {
+        slot.lock().unwrap().as_ref().is_some_and(BotRun::running)
+    }
 
     pub fn is_bot_running(&self) -> bool {
-        false
+        Host::slot_running(&self.bot)
     }
 
-    fn start_bot(&self) {
-        self.bus
-            .emit("error", "the Rust host can't run the bot yet");
+    fn is_measuring(&self) -> bool {
+        Host::slot_running(&self.measurer)
+    }
+
+    pub fn send_bot_state(&self, running: bool) {
         self.clients
-            .broadcast(&dash(json!({"event": "bot", "running": false})));
+            .broadcast(&dash(json!({"event": "bot", "running": running})));
     }
 
-    fn stop_bot(&self) {}
+    fn start_bot(self: &Arc<Self>) {
+        if self.is_bot_running() {
+            return;
+        }
+        if self.is_measuring() {
+            self.bus
+                .emit("error", "stop measuring before starting the bot");
+            return;
+        }
+        match spawn_bot(self) {
+            Ok(run) => *self.bot.lock().unwrap() = Some(run),
+            Err(e) => {
+                self.bus.emit("error", &e);
+                self.send_bot_state(false);
+            }
+        }
+    }
+
+    /// Stop a run and wait for its thread (sleeps wake on the stop).
+    fn stop_slot(slot: &Mutex<Option<BotRun>>) {
+        let run = slot.lock().unwrap().take();
+        if let Some(run) = run {
+            run.stop.set();
+            let _ = run.thread.join();
+        }
+    }
+
+    fn stop_bot(&self) {
+        Host::stop_slot(&self.bot);
+    }
+
+    pub fn shutdown(&self) {
+        Host::stop_slot(&self.bot);
+        Host::stop_slot(&self.measurer);
+        if let Err(e) = self.reach.lock().unwrap().save(true) {
+            eprintln!("saving reach failed: {e}");
+        }
+        self.drop_feed();
+    }
+
+    fn measure_start(self: &Arc<Self>, mode: Mode, only: Option<String>) {
+        if self.is_bot_running() {
+            self.bus
+                .emit("error", "stop the bot before measuring moves");
+            return;
+        }
+        if self.is_measuring() {
+            self.bus.emit("measure", "already measuring");
+            self.send_measure(None);
+            return;
+        }
+        match spawn_measure(self, mode, only) {
+            Ok(run) => *self.measurer.lock().unwrap() = Some(run),
+            Err(e) => self.bus.emit("error", &e),
+        }
+    }
+
+    /// The `measure` event: the given status, else the last one.
+    pub fn send_measure(&self, status: Option<MeasureStatus>) {
+        let st = match status {
+            Some(st) => {
+                *self.last_measure.lock().unwrap() = Some(st.clone());
+                st
+            }
+            None => self
+                .last_measure
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| MeasureStatus {
+                    running: false,
+                    current: None,
+                    plan: plan_for(&self.bot_config.lock().unwrap())
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect(),
+                    results: Map::new(),
+                    mode: Mode::Moves,
+                    only: None,
+                    profile: Vec::new(),
+                    profiles: self.reach.lock().unwrap().profiles.clone(),
+                }),
+        };
+        let mut payload = serde_json::to_value(&st).unwrap_or_default();
+        let mut o = Map::new();
+        o.insert("event".into(), "measure".into());
+        if let Some(m) = payload.as_object_mut() {
+            o.extend(std::mem::take(m));
+        }
+        self.clients.broadcast(&dash(Value::Object(o)));
+    }
+
+    // -- What the bot thread shares ----------------------------------------------------
+
+    pub fn serial_link(&self) -> Option<Arc<SerialLink>> {
+        self.serial.lock().unwrap().clone().filter(|l| l.is_open())
+    }
+
+    pub fn reach_clone(&self) -> ReachModel {
+        self.reach.lock().unwrap().clone()
+    }
+
+    pub fn put_reach(&self, reach: ReachModel) {
+        *self.reach.lock().unwrap() = reach;
+    }
+
+    pub fn set_bot_viz(&self, viz: Option<Viz>) {
+        *self.bot_viz.lock().unwrap() = viz;
+    }
+
+    pub fn bot_viz(&self) -> Option<Viz> {
+        self.bot_viz.lock().unwrap().clone()
+    }
+
+    pub fn take_pending_skills(&self) -> Option<Vec<Skill>> {
+        self.pending_skills.lock().unwrap().take()
+    }
+
+    pub fn map_edits(&self) -> u64 {
+        self.map_edits.load(Ordering::Relaxed)
+    }
+
+    /// Re-send `maps` for a new fit sample or anchor stat, at most every 5s.
+    fn push_maps_throttled(&self) {
+        let now = monotonic();
+        let due = {
+            let mut t = self.maps_pushed.lock().unwrap();
+            let due = now - *t >= 5.0;
+            if due {
+                *t = now;
+            }
+            due
+        };
+        if due {
+            self.send_maps();
+        }
+    }
+
+    pub fn observe_fit(&self, entry: Option<&MapEntry>, wh: Option<(f64, f64)>, pos: (f64, f64)) {
+        let segs: Vec<[f64; 4]> = entry.and_then(|e| e.platforms.clone()).unwrap_or_default();
+        let name = entry.map(|e| e.name.as_str());
+        let changed = self
+            .platfit
+            .lock()
+            .unwrap()
+            .observe(name, &segs, wh, Some(pos), monotonic());
+        if changed {
+            self.push_maps_throttled();
+        }
+    }
+
+    pub fn anchor_stat(&self, map: Option<&str>, kind: &str, anchor: &str, why: &str) {
+        let changed = {
+            let mut st = self.anchor_stats.lock().unwrap();
+            match kind {
+                "visit" => st.visit(map, anchor, epoch()),
+                "miss" => st.miss(map, anchor),
+                _ => st.skip(map, anchor, why),
+            }
+        };
+        if changed {
+            self.push_maps_throttled();
+        }
+    }
+
+    /// Write a map file and re-resolve (the bot re-reads its entry).
+    pub fn save_entry(&self, entry: MapEntry) {
+        let saved = self.maps.lock().unwrap().save(entry);
+        if let Err(e) = saved {
+            self.bus
+                .emit("error", &format!("saving the map failed: {e}"));
+            return;
+        }
+        self.map_edits.fetch_add(1, Ordering::Relaxed);
+        for n in self.identity.refresh() {
+            self.bus.emit("map", &n);
+        }
+        self.send_maps();
+    }
+
+    /// A safety alert (Telegram is not wired in the Rust host yet).
+    pub fn notify(&self, msg: &str) {
+        self.bus.emit("notify", msg);
+    }
 
     // -- Commands ---------------------------------------------------------------------
 
@@ -409,6 +617,13 @@ impl Host {
             _ if msg.starts_with("dash|view|") => self.set_view(&arg(2)),
             "map|list" => self.send_maps(),
             _ if msg.starts_with("map|set|") => self.set_map(&arg(2)),
+            "measure|start" => self.measure_start(Mode::Moves, None),
+            _ if msg.starts_with("measure|start|") => {
+                self.measure_start(Mode::Moves, Some(arg(2).trim().to_owned()))
+            }
+            "measure|profile|up_flash" => self.measure_start(Mode::UpFlashProfile, None),
+            "measure|stop" => Host::stop_slot(&self.measurer),
+            "measure|status" => self.send_measure(None),
             _ => return false,
         }
         true
@@ -461,7 +676,7 @@ impl Host {
         if title.is_empty() || *self.window_title.lock().unwrap() == title {
             return;
         }
-        if self.is_bot_running() {
+        if self.is_bot_running() || self.is_measuring() {
             self.bus
                 .emit("error", "stop the bot before switching windows");
             self.send_host_state();
@@ -537,7 +752,7 @@ impl Host {
     /// Captures failed for seconds straight (streamer thread): rebuild the
     /// feed unless the bot runs on it.
     pub fn stream_stalled(&self, why: &str) {
-        let busy = self.is_bot_running();
+        let busy = self.is_bot_running() || self.is_measuring();
         let now = monotonic();
         let warn = {
             let mut t = self.stall_warned.lock().unwrap();

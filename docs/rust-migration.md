@@ -162,6 +162,16 @@ conversion.
   one-frame slot, so a slow link drops frames, and a send stuck for 10s
   closes that client. Commands: `dash|view`, `map|list`, `map|set`.
   Window view of a 4480×1440 desktop streams at ~7 fps (release build).
+- **M7c** — done, not yet run against the game: `bot|start|stop` and
+  `measure|start[|move]|profile|stop|status`. `HostBody` is the real
+  `Body`: `HidController` (now `impl Keys`) sends numbered, ACKed
+  commands over the serial link; captures come from the shared analyzer
+  and the thread's own grabber; every sleep wakes on a stop; the bot's
+  `Viz` is published to the stream (state, hazard, summons, patrol,
+  route, plan, dot). Map saves (learned ropes), anchor stats and the
+  platform-fit diagnostic flow back into the host. The bot and the
+  measurer take a copy of the reach model and hand it back when they
+  end. Safety alerts go to the event log; Telegram is still to port.
 
 ## Milestones
 
