@@ -37,7 +37,7 @@ use crate::telegram::Telegram;
 
 /// WS message prefixes handled by the host; anything else is HID input
 /// for the Pico.
-const DASHBOARD_PREFIXES: [&str; 13] = [
+const DASHBOARD_PREFIXES: [&str; 16] = [
     "bot|",
     "map|",
     "measure|",
@@ -51,6 +51,9 @@ const DASHBOARD_PREFIXES: [&str; 13] = [
     "nav|",
     "class|",
     "patrol|",
+    "safety|",
+    "notify|",
+    "attacks|",
 ];
 
 pub struct Host {
@@ -1060,5 +1063,47 @@ impl Host {
         for n in self.identity.request(false) {
             self.bus.emit("map", &n);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DASHBOARD_PREFIXES;
+
+    /// A command the dashboard handles but whose prefix is missing from
+    /// `DASHBOARD_PREFIXES` would be sent to the Pico as HID input.
+    #[test]
+    fn every_dashboard_command_prefix_is_routed() {
+        let mut found = Vec::new();
+        for src in [include_str!("commands.rs"), include_str!("host.rs")] {
+            for line in src.lines() {
+                let quoted = line
+                    .split("starts_with(\"")
+                    .skip(1)
+                    .map(|rest| rest.split('"').next().unwrap_or(""))
+                    .chain(
+                        line.trim_start()
+                            .strip_prefix('"')
+                            .filter(|_| line.contains("\" =>"))
+                            .and_then(|rest| rest.split('"').next()),
+                    );
+                for q in quoted {
+                    if let Some((head, _)) = q.split_once('|') {
+                        found.push(format!("{head}|"));
+                    }
+                }
+            }
+        }
+        found.sort();
+        found.dedup();
+        assert!(found.len() >= 10, "scan found too little: {found:?}");
+        let missing: Vec<_> = found
+            .iter()
+            .filter(|p| p.as_str() != "hid|" && !DASHBOARD_PREFIXES.contains(&p.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not routed as dashboard commands: {missing:?}"
+        );
     }
 }
