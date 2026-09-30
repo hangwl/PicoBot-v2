@@ -129,6 +129,7 @@ fn send(host: &Host, mode: &str, mut img: Image, overlay: &Overlay, extra: Map<S
         "player",
         "summons",
         "patrol",
+        "session",
         "layout",
         "no_rotation",
         "ox",
@@ -173,6 +174,7 @@ fn provide(host: &Host, mode: &str, eyes: &mut Eyes, tracker: &mut PlayerTracker
             "summons".into(),
             json!({"placed": placed, "charges": charges}),
         );
+        meta.insert("session".into(), v.session.clone().into());
         meta.insert(
             "patrol".into(),
             serde_json::to_value(&v.patrol).unwrap_or_default(),
