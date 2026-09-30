@@ -47,3 +47,6 @@ env/
 
 # Rust
 /rust/target/
+
+# OCR model (PP-OCRv6_rec_small.onnx, 21 MB)
+models/

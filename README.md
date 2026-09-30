@@ -19,17 +19,33 @@ please use the program at your own risk.
 
 ## Installation
 
-1. Install Python 3.14 or later.
-2. (Optional) Create and activate a virtual environment.
-3. From the project root, install dependencies in editable mode: `pip install -e .`
+The host is written in Rust (`rust/`). The original Python host
+(`picobot/`) is kept as a legacy fallback.
+
+1. Install Rust (<https://rustup.rs>) and Node.js.
+2. Build the dashboard: `cd web; npm install; npm run build`.
+3. Build the host: `cd rust; cargo build --release` (the first build
+   downloads the ONNX runtime used for title OCR).
+4. Title OCR needs PaddleOCR's recogniser, `PP-OCRv6_rec_small.onnx`.
+   Put it in `models/` in the project folder, or install the Python
+   dependencies (below) — the host also finds the copy RapidOCR installs
+   in `.venv`. Without it, map identity falls back to the pin.
+
+The legacy Python host needs Python 3.14 or later: create a virtual
+environment and run `pip install -e .` from the project root.
 
 ## Running
 
 ```bash
-python -m picobot
-# or with explicit overrides: python -m picobot --port COM3 --window "Eluna (x64)"
-# or auto-detect the Pico:   python -m picobot --port auto
+cd rust
+cargo run --release -p picobot-host -- --root ..
+# explicit overrides:  ... -- --root .. --port COM3 --window "Eluna (x64)"
+# auto-detect the Pico: ... -- --root .. --port auto
 ```
+
+`--root` is the project folder (where `config.json`, `maps/`, the reach
+files and `web/dist` live). The built binary works the same way:
+`rust\target\release\picobot.exe --root .` from the project root.
 
 This starts the headless host: serial transport + WebSocket (default :8765) +
 HTTP dashboard (default :8000). Open `http://localhost:8000` — the dashboard is
@@ -37,6 +53,19 @@ the UI. The Pico DATA port and game window can be picked from the dashboard's
 **Connection** panel (selects, or *Auto* to probe for the Pico); both are
 remembered in `config.json` so subsequent runs need no flags. CLI flags
 override the remembered values and are persisted the same way.
+
+Telegram alerts use `bot_token` and `chat_id` in `config.json`;
+`picobot --root . --notify-test` sends one test alert and exits.
+
+### Legacy Python host
+
+```bash
+python -m picobot                 # same flags: --port, --window, --ws, --http
+python -m picobot --debug-frames  # also saves detection captures to debug/frames/
+```
+
+Both hosts read and write the same `config.json`, `maps/` and reach files,
+and use the same ports and COM port — run one at a time.
 
 ## The dashboard at a glance
 
