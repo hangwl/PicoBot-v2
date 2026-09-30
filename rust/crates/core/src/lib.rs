@@ -12,6 +12,7 @@ pub mod error;
 pub mod fileio;
 pub mod identity;
 pub mod json;
+pub mod layout;
 pub mod maps;
 pub mod minimap;
 pub mod navgraph;

@@ -3,6 +3,7 @@
 //! (files, serial handshakes, joining threads) runs on the
 //! `DashboardCommands` thread, in order.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 use picobot_core::anchor_stats::AnchorStats;
 use picobot_core::bot::measure::plan_for;
-use picobot_core::bot::{MeasureStatus, Mode, Viz};
+use picobot_core::bot::{LegViz, MeasureStatus, Mode, Viz};
 use picobot_core::config::{AppConfig, BotConfig, ClassTravel};
 use picobot_core::identity::MapIdentity;
 use picobot_core::maps::{MapEntry, MapStore};
@@ -28,6 +29,7 @@ use serde_json::{json, Map, Value};
 use crate::botbody::{epoch, spawn_bot, spawn_measure, BotRun};
 use crate::bus::Bus;
 use crate::clients::Clients;
+use crate::commands::UndoStep;
 use crate::feed::Feed;
 use crate::frames::Overlay;
 
@@ -53,39 +55,45 @@ pub struct Host {
     pub bus: Arc<Bus>,
     pub clients: Arc<Clients>,
     pub root: PathBuf,
-    config: Mutex<AppConfig>,
-    bot_config: Mutex<BotConfig>,
-    window_title: Mutex<String>,
-    serial: Mutex<Option<Arc<SerialLink>>>,
-    serial_tx: Sender<String>,
-    jobs: Mutex<Option<Sender<String>>>,
-    ws_port: AtomicU16,
-    http_port: AtomicU16,
+    pub(crate) config: Mutex<AppConfig>,
+    pub(crate) bot_config: Mutex<BotConfig>,
+    pub(crate) window_title: Mutex<String>,
+    pub(crate) serial: Mutex<Option<Arc<SerialLink>>>,
+    pub(crate) serial_tx: Sender<String>,
+    pub(crate) jobs: Mutex<Option<Sender<String>>>,
+    pub(crate) ws_port: AtomicU16,
+    pub(crate) http_port: AtomicU16,
     pub maps: Arc<Mutex<MapStore>>,
     pub identity: Arc<MapIdentity>,
-    reach: Mutex<ReachModel>,
-    graphs: Mutex<GraphCache>,
-    platfit: Mutex<PlatformFit>,
-    anchor_stats: Mutex<AnchorStats>,
-    feed: Mutex<Option<Arc<Feed>>>,
+    pub(crate) reach: Mutex<ReachModel>,
+    pub(crate) graphs: Mutex<GraphCache>,
+    pub(crate) platfit: Mutex<PlatformFit>,
+    pub(crate) anchor_stats: Mutex<AnchorStats>,
+    pub(crate) feed: Mutex<Option<Arc<Feed>>>,
     /// The streamer drops its window handle and grabber on the next tick.
-    eyes_reset: AtomicBool,
-    view_mode: Mutex<String>,
+    pub(crate) eyes_reset: AtomicBool,
+    pub(crate) view_mode: Mutex<String>,
     /// Identity version of the last `maps` payload, plus one (0: never).
-    maps_sent: AtomicU64,
-    nav_show: AtomicBool,
-    stall_warned: Mutex<f64>,
-    bot: Mutex<Option<BotRun>>,
-    measurer: Mutex<Option<BotRun>>,
-    last_measure: Mutex<Option<MeasureStatus>>,
-    bot_viz: Mutex<Option<Viz>>,
-    pending_skills: Mutex<Option<Vec<Skill>>>,
+    pub(crate) maps_sent: AtomicU64,
+    pub(crate) nav_show: AtomicBool,
+    pub(crate) stall_warned: Mutex<f64>,
+    pub(crate) bot: Mutex<Option<BotRun>>,
+    pub(crate) measurer: Mutex<Option<BotRun>>,
+    pub(crate) last_measure: Mutex<Option<MeasureStatus>>,
+    pub(crate) bot_viz: Mutex<Option<Viz>>,
+    pub(crate) pending_skills: Mutex<Option<Vec<Skill>>>,
     /// Bumped by every map save (the bot re-reads its entry).
-    map_edits: AtomicU64,
-    maps_pushed: Mutex<f64>,
+    pub(crate) map_edits: AtomicU64,
+    pub(crate) maps_pushed: Mutex<f64>,
+    /// Bumped by every settings edit (a running bot re-reads its config).
+    pub(crate) config_version: AtomicU64,
+    /// The route preview and when it lapses.
+    pub(crate) nav_preview: Mutex<Option<(Vec<LegViz>, f64)>>,
+    /// (map, field) -> the edits this session can undo.
+    pub(crate) layout_undo: Mutex<HashMap<(String, &'static str), Vec<UndoStep>>>,
 }
 
-fn dash(payload: Value) -> String {
+pub(crate) fn dash(payload: Value) -> String {
     format!("dash|{payload}")
 }
 
@@ -138,6 +146,9 @@ impl Host {
             pending_skills: Mutex::new(None),
             map_edits: AtomicU64::new(0),
             maps_pushed: Mutex::new(f64::NEG_INFINITY),
+            config_version: AtomicU64::new(0),
+            nav_preview: Mutex::new(None),
+            layout_undo: Mutex::default(),
             bus,
             clients,
             root,
@@ -175,7 +186,7 @@ impl Host {
         self.http_port.store(p, Ordering::Relaxed);
     }
 
-    fn log(&self, msg: &str) {
+    pub(crate) fn log(&self, msg: &str) {
         let level = if msg.starts_with("TX:") || msg.starts_with("RX:") {
             "debug"
         } else {
@@ -184,7 +195,7 @@ impl Host {
         self.bus.emit_level("remote", msg, level);
     }
 
-    fn save_config(&self) {
+    pub(crate) fn save_config(&self) {
         let cfg = self.config.lock().unwrap().clone();
         if let Err(e) = cfg.save(&self.root.join("config.json")) {
             self.bus
@@ -241,13 +252,13 @@ impl Host {
         self.enqueue_hid(msg);
     }
 
-    fn submit(&self, msg: &str) {
+    pub(crate) fn submit(&self, msg: &str) {
         if let Some(tx) = self.jobs.lock().unwrap().as_ref() {
             let _ = tx.send(msg.to_owned());
         }
     }
 
-    fn command_loop(self: Arc<Self>, rx: Receiver<String>) {
+    pub(crate) fn command_loop(self: Arc<Self>, rx: Receiver<String>) {
         for msg in rx {
             match msg.as_str() {
                 "bot|start" => {
@@ -287,7 +298,7 @@ impl Host {
         let _ = self.serial_tx.send(cmd);
     }
 
-    fn serial_writer(self: Arc<Self>, rx: Receiver<String>) {
+    pub(crate) fn serial_writer(self: Arc<Self>, rx: Receiver<String>) {
         for cmd in rx {
             let link = self.serial.lock().unwrap().clone();
             self.log(&format!("TX: {cmd}"));
@@ -310,7 +321,7 @@ impl Host {
             .is_some_and(|l| l.is_open())
     }
 
-    fn serial_port(&self) -> String {
+    pub(crate) fn serial_port(&self) -> String {
         self.config.lock().unwrap().serial_port.clone()
     }
 
@@ -356,7 +367,7 @@ impl Host {
         true
     }
 
-    fn connect_serial(self: &Arc<Self>, port: &str) {
+    pub(crate) fn connect_serial(self: &Arc<Self>, port: &str) {
         let port = port.trim();
         if port != "auto" {
             self.finish_serial_connect(port);
@@ -386,7 +397,7 @@ impl Host {
             .expect("spawn the port probe");
     }
 
-    fn finish_serial_connect(&self, port: &str) {
+    pub(crate) fn finish_serial_connect(&self, port: &str) {
         if self.open_serial(port) {
             self.config.lock().unwrap().serial_port = port.to_owned();
             self.save_config();
@@ -400,7 +411,7 @@ impl Host {
 
     // -- Bot and measurement -----------------------------------------------------------
 
-    fn slot_running(slot: &Mutex<Option<BotRun>>) -> bool {
+    pub(crate) fn slot_running(slot: &Mutex<Option<BotRun>>) -> bool {
         slot.lock().unwrap().as_ref().is_some_and(BotRun::running)
     }
 
@@ -408,7 +419,7 @@ impl Host {
         Host::slot_running(&self.bot)
     }
 
-    fn is_measuring(&self) -> bool {
+    pub(crate) fn is_measuring(&self) -> bool {
         Host::slot_running(&self.measurer)
     }
 
@@ -417,7 +428,7 @@ impl Host {
             .broadcast(&dash(json!({"event": "bot", "running": running})));
     }
 
-    fn start_bot(self: &Arc<Self>) {
+    pub(crate) fn start_bot(self: &Arc<Self>) {
         if self.is_bot_running() {
             return;
         }
@@ -436,7 +447,7 @@ impl Host {
     }
 
     /// Stop a run and wait for its thread (sleeps wake on the stop).
-    fn stop_slot(slot: &Mutex<Option<BotRun>>) {
+    pub(crate) fn stop_slot(slot: &Mutex<Option<BotRun>>) {
         let run = slot.lock().unwrap().take();
         if let Some(run) = run {
             run.stop.set();
@@ -444,7 +455,7 @@ impl Host {
         }
     }
 
-    fn stop_bot(&self) {
+    pub(crate) fn stop_bot(&self) {
         Host::stop_slot(&self.bot);
     }
 
@@ -457,7 +468,7 @@ impl Host {
         self.drop_feed();
     }
 
-    fn measure_start(self: &Arc<Self>, mode: Mode, only: Option<String>) {
+    pub(crate) fn measure_start(self: &Arc<Self>, mode: Mode, only: Option<String>) {
         if self.is_bot_running() {
             self.bus
                 .emit("error", "stop the bot before measuring moves");
@@ -476,6 +487,7 @@ impl Host {
 
     /// The `measure` event: the given status, else the last one.
     pub fn send_measure(&self, status: Option<MeasureStatus>) {
+        let ended = status.as_ref().is_some_and(|st| !st.running);
         let st = match status {
             Some(st) => {
                 *self.last_measure.lock().unwrap() = Some(st.clone());
@@ -507,6 +519,9 @@ impl Host {
             o.extend(std::mem::take(m));
         }
         self.clients.broadcast(&dash(Value::Object(o)));
+        if ended {
+            self.send_class(); // the measured-moves count changed
+        }
     }
 
     // -- What the bot thread shares ----------------------------------------------------
@@ -535,12 +550,16 @@ impl Host {
         self.pending_skills.lock().unwrap().take()
     }
 
+    pub fn config_version(&self) -> u64 {
+        self.config_version.load(Ordering::Relaxed)
+    }
+
     pub fn map_edits(&self) -> u64 {
         self.map_edits.load(Ordering::Relaxed)
     }
 
     /// Re-send `maps` for a new fit sample or anchor stat, at most every 5s.
-    fn push_maps_throttled(&self) {
+    pub(crate) fn push_maps_throttled(&self) {
         let now = monotonic();
         let due = {
             let mut t = self.maps_pushed.lock().unwrap();
@@ -624,12 +643,12 @@ impl Host {
             "measure|profile|up_flash" => self.measure_start(Mode::UpFlashProfile, None),
             "measure|stop" => Host::stop_slot(&self.measurer),
             "measure|status" => self.send_measure(None),
-            _ => return false,
+            _ => return self.handle_edit(msg),
         }
         true
     }
 
-    fn send_history(&self) {
+    pub(crate) fn send_history(&self) {
         let items: Vec<Value> = self
             .bus
             .history()
@@ -671,7 +690,7 @@ impl Host {
         self.clients.broadcast(&dash(payload));
     }
 
-    fn set_window(&self, title: &str) {
+    pub(crate) fn set_window(&self, title: &str) {
         let title = title.trim();
         if title.is_empty() || *self.window_title.lock().unwrap() == title {
             return;
@@ -690,7 +709,7 @@ impl Host {
         self.send_host_state();
     }
 
-    fn set_fps(&self, payload: &str) {
+    pub(crate) fn set_fps(&self, payload: &str) {
         let Ok(fps) = payload.trim().parse::<f64>() else {
             self.bus.emit("error", &format!("invalid fps: {payload:?}"));
             return;
@@ -720,7 +739,7 @@ impl Host {
         self.view_mode.lock().unwrap().clone()
     }
 
-    fn set_view(&self, mode: &str) {
+    pub(crate) fn set_view(&self, mode: &str) {
         if ["minimap", "window", "title"].contains(&mode) {
             *self.view_mode.lock().unwrap() = mode.to_owned();
         }
@@ -739,7 +758,7 @@ impl Host {
     }
 
     /// Close the feed; the next `get_feed` builds a fresh one.
-    fn drop_feed(&self) {
+    pub(crate) fn drop_feed(&self) {
         let old = self.feed.lock().unwrap().take();
         drop(old);
         self.eyes_reset.store(true, Ordering::Relaxed);
@@ -779,7 +798,7 @@ impl Host {
         }
     }
 
-    fn live_region(&self) -> Option<Region> {
+    pub(crate) fn live_region(&self) -> Option<Region> {
         self.feed
             .lock()
             .unwrap()
@@ -787,7 +806,7 @@ impl Host {
             .and_then(|f| f.analyzer.region())
     }
 
-    fn graph_options(cfg: &BotConfig) -> GraphOptions {
+    pub(crate) fn graph_options(cfg: &BotConfig) -> GraphOptions {
         GraphOptions {
             rope_penalty: cfg.rope_penalty,
             allow_flash: cfg.class_travel == ClassTravel::Flash && cfg.flash_jump_enabled,
@@ -796,7 +815,11 @@ impl Host {
         }
     }
 
-    fn nav_graph(&self, entry: Option<&MapEntry>, wh: Option<(f64, f64)>) -> Option<Arc<NavGraph>> {
+    pub(crate) fn nav_graph(
+        &self,
+        entry: Option<&MapEntry>,
+        wh: Option<(f64, f64)>,
+    ) -> Option<Arc<NavGraph>> {
         let opts = Host::graph_options(&self.bot_config.lock().unwrap());
         let reach = self.reach.lock().unwrap();
         self.graphs.lock().unwrap().get(entry, wh, &reach, opts)
@@ -847,6 +870,11 @@ impl Host {
                 .iter()
                 .map(|p| [p.x0, p.y0, p.x1, p.y1])
                 .collect();
+            if let Some((legs, until)) = self.nav_preview.lock().unwrap().clone() {
+                if monotonic() < until {
+                    o.nav_route = legs;
+                }
+            }
             if self.nav_show.load(Ordering::Relaxed) {
                 o.nav_edges = g
                     .transfer_legs()
@@ -874,7 +902,7 @@ impl Host {
 
     // -- Maps -------------------------------------------------------------------------
 
-    fn rope_rows(&self, entry: Option<&MapEntry>, region: Option<Region>) -> Vec<Value> {
+    pub(crate) fn rope_rows(&self, entry: Option<&MapEntry>, region: Option<Region>) -> Vec<Value> {
         let (Some(e), Some(r)) = (entry, region) else {
             return Vec::new();
         };
@@ -936,20 +964,22 @@ impl Host {
         self.clients.broadcast(&dash(payload));
     }
 
-    /// Pin a map ("" = auto-detect) and remember it.
-    fn set_map(&self, name: &str) {
+    /// Pin a map ("" = auto-detect) for this run.
+    pub(crate) fn set_map(&self, name: &str) {
         let name = name.trim();
         let pin = (!name.is_empty()).then(|| name.to_owned());
-        self.config
-            .lock()
-            .unwrap()
-            .bot
-            .insert("active_map".into(), pin.clone().into());
-        self.bot_config.lock().unwrap().active_map = pin.clone();
-        self.save_config();
+        {
+            let mut cfg = self.bot_config.lock().unwrap();
+            cfg.active_map = pin.clone();
+            cfg.auto_select_map = pin.is_none();
+        }
         for n in self.identity.set_pin(pin.as_deref()) {
             self.bus.emit("map", &n);
         }
+        self.bus.emit(
+            "map",
+            &format!("active map: {}", pin.as_deref().unwrap_or("auto")),
+        );
         self.send_maps();
     }
 }

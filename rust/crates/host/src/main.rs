@@ -12,6 +12,7 @@
 mod botbody;
 mod bus;
 mod clients;
+mod commands;
 mod feed;
 mod frames;
 mod host;

@@ -76,6 +76,7 @@ pub struct HostBody {
     map_name: Option<String>,
     viz_at: f64,
     minimap_warned: bool,
+    cfg_version: u64,
 }
 
 impl HostBody {
@@ -88,6 +89,7 @@ impl HostBody {
         analyzer: Arc<MinimapAnalyzer>,
         stop: Arc<Stop>,
     ) -> Self {
+        let host_version = host.config_version();
         HostBody {
             host,
             cfg,
@@ -102,6 +104,7 @@ impl HostBody {
             map_name: None,
             viz_at: f64::NEG_INFINITY,
             minimap_warned: false,
+            cfg_version: host_version,
         }
     }
 
@@ -189,6 +192,11 @@ impl Body for HostBody {
         let woke = self.stop.wait(secs);
         if let Some(skills) = self.host.take_pending_skills() {
             self.state.pending_skills = Some(skills);
+        }
+        let v = self.host.config_version();
+        if v != self.cfg_version {
+            self.cfg_version = v;
+            self.cfg = self.host.bot_config();
         }
         woke
     }

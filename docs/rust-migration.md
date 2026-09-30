@@ -172,6 +172,18 @@ conversion.
   platform-fit diagnostic flow back into the host. The bot and the
   measurer take a copy of the reach model and hand it back when they
   end. Safety alerts go to the event log; Telegram is still to port.
+- **M7d** — done: the dashboard's edit commands. Settings (`class|list|use|add`,
+  `skills|list|set|del`, `movekeys|set`, `patrol|policy|temp`) edit the
+  persisted `bot` block and derive `BotConfig` from it again, so the live
+  config always equals what a restart loads; a running bot picks it up
+  (and new skill books, cooldowns kept). Run through the Python host's
+  handlers on the same config, a mixed sequence of these leaves an
+  identical `bot` block and the same messages. Layout (`layout|save|clear|reset`,
+  platforms and ropes with undo/clear/tidy, `plat|here|feet`, rope delete,
+  anchors) uses `core::layout` (tidy, anchors following their lines, the
+  line under the feet); `map|stats|reset`, `map|title`, `nav|show|preview`.
+  Blank-name layout writes need a title-verified map, so until OCR (M8)
+  the dashboard must name the map.
 
 ## Milestones
 
