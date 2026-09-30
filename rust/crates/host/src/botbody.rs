@@ -191,6 +191,8 @@ impl Body for HostBody {
         let reason = if self.analyzer.loading() {
             Some("map transfer (loading screen)")
         } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
+        } else if self.host.identity.unrecognized() {
+            Some("unrecognized map")
             Some("rune")
         } else if self.cfg.stop_when_players_appear && self.analyzer.has_other_players(img) {
             Some("other players")
