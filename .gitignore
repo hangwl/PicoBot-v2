@@ -43,11 +43,21 @@ env/
 # Local map data
 /maps/
 
-# Learned per-character move reach
-/nav_reach.json
+# Learned per-character move reach (nav_reach.json, nav_reach_<class>.json)
+/nav_reach*.json
 
 # Rust
 /rust/target/
 
 # OCR model (PP-OCRv6_rec_small.onnx, 21 MB)
 models/
+
+# Local Claude Code state
+.claude/
+
+# Logs, OS and editor leftovers
+*.log
+*.tmp
+*.bak
+Thumbs.db
+desktop.ini
