@@ -149,6 +149,19 @@ conversion.
   `events|history`, `dash|fps`. Run it with
   `cargo run -p picobot-host -- --root ..\..\PicoBot-v2` (it shares
   `config.json` and `maps/` with the Python host: run one at a time).
+- **M7b** — done: the vision feed and the view stream. `MapMonitor` (its
+  own thread and grabber, 20 Hz) locates the panel, feeds the blackout
+  detector, relocates a moved panel and requests title reads on arrival.
+  `core::identity` resolves the map from the pin and title reads (voting,
+  stale-read generations, pin override); until the OCR reader lands (M8)
+  titles match exactly and the pin decides. `core::title` segments the
+  title band — identical to Python on 60 generated bands
+  (`tests/title_parity.rs`). The `FrameStreamer` thread captures the
+  Panel / Window / Title view only while someone subscribes, draws the
+  overlays, encodes JPEG and packs `PBF1` frames; each client has a
+  one-frame slot, so a slow link drops frames, and a send stuck for 10s
+  closes that client. Commands: `dash|view`, `map|list`, `map|set`.
+  Window view of a 4480×1440 desktop streams at ~7 fps (release build).
 
 ## Milestones
 

@@ -4,17 +4,28 @@
 //! `DashboardCommands` thread, in order.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use picobot_core::config::{AppConfig, BotConfig};
+use picobot_core::anchor_stats::AnchorStats;
+use picobot_core::config::{AppConfig, BotConfig, ClassTravel};
+use picobot_core::identity::MapIdentity;
+use picobot_core::maps::{MapEntry, MapStore};
+use picobot_core::navgraph::{GraphCache, GraphOptions, NavGraph};
+use picobot_core::platform_fit::{PlatformFit, SegKey};
+use picobot_core::reach::{base_reach, ReachModel};
+use picobot_core::rotation::resolve_coord;
+use picobot_core::timing::monotonic;
+use picobot_core::vision::Region;
 use picobot_io::serial::{discover_data_port, list_ports, SerialLink};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::bus::Bus;
 use crate::clients::Clients;
+use crate::feed::Feed;
+use crate::frames::Overlay;
 
 /// WS message prefixes handled by the host; anything else is HID input
 /// for the Pico.
@@ -46,6 +57,20 @@ pub struct Host {
     jobs: Mutex<Option<Sender<String>>>,
     ws_port: AtomicU16,
     http_port: AtomicU16,
+    pub maps: Arc<Mutex<MapStore>>,
+    pub identity: Arc<MapIdentity>,
+    reach: Mutex<ReachModel>,
+    graphs: Mutex<GraphCache>,
+    platfit: Mutex<PlatformFit>,
+    anchor_stats: Mutex<AnchorStats>,
+    feed: Mutex<Option<Arc<Feed>>>,
+    /// The streamer drops its window handle and grabber on the next tick.
+    eyes_reset: AtomicBool,
+    view_mode: Mutex<String>,
+    /// Identity version of the last `maps` payload, plus one (0: never).
+    maps_sent: AtomicU64,
+    nav_show: AtomicBool,
+    stall_warned: Mutex<f64>,
 }
 
 fn dash(payload: Value) -> String {
@@ -58,27 +83,42 @@ impl Host {
         let clients = Arc::new(Clients::default());
         let c = clients.clone();
         bus.subscribe(move |e| {
-            let mut p = e.clone();
-            p["event"] = "evt".into();
-            // `event` first, like the Python payload.
-            let mut o = serde_json::Map::new();
+            let mut o = Map::new();
             o.insert("event".into(), "evt".into());
-            for (k, v) in p
-                .as_object()
-                .into_iter()
-                .flatten()
-                .filter(|(k, _)| *k != "event")
-            {
-                o.insert(k.clone(), v.clone());
-            }
+            o.extend(
+                e.as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
             c.broadcast(&dash(Value::Object(o)));
         });
         let bot_config = BotConfig::from_json(&config.bot).unwrap_or_else(|e| {
             bus.emit("error", &format!("config: {e} — using defaults"));
             BotConfig::default()
         });
+        let maps = Arc::new(Mutex::new(MapStore::new(root.join(&bot_config.maps_dir))));
+        // Title reads need the OCR reader (M8); until then the pin decides.
+        let (identity, notes) =
+            MapIdentity::new(maps.clone(), bot_config.active_map.clone(), false);
+        for n in notes {
+            bus.emit("map", &n);
+        }
+        let reach = ReachModel::load(base_reach(&bot_config), root.join(bot_config.reach_path()));
         let (serial_tx, serial_rx) = channel();
         let host = Arc::new(Host {
+            maps,
+            identity: Arc::new(identity),
+            reach: Mutex::new(reach),
+            graphs: Mutex::default(),
+            platfit: Mutex::default(),
+            anchor_stats: Mutex::default(),
+            feed: Mutex::new(None),
+            eyes_reset: AtomicBool::new(false),
+            view_mode: Mutex::new("minimap".into()),
+            maps_sent: AtomicU64::new(0),
+            nav_show: AtomicBool::new(false),
+            stall_warned: Mutex::new(f64::NEG_INFINITY),
             bus,
             clients,
             root,
@@ -111,9 +151,6 @@ impl Host {
     }
     pub fn set_ws_port(&self, p: u16) {
         self.ws_port.store(p, Ordering::Relaxed);
-    }
-    pub fn http_port(&self) -> u16 {
-        self.http_port.load(Ordering::Relaxed)
     }
     pub fn set_http_port(&self, p: u16) {
         self.http_port.store(p, Ordering::Relaxed);
@@ -369,6 +406,9 @@ impl Host {
             _ if msg.starts_with("host|serial|") => self.connect_serial(&arg(2)),
             _ if msg.starts_with("host|window|") => self.set_window(&arg(2)),
             _ if msg.starts_with("dash|fps|") => self.set_fps(&arg(2)),
+            _ if msg.starts_with("dash|view|") => self.set_view(&arg(2)),
+            "map|list" => self.send_maps(),
+            _ if msg.starts_with("map|set|") => self.set_map(&arg(2)),
             _ => return false,
         }
         true
@@ -430,6 +470,7 @@ impl Host {
         *self.window_title.lock().unwrap() = title.to_owned();
         self.config.lock().unwrap().default_target_window = title.to_owned();
         self.save_config();
+        self.drop_feed();
         self.bus.emit("host", &format!("window: {title}"));
         self.send_host_state();
     }
@@ -448,5 +489,252 @@ impl Host {
 
     pub fn view_fps(&self) -> f64 {
         self.config.lock().unwrap().view_fps
+    }
+
+    // -- Vision feed and the view ----------------------------------------------------
+
+    pub fn window_title(&self) -> String {
+        self.window_title.lock().unwrap().clone()
+    }
+
+    pub fn bot_config(&self) -> BotConfig {
+        self.bot_config.lock().unwrap().clone()
+    }
+
+    pub fn view_mode(&self) -> String {
+        self.view_mode.lock().unwrap().clone()
+    }
+
+    fn set_view(&self, mode: &str) {
+        if ["minimap", "window", "title"].contains(&mode) {
+            *self.view_mode.lock().unwrap() = mode.to_owned();
+        }
+    }
+
+    /// The shared feed, started on first use; None without the game.
+    pub fn get_feed(&self) -> Option<Arc<Feed>> {
+        let mut slot = self.feed.lock().unwrap();
+        if slot.is_none() {
+            let title = self.window_title();
+            let cfg = self.bot_config();
+            *slot =
+                Feed::start(&title, &cfg, self.identity.clone(), self.bus.clone()).map(Arc::new);
+        }
+        slot.clone()
+    }
+
+    /// Close the feed; the next `get_feed` builds a fresh one.
+    fn drop_feed(&self) {
+        let old = self.feed.lock().unwrap().take();
+        drop(old);
+        self.eyes_reset.store(true, Ordering::Relaxed);
+    }
+
+    pub fn take_eyes_reset(&self) -> bool {
+        self.eyes_reset.swap(false, Ordering::Relaxed)
+    }
+
+    /// Captures failed for seconds straight (streamer thread): rebuild the
+    /// feed unless the bot runs on it.
+    pub fn stream_stalled(&self, why: &str) {
+        let busy = self.is_bot_running();
+        let now = monotonic();
+        let warn = {
+            let mut t = self.stall_warned.lock().unwrap();
+            let due = now - *t >= 30.0;
+            if due {
+                *t = now;
+            }
+            due
+        };
+        if warn {
+            let tail = if busy {
+                ""
+            } else {
+                " — rebuilding the vision feed"
+            };
+            self.bus.emit_level(
+                "warn",
+                &format!("live view: capture failing ({why}){tail}"),
+                "warn",
+            );
+        }
+        if !busy {
+            self.drop_feed();
+        }
+    }
+
+    fn live_region(&self) -> Option<Region> {
+        self.feed
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|f| f.analyzer.region())
+    }
+
+    fn graph_options(cfg: &BotConfig) -> GraphOptions {
+        GraphOptions {
+            rope_penalty: cfg.rope_penalty,
+            allow_flash: cfg.class_travel == ClassTravel::Flash && cfg.flash_jump_enabled,
+            allow_teleport: cfg.class_travel == ClassTravel::Teleport && cfg.teleport_key.is_some(),
+            ..Default::default()
+        }
+    }
+
+    fn nav_graph(&self, entry: Option<&MapEntry>, wh: Option<(f64, f64)>) -> Option<Arc<NavGraph>> {
+        let opts = Host::graph_options(&self.bot_config.lock().unwrap());
+        let reach = self.reach.lock().unwrap();
+        self.graphs.lock().unwrap().get(entry, wh, &reach, opts)
+    }
+
+    /// The overlay and frame metadata of the resolved map: platforms,
+    /// ropes, anchors, and identity (`map`, `map_via`, `map_conf`,
+    /// `map_title`, `no_rotation`).
+    pub fn map_meta(&self, region: Option<Region>) -> (Overlay, Map<String, Value>) {
+        if self.maps_sent.load(Ordering::Relaxed) != self.identity.version() + 1 {
+            self.send_maps();
+        }
+        let entry = self.identity.entry();
+        let res = self.identity.current();
+        let wh = region
+            .filter(|r| r.2 > 0 && r.3 > 0)
+            .map(|r| (r.2 as f64, r.3 as f64));
+        let mut o = Overlay::default();
+        if let (Some(e), Some((w, h))) = (&entry, wh) {
+            o.anchors = e
+                .rotation
+                .anchors
+                .iter()
+                .map(|a| {
+                    (
+                        resolve_coord(a.x, w as i64) as f64,
+                        resolve_coord(a.y, h as i64) as f64,
+                    )
+                })
+                .collect();
+            o.ropes = e
+                .ropes
+                .iter()
+                .flatten()
+                .map(|s| {
+                    [
+                        (s[0] * w).round(),
+                        (s[1] * h).round(),
+                        (s[2] * w).round(),
+                        (s[3] * h).round(),
+                    ]
+                })
+                .collect();
+        }
+        if let Some(g) = self.nav_graph(entry.as_ref(), wh) {
+            o.platforms = g
+                .platforms
+                .iter()
+                .map(|p| [p.x0, p.y0, p.x1, p.y1])
+                .collect();
+            if self.nav_show.load(Ordering::Relaxed) {
+                o.nav_edges = g
+                    .transfer_legs()
+                    .iter()
+                    .map(|l| (l.kind.as_str().to_owned(), l.x0, l.y0, l.x1, l.y1))
+                    .collect();
+            }
+        }
+        let rotation_empty = match &entry {
+            Some(e) => e.rotation.anchors.is_empty(),
+            None => self.bot_config.lock().unwrap().rotation.anchors.is_empty(),
+        };
+        let conf = entry
+            .as_ref()
+            .filter(|e| res.title_map.as_deref() == Some(e.name.as_str()))
+            .map(|_| res.score);
+        let mut meta = Map::new();
+        meta.insert("map".into(), entry.as_ref().map(|e| e.name.clone()).into());
+        meta.insert("map_via".into(), res.via.into());
+        meta.insert("map_conf".into(), conf.into());
+        meta.insert("map_title".into(), res.title.into());
+        meta.insert("no_rotation".into(), rotation_empty.into());
+        (o, meta)
+    }
+
+    // -- Maps -------------------------------------------------------------------------
+
+    fn rope_rows(&self, entry: Option<&MapEntry>, region: Option<Region>) -> Vec<Value> {
+        let (Some(e), Some(r)) = (entry, region) else {
+            return Vec::new();
+        };
+        let (w, h) = (r.2 as f64, r.3 as f64);
+        let mut rows: Vec<(i64, i64, Value)> = e
+            .ropes
+            .iter()
+            .flatten()
+            .map(|s| {
+                let x = ((s[0] + s[2]) / 2.0 * w).round() as i64;
+                let top = (s[1].min(s[3]) * h).round() as i64;
+                let bottom = (s[1].max(s[3]) * h).round() as i64;
+                (
+                    x,
+                    top,
+                    json!({"key": SegKey::of(s).text(), "x": x, "top": top, "bottom": bottom}),
+                )
+            })
+            .collect();
+        rows.sort_by_key(|r| (r.0, r.1));
+        rows.into_iter().map(|r| r.2).collect()
+    }
+
+    pub fn send_maps(&self) {
+        self.maps_sent
+            .store(self.identity.version() + 1, Ordering::Relaxed);
+        let res = self.identity.current();
+        let entry = self.identity.entry();
+        let region = self.live_region();
+        let wh = region.map(|r| (r.2 as f64, r.3 as f64));
+        let names = self.maps.lock().unwrap().names();
+        let name = entry.as_ref().map(|e| e.name.as_str());
+        let segs: Vec<[f64; 4]> = entry
+            .as_ref()
+            .and_then(|e| e.platforms.clone())
+            .unwrap_or_default();
+        let fit = self.platfit.lock().unwrap().summary(name, &segs, wh);
+        let anchors: Vec<String> = entry
+            .iter()
+            .flat_map(|e| e.rotation.anchors.iter().map(|a| a.name.clone()))
+            .collect();
+        let stats = self.anchor_stats.lock().unwrap().rows(name, &anchors);
+        let payload = json!({
+            "event": "maps",
+            "maps": names,
+            "active": self.identity.pin(),
+            "detected": res.name,
+            "via": res.via,
+            "title": res.title,
+            "score": res.title_map.as_ref().map(|_| res.score),
+            "reading": self.identity.pending(),
+            "platforms_n": segs.len(),
+            "anchors_n": anchors.len(),
+            "platform_fit": fit,
+            "ropes": self.rope_rows(entry.as_ref(), region),
+            "recorded_title": entry.as_ref().and_then(|e| e.map_name.clone()),
+            "anchor_stats": stats,
+        });
+        self.clients.broadcast(&dash(payload));
+    }
+
+    /// Pin a map ("" = auto-detect) and remember it.
+    fn set_map(&self, name: &str) {
+        let name = name.trim();
+        let pin = (!name.is_empty()).then(|| name.to_owned());
+        self.config
+            .lock()
+            .unwrap()
+            .bot
+            .insert("active_map".into(), pin.clone().into());
+        self.bot_config.lock().unwrap().active_map = pin.clone();
+        self.save_config();
+        for n in self.identity.set_pin(pin.as_deref()) {
+            self.bus.emit("map", &n);
+        }
+        self.send_maps();
     }
 }

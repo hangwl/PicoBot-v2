@@ -75,10 +75,6 @@ impl Clients {
             .unwrap_or_default()
     }
 
-    pub fn len(&self) -> usize {
-        self.map.lock().unwrap().len()
-    }
-
     pub fn peer(&self, id: u64) -> String {
         self.map
             .lock()

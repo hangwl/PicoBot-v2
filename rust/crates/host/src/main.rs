@@ -11,8 +11,11 @@
 
 mod bus;
 mod clients;
+mod feed;
+mod frames;
 mod host;
 mod server;
+mod streamer;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -188,6 +191,7 @@ fn main() -> ExitCode {
             "picobot (rust) running — ws :{ws_port}, http :{http_port}{}. Ctrl+C to quit.",
             if dual { "" } else { ", IPv4 only" }
         );
+        let _streamer = streamer::Streamer::start(host.clone());
         tokio::signal::ctrl_c().await.map_err(|e| e.to_string())
     });
     if let Err(e) = served {

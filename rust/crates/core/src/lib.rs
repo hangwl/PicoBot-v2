@@ -10,6 +10,7 @@ pub mod bot;
 pub mod config;
 pub mod error;
 pub mod fileio;
+pub mod identity;
 pub mod json;
 pub mod maps;
 pub mod minimap;
@@ -21,6 +22,7 @@ pub mod rotation;
 pub mod skills;
 pub mod summons;
 pub mod timing;
+pub mod title;
 pub mod vision;
 
 pub use error::{Error, Result};

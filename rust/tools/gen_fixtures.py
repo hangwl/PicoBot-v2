@@ -291,6 +291,72 @@ def nav_trace() -> None:
     (OUT / "trace_nav.json").write_text(json.dumps(graphs))
 
 
+def title_bands() -> None:
+    """Synthetic title bands (text lines, icon tiles, filled icons, the
+    divider, faded tails, noise) and what the Python title_scan finds."""
+    import random
+
+    import numpy as np
+    from PIL import Image
+
+    from picobot.vision.mapname import title_scan
+
+    d = OUT / "title"
+    d.mkdir()
+    rng = random.Random(11)
+    cases = []
+    for i in range(60):
+        h, w = rng.randint(30, 80), rng.randint(140, 260)
+        band = np.array(
+            [[[rng.choice((0, 0, 0, 35, 70))] * 3 for _ in range(w)] for _ in range(h)],
+            dtype=np.uint8,
+        )
+        band[:, :, 1] = band[:, :, 1] // 2 + rng.choice((0, 20, 40))
+        x = rng.randint(2, 12)
+        if rng.random() < 0.3:                     # region-icon tile
+            s = rng.randint(20, min(34, h - 4))
+            y0 = rng.randint(0, h - s - 1)
+            band[y0:y0 + s, x] = 230
+            band[y0:y0 + s, x + s - 1] = 230
+            band[y0, x:x + s] = 230
+            band[y0 + s - 1, x:x + s] = 230
+            band[y0 + 2:y0 + s - 2, x + 2:x + s - 2] = (40, 180, 90)
+            x += s + 3
+        if rng.random() < 0.3:                     # filled toolbar icon
+            band[2:12, x:x + 9] = 240
+            x += 14
+        y = rng.randint(2, 8)
+        for _ in range(rng.randint(1, 2)):         # text lines
+            lh = rng.randint(5, 10)
+            gx = x
+            for _ in range(rng.randint(5, 14)):
+                gw = rng.randint(2, 6)
+                if gx + gw >= w - 2 or y + lh >= h:
+                    break
+                for _ in range(rng.randint(3, 10)):
+                    band[y + rng.randint(0, lh - 1), gx + rng.randint(0, gw - 1)] = 250
+                gx += gw + rng.randint(1, 7)
+            if rng.random() < 0.3:                 # faded tail
+                for _ in range(rng.randint(2, 5)):
+                    tx = gx + rng.randint(1, 10)
+                    if tx < w:
+                        band[y + rng.randint(0, lh - 1), tx] = rng.randint(90, 160)
+            y += lh + rng.randint(1, 6)
+        if rng.random() < 0.6 and y + 2 < h and w > 130:   # divider
+            a = rng.randint(0, max(0, w - 125))
+            band[y + 1, a:min(w, a + rng.randint(121, w))] = 235
+            band[y + 2:, :] = np.maximum(band[y + 2:, :], rng.randint(0, 250))
+        name = f"{i:02}.png"
+        Image.fromarray(np.ascontiguousarray(band[:, :, ::-1])).save(d / name)
+        lines, div = title_scan(band)
+        cases.append({
+            "png": name,
+            "lines": [[int(v) for v in l] for l in lines],
+            "div": [int(v) for v in div] if div is not None else None,
+        })
+    (d / "trace_title.json").write_text(json.dumps(cases))
+
+
 if __name__ == "__main__":
     shutil.rmtree(OUT, ignore_errors=True)
     OUT.mkdir(parents=True)
@@ -299,5 +365,6 @@ if __name__ == "__main__":
     reach()
     traces()
     nav_trace()
+    title_bands()
     for p in sorted(OUT.rglob("*.json")):
         print(p.relative_to(OUT))
