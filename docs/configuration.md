@@ -155,6 +155,9 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   markers (monsters drawn as players) or tolerates N, instead of the
   global setting; absent follows it. Set on the Map page
   (`map|players`). On an ignoring map the count is logged at debug level.
+- `rope_penalty` (default 5 s) and `walk_cost_factor` (default 1) — how
+  strongly the planner avoids ropes and walking (see bot-behavior.md);
+  Setup → Patrol edits them.
 - `heartbeat_minutes` — Telegram status message every N minutes while
   the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.

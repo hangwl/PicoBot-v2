@@ -280,6 +280,17 @@ Skills also carry a `stance` (`ground`, `air`, or `any` — the default)
 and a `weight` (default 1), stored only when not default. The attack
 scheduler (windows, above) uses them.
 
+### Walking and ropes
+
+Ropes are a last resort: a climb edge costs `rope_penalty` extra seconds
+(default 5), so it is planned only when no hop path is within that much
+cheaper — 30 or more all but bans ropes. `walk_cost_factor` (default 1)
+multiplies every walking leg's cost, so routes and loop orders that walk
+less win. Both are on Setup → Patrol (`patrol|rope_penalty`,
+`patrol|walk_factor`). The Home status list and the stop/heartbeat
+summaries count the legs run by kind (`flash 41 · walk 12 · climb up 3 (1
+missed)`), so you can see what the bot is really doing.
+
 ### Skill effects
 
 Some attacks change a flash — they hold the character up or shift where
@@ -322,9 +333,10 @@ carries (`profiles.walk_taps`: `{ms, n, dx, sd}`), then times the walking
 pace and slide (`profiles.walk_speed`). Each direction change spends one
 discarded tap: the first only turns the character. With a tap table,
 `Body::nudge_to` closes in on a target with the longest tap that doesn't
-overshoot, re-reading the dot after each (8 taps at most), and the
-navigator's exact walks finish that way; the planner's walking cost uses
-the measured pace. Without a sweep, nothing changes.
+overshoot, re-reading the dot after each (8 taps at most). Only a **rope
+grab's takeoff** finishes that way — every other leg's takeoff alignment
+stays a plain walk, so the taps don't slow the loop. The planner's walking
+cost uses the measured pace. Without a sweep, nothing changes.
 
 ## Summons (`summons.rs`)
 

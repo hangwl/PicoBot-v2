@@ -321,6 +321,7 @@ pub trait Body {
             rope_penalty: cfg.rope_penalty,
             allow_flash: cfg.class_travel == ClassTravel::Flash && cfg.flash_jump_enabled,
             allow_double_flash: cfg.double_flash,
+            walk_factor: cfg.walk_cost_factor.max(0.1),
             walk_speed: self
                 .state_ref()
                 .reach

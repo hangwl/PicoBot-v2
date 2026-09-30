@@ -177,6 +177,9 @@ struct Edge {
 #[derive(Debug, Clone, Copy)]
 pub struct GraphOptions {
     pub walk_speed: f64,
+    /// Multiplies every walking leg's cost (above 1 prefers hops and ropes
+    /// over walking).
+    pub walk_factor: f64,
     pub snap_px: f64,
     pub edge_inset_px: f64,
     pub takeoff_inset_px: f64,
@@ -192,6 +195,7 @@ impl Default for GraphOptions {
     fn default() -> Self {
         GraphOptions {
             walk_speed: 40.0,
+            walk_factor: 1.0,
             snap_px: 8.0,
             edge_inset_px: 4.0,
             takeoff_inset_px: 3.0,
@@ -243,7 +247,7 @@ impl NavGraph {
                 .copied()
                 .collect(),
             snap_px: opts.snap_px,
-            walk_speed: opts.walk_speed,
+            walk_speed: opts.walk_speed / opts.walk_factor.max(0.01),
             rope_max_px: opts
                 .rope_max_px
                 .unwrap_or(reach.base[Move::RopeLift as usize].rise),
@@ -859,7 +863,10 @@ struct CacheKey {
     platforms: Vec<[u64; 4]>,
     ropes: Vec<[u64; 4]>,
     rope_penalty: u64,
+    walk_speed: u64,
+    walk_factor: u64,
     allow_flash: bool,
+    allow_double_flash: bool,
     allow_teleport: bool,
     region: (u64, u64),
     reach: Vec<crate::reach::SnapshotRow>,
@@ -896,7 +903,10 @@ impl GraphCache {
             platforms: bits(entry.platforms.as_ref()),
             ropes: bits(entry.ropes.as_ref()),
             rope_penalty: opts.rope_penalty.to_bits(),
+            walk_speed: opts.walk_speed.to_bits(),
+            walk_factor: opts.walk_factor.to_bits(),
             allow_flash: opts.allow_flash,
+            allow_double_flash: opts.allow_double_flash,
             allow_teleport: opts.allow_teleport,
             region: (wh.0.to_bits(), wh.1.to_bits()),
             reach: reach.snapshot(),

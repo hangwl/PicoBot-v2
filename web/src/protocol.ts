@@ -57,6 +57,8 @@ export interface SessionStats {
   skips: number;
   pauses: number;
   paused: number;
+  /** Legs run by move kind. */
+  moves?: Record<string, { ok: number; failed: number }>;
   /** Attacks cast in the last minute. */
   apm?: number;
 }
@@ -222,6 +224,8 @@ export interface AppState {
   stopRune: boolean;
   stopMap: boolean;
   heartbeat: number;
+  ropePenalty: number;
+  walkFactor: number;
   allowedPlayers: number;
   playerMinPx: number;
   others: number;
@@ -289,6 +293,8 @@ const initial: AppState = {
   stopRune: true,
   stopMap: true,
   heartbeat: 30,
+  ropePenalty: 5,
+  walkFactor: 1,
   allowedPlayers: 0,
   playerMinPx: 6,
   others: 0,
@@ -625,6 +631,8 @@ function onEvent(p: Record<string, any> & { event: string }) {
         stopRune: c.stop_when_rune_appears !== false,
         stopMap: c.stop_when_map_unrecognized !== false,
         heartbeat: (c.heartbeat_minutes as number) ?? 30,
+        ropePenalty: (c.rope_penalty as number) ?? 5,
+        walkFactor: (c.walk_cost_factor as number) ?? 1,
         allowedPlayers: (c.allowed_other_players as number) ?? 0,
         playerMinPx: (c.other_player_min_px as number) ?? 6,
         moveAttack: (c.move_attack_chance as number) ?? 1,

@@ -446,3 +446,53 @@ fn up_flash_targets_the_highest_platform_its_peak_clears() {
     assert_eq!(up.len(), 1);
     assert!(up[0].x0 > 55.0);
 }
+
+#[test]
+fn walking_cost_scales_with_the_factor() {
+    let plats = [[0.0, 100.0, 200.0, 100.0]];
+    let cost = |factor: f64| {
+        let opts = GraphOptions {
+            walk_factor: factor,
+            ..GraphOptions::default()
+        };
+        with_ropes(&plats, &[], opts).route_cost((10.0, 100.0), (150.0, 100.0), &[])
+    };
+    assert!(
+        (cost(3.0) - 3.0 * cost(1.0)).abs() < 1e-6,
+        "{} {}",
+        cost(3.0),
+        cost(1.0)
+    );
+}
+
+#[test]
+fn the_graph_cache_rebuilds_when_kit_or_walking_pace_change() {
+    use picobot_core::navgraph::GraphCache;
+    use std::sync::Arc;
+    let mut e = MapEntry::new("m");
+    e.platforms = Some(vec![[0.0, 0.667, 1.0, 0.667]]);
+    let (wh, r) = ((200.0, 150.0), reach());
+    let mut cache = GraphCache::default();
+    let base = GraphOptions::default();
+    let a = cache.get(Some(&e), Some(wh), &r, base).unwrap();
+    let same = cache.get(Some(&e), Some(wh), &r, base).unwrap();
+    assert!(Arc::ptr_eq(&a, &same));
+    for changed in [
+        GraphOptions {
+            allow_double_flash: false,
+            ..base
+        },
+        GraphOptions {
+            walk_speed: 90.0,
+            ..base
+        },
+        GraphOptions {
+            walk_factor: 2.0,
+            ..base
+        },
+    ] {
+        let g = cache.get(Some(&e), Some(wh), &r, changed).unwrap();
+        assert!(!Arc::ptr_eq(&a, &g), "{changed:?} must rebuild");
+        cache.get(Some(&e), Some(wh), &r, base).unwrap();
+    }
+}

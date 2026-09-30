@@ -95,6 +95,12 @@ impl Host {
             _ if msg.starts_with("attacks|set|") => self.attacks_set(&arg(2)),
             _ if msg.starts_with("layout|erase|") => self.layout_erase(msg),
             _ if msg.starts_with("patrol|temp|") => self.patrol_set(None, Some(&arg(2))),
+            _ if msg.starts_with("patrol|rope_penalty|") => {
+                self.plan_cost_set("rope_penalty", &arg(2), 0.0, 600.0)
+            }
+            _ if msg.starts_with("patrol|walk_factor|") => {
+                self.plan_cost_set("walk_cost_factor", &arg(2), 0.1, 10.0)
+            }
             "map|stats|reset" => self.map_stats_reset(""),
             _ if msg.starts_with("map|stats|reset|") => self.map_stats_reset(&arg(3)),
             _ if msg.starts_with("map|title|") => self.map_title(msg),
@@ -323,6 +329,26 @@ impl Host {
         self.send_skills();
         self.send_config();
         self.send_measure(None);
+    }
+
+    /// `patrol|rope_penalty|<s>` / `patrol|walk_factor|<x>`: planner costs.
+    fn plan_cost_set(&self, key: &'static str, raw: &str, lo: f64, hi: f64) {
+        let v = match raw.trim().parse::<f64>() {
+            Ok(v) if v.is_finite() && (lo..=hi).contains(&v) => v,
+            _ => {
+                self.bus
+                    .emit("error", &format!("{key} must be between {lo} and {hi}"));
+                return;
+            }
+        };
+        if let Err(e) = self.commit_bot(|bot| {
+            bot.insert(key.into(), v.into());
+        }) {
+            self.bus.emit("error", &e);
+            return;
+        }
+        self.bus.emit("bot", &format!("{key}: {v}"));
+        self.send_config();
     }
 
     fn patrol_set(&self, policy: Option<&str>, temp: Option<&str>) {
