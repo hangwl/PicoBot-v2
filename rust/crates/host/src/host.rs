@@ -396,12 +396,14 @@ impl Host {
             bus.emit_level("remote", &format!("RX: {line}"), "debug");
         });
         let bus = self.bus.clone();
+        let telegram = self.telegram.clone();
         link.on_lost(move |why| {
             bus.emit(
                 "remote",
                 &format!("ERR: serial port lost ({why}) — reconnect it in Connection"),
             );
             bus.emit("status", "Remote: Serial lost");
+            telegram.send_async(&format!("Serial port lost ({why})"));
         });
         let old = self.serial.lock().unwrap().replace(Arc::new(link));
         drop(old);
@@ -484,6 +486,7 @@ impl Host {
             Ok(run) => *self.bot.lock().unwrap() = Some(run),
             Err(e) => {
                 self.bus.emit("error", &e);
+                self.notify(&format!("Bot failed to start: {e}"));
                 self.send_bot_state(false);
             }
         }

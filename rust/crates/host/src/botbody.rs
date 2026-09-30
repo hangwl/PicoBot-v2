@@ -3,6 +3,7 @@
 //! wakes every sleep. Also the thread that runs the state machine.
 
 use std::cell::RefCell;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -190,9 +191,9 @@ impl Body for HostBody {
     fn hazard_in(&mut self, img: &Image) -> Option<String> {
         let reason = if self.analyzer.loading() {
             Some("map transfer (loading screen)")
-        } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
         } else if self.host.identity.unrecognized() {
             Some("unrecognized map")
+        } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
             Some("rune")
         } else if self.cfg.stop_when_players_appear && self.analyzer.has_other_players(img) {
             Some("other players")
@@ -336,9 +337,16 @@ pub fn spawn_bot(host: &Arc<Host>) -> Result<BotRun, String> {
     let thread = std::thread::Builder::new()
         .name("SmartBot".into())
         .spawn(move || {
-            match make_body(&h, s) {
-                Ok(body) => run_bot(&h, body),
-                Err(e) => h.bus.emit("error", &format!("smart bot failed: {e}")),
+            let ended = match make_body(&h, s.clone()) {
+                Ok(body) => run_bot(&h, body).map(|()| "Bot stopped".to_owned()),
+                Err(e) => Err(format!("Bot failed to start: {e}")),
+            };
+            match ended {
+                Ok(msg) => h.notify(&msg),
+                Err(e) => {
+                    h.bus.emit("error", &e);
+                    h.notify(&e);
+                }
             }
             h.set_bot_viz(None);
             h.bus.emit("bot", "stopped");
@@ -348,7 +356,9 @@ pub fn spawn_bot(host: &Arc<Host>) -> Result<BotRun, String> {
     Ok(BotRun { stop, thread })
 }
 
-fn run_bot(h: &Arc<Host>, mut body: HostBody) {
+/// Run the machine to its end; a panic comes back as the error (keys
+/// released either way).
+fn run_bot(h: &Arc<Host>, mut body: HostBody) -> Result<(), String> {
     h.bus.emit("bot", "started");
     h.send_bot_state(true);
     new_session(); // this run's pace differs from the last
@@ -359,13 +369,21 @@ fn run_bot(h: &Arc<Host>, mut body: HostBody) {
     }
     body.eyes.window.activate();
     body.sleep(1.0);
-    Machine::default().run(&mut body);
+    let ran = catch_unwind(AssertUnwindSafe(|| Machine::default().run(&mut body)));
     body.log("Smart bot stopped");
     body.hid.release_all();
     if let Err(e) = body.state.reach.save(true) {
         h.bus.emit("error", &format!("saving reach failed: {e}"));
     }
     h.put_reach(body.state.reach.clone());
+    ran.map_err(|p| {
+        let why = p
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| p.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown".into());
+        format!("Bot crashed: {why}")
+    })
 }
 
 /// The dot for the flight recorder: its thread keeps its own eyes.

@@ -49,6 +49,15 @@ fn a_hazard_pauses_with_an_alert() {
 }
 
 #[test]
+fn a_long_pause_raises_the_watchdog_alert() {
+    let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+    b.focus = false;
+    b.stop_at = 100.0;
+    Machine::default().run(&mut b);
+    assert!(b.log_has("Paused for"));
+}
+
+#[test]
 fn grind_without_a_rotation_never_leaves_grind() {
     let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
     b.state.travel_target = Some(0);
