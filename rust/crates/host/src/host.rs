@@ -33,6 +33,7 @@ use crate::clients::Clients;
 use crate::commands::UndoStep;
 use crate::feed::{Feed, TitleJob};
 use crate::frames::Overlay;
+use crate::telegram::Telegram;
 
 /// WS message prefixes handled by the host; anything else is HID input
 /// for the Pico.
@@ -94,6 +95,7 @@ pub struct Host {
     pub(crate) layout_undo: Mutex<HashMap<(String, &'static str), Vec<UndoStep>>>,
     /// Title bands for the TitleOCR worker (None without a reader).
     pub(crate) ocr_tx: Mutex<Option<Sender<TitleJob>>>,
+    pub(crate) telegram: Telegram,
 }
 
 /// The title recogniser, if its model is found and loads.
@@ -140,6 +142,7 @@ impl Host {
             BotConfig::default()
         });
         let maps = Arc::new(Mutex::new(MapStore::new(root.join(&bot_config.maps_dir))));
+        let telegram = Telegram::new(&config.bot_token, &config.chat_id, bus.clone());
         let reader = if bot_config.name_ocr {
             load_reader(&root, &bus)
         } else {
@@ -179,6 +182,7 @@ impl Host {
             nav_preview: Mutex::new(None),
             layout_undo: Mutex::default(),
             ocr_tx: Mutex::new(None),
+            telegram,
             bus,
             clients,
             root,
@@ -655,9 +659,10 @@ impl Host {
         self.send_maps();
     }
 
-    /// A safety alert (Telegram is not wired in the Rust host yet).
+    /// A safety alert: the event log, and Telegram when configured.
     pub fn notify(&self, msg: &str) {
         self.bus.emit("notify", msg);
+        self.telegram.send_async(msg);
     }
 
     // -- Commands ---------------------------------------------------------------------

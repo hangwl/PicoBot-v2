@@ -17,3 +17,4 @@ socket2 = { version = "0.6.5", features = ["all"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "signal"] }
 serde_json.workspace = true
 jpeg-encoder = "0.7.1"
+ureq = "3.4.2"

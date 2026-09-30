@@ -18,6 +18,7 @@ mod frames;
 mod host;
 mod server;
 mod streamer;
+mod telegram;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

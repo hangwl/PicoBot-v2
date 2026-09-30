@@ -171,7 +171,8 @@ conversion.
   route, plan, dot). Map saves (learned ropes), anchor stats and the
   platform-fit diagnostic flow back into the host. The bot and the
   measurer take a copy of the reach model and hand it back when they
-  end. Safety alerts go to the event log; Telegram is still to port.
+  end. Safety alerts go to the event log and to Telegram (`bot_token`,
+  `chat_id`), sent on a thread each with the token scrubbed from errors.
 - **M7d** — done: the dashboard's edit commands. Settings (`class|list|use|add`,
   `skills|list|set|del`, `movekeys|set`, `patrol|policy|temp`) edit the
   persisted `bot` block and derive `BotConfig` from it again, so the live
