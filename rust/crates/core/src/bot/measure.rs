@@ -25,6 +25,11 @@ const VERTICAL: &[&str] = &["up_flash", "rope_lift", "teleport_up"];
 pub const PROFILE_DELAYS: [f64; 8] = [0.08, 0.12, 0.16, 0.20, 0.25, 0.30, 0.36, 0.44];
 pub const PROFILE_REPS: usize = 3;
 pub const PROFILE_CLEAR_PX: f64 = 45.0;
+/// Walk-tap sweep: key-hold lengths (ms) and the measured taps for each.
+pub const TAP_MS: [u32; 6] = [30, 50, 80, 120, 180, 260];
+pub const TAP_REPS: usize = 4;
+/// A tap sweep stays this far from a platform end (turning round before it).
+const TAP_ROOM_PX: f64 = 30.0;
 
 fn room(m: &str) -> f64 {
     match m {
@@ -69,6 +74,7 @@ impl Recorder for FlightRecorder {
 pub enum Mode {
     Moves,
     UpFlashProfile,
+    WalkTaps,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -182,9 +188,10 @@ impl MoveMeasurer {
             );
             return;
         }
-        if self.mode == Mode::UpFlashProfile {
-            self.profile(body);
-            return;
+        match self.mode {
+            Mode::UpFlashProfile => return self.profile(body),
+            Mode::WalkTaps => return self.walk_taps(body),
+            Mode::Moves => {}
         }
         let mut plan: Vec<&str> = plan_for(body.config()).to_vec();
         if let Some(only) = self.only.clone() {
@@ -454,6 +461,163 @@ impl MoveMeasurer {
             ));
         }
         Got(flight)
+    }
+
+    // -- Walk taps and pace ---------------------------------------------------------------
+    /// How far taps of several lengths carry, then the walking pace and
+    /// slide. Turning round before a platform end; each direction change
+    /// spends one discarded tap (the first only turns the character).
+    fn walk_taps<B: Body + ?Sized>(&mut self, body: &mut B) {
+        let Some(start) = settle(body, 0.9) else {
+            (self.emit)("measure", "player dot not visible");
+            return;
+        };
+        let graph = body.graph().expect("checked before the run");
+        let Some(pi) = graph.locate(start.0, start.1) else {
+            (self.emit)("measure", "stand on a drawn platform first");
+            return;
+        };
+        let plat = graph.platforms[pi];
+        if plat.x1 - plat.x0 < 4.0 * TAP_ROOM_PX {
+            (self.emit)(
+                "measure",
+                &format!(
+                    "this platform is too short — stand on one at least {:.0}px long",
+                    4.0 * TAP_ROOM_PX
+                ),
+            );
+            return;
+        }
+        (self.emit)(
+            "measure",
+            &format!(
+                "walk-tap sweep: {} taps — keep the game focused",
+                TAP_MS.len() * (TAP_REPS + 1)
+            ),
+        );
+        let room = |dir: Dir, x: f64| match dir {
+            Dir::Right => plat.x1 - x,
+            Dir::Left => x - plat.x0,
+        };
+        let mut dir = if room(Dir::Right, start.0) >= room(Dir::Left, start.0) {
+            Dir::Right
+        } else {
+            Dir::Left
+        };
+        let mut facing: Option<Dir> = None;
+        let mut rows: Vec<Value> = Vec::new();
+        for ms in TAP_MS {
+            let mut dxs: Vec<f64> = Vec::new();
+            while dxs.len() < TAP_REPS {
+                if !body.should_continue() || !body.focused() {
+                    (self.emit)("measure", "sweep stopped");
+                    self.save_taps(body, rows);
+                    return;
+                }
+                self.current = Some(format!("tap {ms}ms"));
+                self.publish(body);
+                let Some(pos) = settle(body, 0.9) else {
+                    (self.emit)("measure", "sweep stopped — player dot lost");
+                    self.save_taps(body, rows);
+                    return;
+                };
+                if room(dir, pos.0) < TAP_ROOM_PX {
+                    dir = dir.flip();
+                }
+                if facing != Some(dir) {
+                    body.tap(dir, f64::from(ms) / 1000.0);
+                    facing = Some(dir);
+                    continue;
+                }
+                body.tap(dir, f64::from(ms) / 1000.0);
+                let Some(after) = settle(body, 0.9) else {
+                    (self.emit)("measure", "sweep stopped — player dot lost");
+                    self.save_taps(body, rows);
+                    return;
+                };
+                let sign = if dir == Dir::Right { 1.0 } else { -1.0 };
+                dxs.push((after.0 - pos.0) * sign);
+                body.sleep_between(0.2, 0.12, 0.4);
+            }
+            let m = mean(&dxs);
+            let sd = (dxs.iter().map(|d| (d - m).powi(2)).sum::<f64>() / dxs.len() as f64).sqrt();
+            rows.push(json!({
+                "ms": ms,
+                "n": dxs.len(),
+                "dx": round_to(m, 1),
+                "sd": round_to(sd, 1),
+            }));
+            self.profile_rows = rows.clone();
+            self.publish(body);
+        }
+        self.save_taps(body, rows);
+        self.walk_pace(body, plat.x0, plat.x1);
+    }
+
+    fn save_taps<B: Body + ?Sized>(&mut self, body: &mut B, rows: Vec<Value>) {
+        if rows.is_empty() {
+            (self.emit)("measure", "sweep recorded nothing");
+            return;
+        }
+        body.state().reach.set_profile("walk_taps", rows);
+        (self.emit)("measure", "walk taps saved");
+    }
+
+    /// Hold a direction ~0.6 s for the pace, release for the slide; two
+    /// runs, one each way.
+    fn walk_pace<B: Body + ?Sized>(&mut self, body: &mut B, x0: f64, x1: f64) {
+        let (mut speeds, mut slides) = (Vec::new(), Vec::new());
+        for dir in [Dir::Right, Dir::Left, Dir::Right, Dir::Left] {
+            if !body.should_continue() || !body.focused() {
+                break;
+            }
+            let Some(a) = settle(body, 0.9) else { break };
+            let room = if dir == Dir::Right {
+                x1 - a.0
+            } else {
+                a.0 - x0
+            };
+            if room < 2.0 * TAP_ROOM_PX {
+                continue;
+            }
+            self.current = Some("walking pace".into());
+            self.publish(body);
+            body.keys().key_down(dir.key());
+            let (t0, mut last) = (body.now(), a);
+            let mut t1 = t0;
+            while body.now() - t0 < 0.6 {
+                body.sleep(0.1);
+                if let Some(p) = body.pos() {
+                    last = p;
+                    t1 = body.now();
+                }
+            }
+            body.keys().key_up(dir.key());
+            let Some(rest) = settle(body, 0.9) else { break };
+            if t1 - t0 > 0.2 {
+                speeds.push((last.0 - a.0).abs() / (t1 - t0));
+                slides.push((rest.0 - last.0).abs());
+            }
+        }
+        if speeds.is_empty() {
+            (self.emit)("measure", "walking pace not measured — not enough room");
+            return;
+        }
+        let row = json!({
+            "speed": round_to(mean(&speeds), 1),
+            "slide": round_to(mean(&slides), 1),
+            "n": speeds.len(),
+        });
+        body.state()
+            .reach
+            .set_profile("walk_speed", vec![row.clone()]);
+        (self.emit)(
+            "measure",
+            &format!(
+                "walking pace saved — {} px/s, {} px slide",
+                row["speed"], row["slide"]
+            ),
+        );
     }
 
     // -- Up-flash timing sweep ---------------------------------------------------------

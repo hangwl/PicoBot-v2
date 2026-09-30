@@ -688,6 +688,7 @@ impl Host {
                 self.measure_start(Mode::Moves, Some(arg(2).trim().to_owned()))
             }
             "measure|profile|up_flash" => self.measure_start(Mode::UpFlashProfile, None),
+            "measure|profile|walk" => self.measure_start(Mode::WalkTaps, None),
             "measure|stop" => Host::stop_slot(&self.measurer),
             "measure|status" => self.send_measure(None),
             _ => return self.handle_edit(msg),

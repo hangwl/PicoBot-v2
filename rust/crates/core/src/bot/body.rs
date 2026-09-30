@@ -279,6 +279,11 @@ pub trait Body {
             rope_penalty: cfg.rope_penalty,
             allow_flash: cfg.class_travel == ClassTravel::Flash && cfg.flash_jump_enabled,
             allow_double_flash: cfg.double_flash,
+            walk_speed: self
+                .state_ref()
+                .reach
+                .walk_stats()
+                .map_or(GraphOptions::default().walk_speed, |w| w.speed),
             allow_teleport: cfg.class_travel == ClassTravel::Teleport && cfg.teleport_key.is_some(),
             ..Default::default()
         }
@@ -745,6 +750,38 @@ pub trait Body {
             self.sleep_between(0.4, 0.28, 0.6);
         }
         self.keys().key_up(dir.key());
+    }
+
+    /// A tap on `dir`: the key held exactly `secs`.
+    fn tap(&mut self, dir: Dir, secs: f64) -> bool {
+        self.keys().press(dir.key(), Some(secs))
+    }
+
+    /// Step to within `tol` px of `x` in calibrated taps: the longest that
+    /// doesn't overshoot, re-reading the dot after each. False without a
+    /// tap table, or when 8 taps don't get there.
+    fn nudge_to(&mut self, x: f64, tol: f64) -> bool {
+        let Some(table) = self.state_ref().reach.tap_table() else {
+            return false;
+        };
+        let tol = tol.max(table.resolution() * 0.5);
+        for _ in 0..8 {
+            if !self.should_continue() || !self.focused() {
+                return false;
+            }
+            let Some(pos) = super::measure::settle(self, 0.7) else {
+                return false;
+            };
+            let need = x - pos.0;
+            if need.abs() <= tol {
+                return true;
+            }
+            let Some(row) = table.choose(need.abs()) else {
+                return true;
+            };
+            self.tap(Dir::toward(need), row.secs);
+        }
+        false
     }
 
     /// Weave an attack into a walked leg, spaced ~0.4s.

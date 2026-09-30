@@ -105,7 +105,9 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   are planned only when no jump/rope-lift path is within this much
   cheaper. Set 0 to allow ropes freely.
 - `class` — named class profiles with an active selector; the active
-  profile overlays `travel` (flash|teleport|walk), `air_attacks`, the
+  profile overlays `travel` (flash|teleport|walk), `air_attacks`,
+  `double_flash` (default true; false drops double-flash edges and its
+  measurement), the
   teleport keys, **its own movement keys** (`jump_key`,
   `up_jump_skill_key`, `flash_jump`) and **its own `skills` kit**. When
   every profile carries its kit, the top-level `skills`/`jump_key`/

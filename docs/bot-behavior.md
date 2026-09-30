@@ -260,6 +260,23 @@ Registered skills have `key`, `kind`, `cooldown`:
 - `summon` — placed at anchors (below). Allowed at an anchor that lists
   it in `on_arrive`, or at any anchor that lists none.
 
+Skills also carry a `stance` (`ground`, `air`, or `any` — the default)
+and a `weight` (default 1). Both are stored only when not default. They
+are data for now: the attack scheduler that will use them (windows,
+odds, a target attack rate) isn't built yet.
+
+### Walk taps
+
+`measure|profile|walk` (Setup → Measure moves → Walk taps) sweeps
+keypresses of 30–260 ms on one drawn platform and saves how far each
+carries (`profiles.walk_taps`: `{ms, n, dx, sd}`), then times the walking
+pace and slide (`profiles.walk_speed`). Each direction change spends one
+discarded tap: the first only turns the character. With a tap table,
+`Body::nudge_to` closes in on a target with the longest tap that doesn't
+overshoot, re-reading the dot after each (8 taps at most), and the
+navigator's exact walks finish that way; the planner's walking cost uses
+the measured pace. Without a sweep, nothing changes.
+
 ## Summons (`summons.rs`)
 
 - **Charges**: a skill stores up to `charges` uses (default 1); while

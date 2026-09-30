@@ -304,6 +304,16 @@ impl Navigator {
         if (pos.0 - x).abs() <= tol {
             return true;
         }
+        if exact && body.state_ref().reach.tap_table().is_some() {
+            // Hold-and-release overshoots a tight target: close in, then tap.
+            return body.move_to_point(
+                x.round(),
+                pos.1,
+                Some(tol.max(6.0).trunc()),
+                Travel::Mixed,
+                true,
+            ) && body.nudge_to(x, tol);
+        }
         body.move_to_point(x.round(), pos.1, Some(tol.trunc()), Travel::Mixed, true)
     }
 

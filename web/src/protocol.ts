@@ -81,6 +81,14 @@ export interface SweepRow {
   air: number | null;
 }
 
+/** One walk-tap length and how far it carries (minimap px). */
+export interface TapRow {
+  ms: number;
+  n: number;
+  dx: number;
+  sd: number;
+}
+
 export interface MeasureState {
   running: boolean;
   move: string | null;
@@ -90,9 +98,9 @@ export interface MeasureState {
   /** The one move being measured, or null for the whole plan. */
   only: string | null;
   /** Live rows of the sweep in progress. */
-  profile: SweepRow[];
-  /** Saved sweeps by move. */
-  profiles: Record<string, { at: number; rows: SweepRow[] }>;
+  profile: (SweepRow | TapRow)[];
+  /** Saved sweeps by name (`up_flash`, `walk_taps`, `walk_speed`). */
+  profiles: Record<string, { at: number; rows: any[] }>;
 }
 
 /** Where the feet settle on one drawn platform (minimap px). */

@@ -23,6 +23,7 @@ pub mod reach;
 pub mod rotation;
 pub mod skills;
 pub mod summons;
+pub mod taps;
 pub mod timing;
 pub mod title;
 pub mod vision;

@@ -365,6 +365,18 @@ impl ReachModel {
         self.dirty = true;
     }
 
+    /// The calibrated walk taps, if a sweep has been saved.
+    pub fn tap_table(&self) -> Option<crate::taps::TapTable> {
+        let rows = self.profiles.get("walk_taps")?.get("rows")?.as_array()?;
+        crate::taps::TapTable::from_rows(rows)
+    }
+
+    /// The measured walking pace and slide, if saved.
+    pub fn walk_stats(&self) -> Option<crate::taps::WalkStats> {
+        let rows = self.profiles.get("walk_speed")?.get("rows")?.as_array()?;
+        crate::taps::WalkStats::from_rows(rows)
+    }
+
     /// (lo, mid, hi) re-press delays around a sweep's highest peak: the
     /// contiguous run of delays within `slack` px of it.
     pub fn plateau(&self, name: &str, slack: f64) -> Option<(f64, f64, f64)> {

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use picobot_core::bot::{Flight, MeasureStatus, Mode, MoveMeasurer, Recorder};
+use picobot_core::bot::{Body, Flight, MeasureStatus, Mode, MoveMeasurer, Recorder};
 use picobot_core::config::ClassTravel;
 use picobot_core::reach::{Move, Reach};
 use sim::*;
@@ -389,4 +389,40 @@ fn a_class_without_double_flash_does_not_measure_it() {
     cfg.double_flash = false;
     assert!(!plan_for(&cfg).contains(&"double_flash"));
     assert!(plan_for(&cfg).contains(&"flash"));
+}
+
+#[test]
+fn the_tap_sweep_measures_taps_and_pace() {
+    let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
+    b.walk = 4.0;
+    let mut m = MoveMeasurer::new(None, Box::new(|_, _| {}), Box::new(|_| {}));
+    m.run(&mut b, Mode::WalkTaps, None);
+    let table = b.state.reach.tap_table().expect("taps saved");
+    assert_eq!(table.rows().len(), 6);
+    // 50 px/s: a 120 ms tap carries 6 px, and the turn-only first tap of
+    // each direction change is not counted.
+    let r = table
+        .rows()
+        .iter()
+        .find(|r| (r.secs - 0.12).abs() < 1e-9)
+        .unwrap();
+    assert!((r.dx - 6.0).abs() < 0.6, "{r:?}");
+    // 4 px per 0.1 s sleep while a key is held.
+    let w = b.state.reach.walk_stats().expect("pace saved");
+    assert!((w.speed - 40.0).abs() < 4.0, "{w:?}");
+}
+
+#[test]
+fn nudge_closes_in_with_measured_taps() {
+    let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
+    assert!(!b.nudge_to(113.0, 1.0)); // no table yet
+    let rows: Vec<serde_json::Value> = [(30, 1.5), (50, 2.5), (120, 6.0), (260, 13.0)]
+        .iter()
+        .map(|(ms, dx)| serde_json::json!({"ms": ms, "n": 4, "dx": dx, "sd": 0.3}))
+        .collect();
+    b.state.reach.set_profile("walk_taps", rows);
+    assert!(b.nudge_to(113.0, 1.0));
+    assert!((b.pos.0 - 113.0).abs() <= 1.5, "{}", b.pos.0);
+    assert!(b.nudge_to(104.0, 1.0)); // back the other way (a turn tap first)
+    assert!((b.pos.0 - 104.0).abs() <= 1.5, "{}", b.pos.0);
 }
