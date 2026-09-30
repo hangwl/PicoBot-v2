@@ -426,3 +426,39 @@ fn nudge_closes_in_with_measured_taps() {
     assert!(b.nudge_to(104.0, 1.0)); // back the other way (a turn tap first)
     assert!((b.pos.0 - 104.0).abs() <= 1.5, "{}", b.pos.0);
 }
+
+/// A recorder whose flights always show the same arc.
+struct ArcRecorder(HashMap<String, f64>);
+
+impl Recorder for ArcRecorder {
+    fn start(&mut self) {
+        self.0.clear();
+    }
+    fn mark(&mut self, name: &str) {
+        self.0.insert(name.into(), 0.1);
+    }
+    fn stop(&mut self) -> Flight {
+        flight_arc(10.0, Some(self.0.clone()))
+    }
+}
+
+#[test]
+fn the_skill_sweep_measures_how_far_a_skill_moves_the_landing() {
+    let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
+    b.state.skills = picobot_core::skills::SkillBook::new(vec![
+        picobot_core::skills::Skill::new("pull", "x"),
+        picobot_core::skills::Skill {
+            stance: picobot_core::skills::Stance::Ground,
+            ..picobot_core::skills::Skill::new("slam", "y")
+        },
+    ]);
+    b.skill_fx.insert("x".into(), -12.0);
+    let rec: Box<dyn Recorder + Send> = Box::new(ArcRecorder(HashMap::new()));
+    let mut m = MoveMeasurer::new(Some(rec), Box::new(|_, _| {}), Box::new(|_| {}));
+    m.run(&mut b, Mode::SkillEffects, None);
+    let fx = b.state.reach.skill_effects();
+    // The ground-only skill isn't measured; the other pulls the landing back 12px.
+    assert_eq!(fx.len(), 1, "{fx:?}");
+    assert_eq!(fx[0].skill, "pull");
+    assert!((fx[0].dx + 12.0).abs() < 0.6, "{:?}", fx[0]);
+}

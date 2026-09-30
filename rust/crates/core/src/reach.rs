@@ -371,6 +371,16 @@ impl ReachModel {
         crate::taps::TapTable::from_rows(rows)
     }
 
+    /// What each measured skill does to a flash jump (see `effects`).
+    pub fn skill_effects(&self) -> Vec<crate::effects::SkillEffect> {
+        self.profiles
+            .get("skill_effects")
+            .and_then(|p| p.get("rows"))
+            .and_then(Value::as_array)
+            .map(|rows| crate::effects::SkillEffect::from_rows(rows))
+            .unwrap_or_default()
+    }
+
     /// The measured walking pace and slide, if saved.
     pub fn walk_stats(&self) -> Option<crate::taps::WalkStats> {
         let rows = self.profiles.get("walk_speed")?.get("rows")?.as_array()?;

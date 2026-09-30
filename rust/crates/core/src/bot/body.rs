@@ -142,6 +142,9 @@ pub struct BotState {
     /// Learned minimap px one flash weave covers.
     pub hop_px: f64,
     pub travel_attack_at: f64,
+    /// Px a skill may shift the current move's landing (back, forward),
+    /// while a flash is planned onto a platform; None = unconstrained.
+    pub air_slack: Option<(f64, f64)>,
     /// When each attack was cast, over the last `RATE_WINDOW_S`.
     pub attack_log: std::collections::VecDeque<f64>,
     pub anchor_idx: usize,
@@ -177,6 +180,7 @@ impl BotState {
             last_teleport: f64::NEG_INFINITY,
             hop_px: 14.0,
             travel_attack_at: f64::NEG_INFINITY,
+            air_slack: None,
             attack_log: Default::default(),
             anchor_idx: 0,
             travel_target: None,
@@ -373,11 +377,24 @@ pub trait Body {
     fn pick_attack(&mut self, w: Window) -> Option<Skill> {
         let now = self.now();
         let st = self.state();
+        // In the air, a skill measured to shift the landing further than the
+        // move has room for would land it off the platform.
+        let effects = match (w, st.air_slack) {
+            (Window::Air, Some(slack)) => Some((slack, st.reach.skill_effects())),
+            _ => None,
+        };
         let ready: Vec<Skill> = st
             .skills
             .ready_attacks(now)
             .into_iter()
             .filter(|s| w.allows(s.stance) && s.weight > 0.0)
+            .filter(|s| match &effects {
+                Some(((back, fwd), all)) => all
+                    .iter()
+                    .find(|e| e.skill == s.name)
+                    .is_none_or(|e| e.fits(*back, *fwd)),
+                None => true,
+            })
             .collect();
         let with_cd: Vec<&Skill> = ready.iter().filter(|s| s.cooldown > 0.0).collect();
         let pool: Vec<&Skill> = if with_cd.is_empty() {

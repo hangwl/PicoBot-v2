@@ -274,6 +274,24 @@ Skills also carry a `stance` (`ground`, `air`, or `any` — the default)
 and a `weight` (default 1), stored only when not default. The attack
 scheduler (windows, above) uses them.
 
+### Skill effects
+
+Some attacks change a flash: they hold the character up, or shift where
+it lands. `measure|profile|effects` (flash-jump classes, with flight
+recording) flashes plainly a few times, then with each attack skill that
+isn't ground-only cast just after the re-press — where an attack window
+casts it — and saves per skill the landing shift toward the jump (`dx`,
+negative = pulled back), the airtime added (`hang`) and the peak change
+(`rise`) as `profiles.skill_effects`. A skill that needs a long cooldown
+is measured once, one that is on cooldown over 40 s is skipped.
+
+While a flash is planned onto a platform, an air window only picks
+skills whose measured shift fits the room left: the navigator sets
+`air_slack` (px the landing may move back and forward, from the target
+platform's ends with a 6 px margin) for each flash leg, and the weave
+sets it from the weave bounds. Unmeasured skills aren't held back. Ground
+windows ignore it.
+
 ### Walk taps
 
 `measure|profile|walk` (Setup → Measure moves → Walk taps) sweeps

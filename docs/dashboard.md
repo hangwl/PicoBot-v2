@@ -91,6 +91,9 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     While measuring, the top bar says so and Start bot is replaced.
     Flash classes also get **Up-flash timing**: a sweep button and the
     per-delay peaks (live while sweeping, then the saved sweep).
+    Every class also gets **Walk taps** (tap lengths, pace), and flash
+    classes **Skill effects** (what each air attack does to a flash;
+    shown on the Skills page too).
   - **Patrol** — loop order + temperature, and per-anchor **stats**
     (visits, misses, skips by reason; Reset).
   - **Attacks** — how often a move and a landing carry attacks, the

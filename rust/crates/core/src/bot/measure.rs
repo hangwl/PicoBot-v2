@@ -13,7 +13,9 @@ use serde_json::{json, Map, Value};
 use super::body::{Body, Dir};
 use super::flight::{Flight, FlightRecorder};
 use crate::config::{BotConfig, ClassTravel};
+use crate::effects::{effect_of, Glide};
 use crate::reach::Move;
+use crate::skills::{Skill, SkillKind, Stance};
 use crate::vision::platform_span_at;
 
 const FLASH_PLAN: &[&str] = &["flash", "double_flash", "jump", "rope_lift", "up_flash"];
@@ -28,6 +30,10 @@ pub const PROFILE_CLEAR_PX: f64 = 45.0;
 /// Walk-tap sweep: key-hold lengths (ms) and the measured taps for each.
 pub const TAP_MS: [u32; 6] = [30, 50, 80, 120, 180, 260];
 pub const TAP_REPS: usize = 4;
+/// Skill-effect flashes: each is measured this many times, and needs this
+/// much platform ahead.
+const EFFECT_REPS: usize = 3;
+const EFFECT_ROOM_PX: f64 = 70.0;
 /// A tap sweep stays this far from a platform end (turning round before it).
 const TAP_ROOM_PX: f64 = 30.0;
 
@@ -75,6 +81,7 @@ pub enum Mode {
     Moves,
     UpFlashProfile,
     WalkTaps,
+    SkillEffects,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -191,6 +198,7 @@ impl MoveMeasurer {
         match self.mode {
             Mode::UpFlashProfile => return self.profile(body),
             Mode::WalkTaps => return self.walk_taps(body),
+            Mode::SkillEffects => return self.skill_effects(body),
             Mode::Moves => {}
         }
         let mut plan: Vec<&str> = plan_for(body.config()).to_vec();
@@ -461,6 +469,194 @@ impl MoveMeasurer {
             ));
         }
         Got(flight)
+    }
+
+    // -- Skill effects -------------------------------------------------------------------
+    /// What each air-capable attack does to a flash jump: plain flashes
+    /// for a baseline, then flashes with the skill cast a moment after the
+    /// re-press — the same moment an attack window casts it.
+    fn skill_effects<B: Body + ?Sized>(&mut self, body: &mut B) {
+        if self.recorder.is_none() {
+            (self.emit)("measure", "skill effects need flight recording");
+            return;
+        }
+        let cfg = body.config();
+        if cfg.class_travel != ClassTravel::Flash || !cfg.flash_jump_enabled {
+            (self.emit)(
+                "measure",
+                "skill effects are measured for flash-jump classes",
+            );
+            return;
+        }
+        let skills: Vec<Skill> = body
+            .state_ref()
+            .skills
+            .skills()
+            .iter()
+            .filter(|s| matches!(s.kind, SkillKind::Attack | SkillKind::Movement))
+            .filter(|s| s.stance != Stance::Ground)
+            .cloned()
+            .collect();
+        if skills.is_empty() {
+            (self.emit)("measure", "no attack skills that can be cast in the air");
+            return;
+        }
+        let Some(start) = settle(body, 0.9) else {
+            (self.emit)("measure", "player dot not visible");
+            return;
+        };
+        let graph = body.graph().expect("checked before the run");
+        let Some(pi) = graph.locate(start.0, start.1) else {
+            (self.emit)("measure", "stand on a drawn platform first");
+            return;
+        };
+        let plat = graph.platforms[pi];
+        if plat.x1 - plat.x0 < 2.0 * EFFECT_ROOM_PX {
+            (self.emit)(
+                "measure",
+                &format!(
+                    "this platform is too short — stand on one at least {:.0}px long",
+                    2.0 * EFFECT_ROOM_PX
+                ),
+            );
+            return;
+        }
+        (self.emit)(
+            "measure",
+            &format!(
+                "measuring {} skill(s) in the air — keep the game focused",
+                skills.len()
+            ),
+        );
+        let mut base: Vec<Glide> = Vec::new();
+        let mut with: Vec<Glide> = Vec::new();
+        let mut rows: Vec<Value> = Vec::new();
+        let mut plan: Vec<Option<&Skill>> = vec![None; EFFECT_REPS];
+        for s in &skills {
+            let reps = if s.cooldown <= 12.0 { EFFECT_REPS } else { 1 };
+            plan.extend(std::iter::repeat_n(Some(s), reps));
+        }
+        for (i, cast) in plan.iter().enumerate() {
+            if !body.should_continue() || !body.focused() {
+                (self.emit)("measure", "measurement stopped");
+                break;
+            }
+            self.current = Some(cast.map_or("plain flash".into(), |s| s.name.clone()));
+            self.publish(body);
+            if let Some(s) = cast {
+                let now = body.now();
+                let wait = body.state().skills.remaining(&s.name, now);
+                if wait > 40.0 {
+                    (self.emit)(
+                        "measure",
+                        &format!("{}: on cooldown for {wait:.0}s — skipped", s.name),
+                    );
+                    continue;
+                }
+                body.sleep(wait + 0.3);
+            }
+            let Some(pos) = settle(body, 0.9) else {
+                (self.emit)("measure", "player dot lost");
+                break;
+            };
+            let room = |d: Dir| match d {
+                Dir::Right => plat.x1 - pos.0,
+                Dir::Left => pos.0 - plat.x0,
+            };
+            let dir = [Dir::Right, Dir::Left]
+                .into_iter()
+                .max_by(|a, b| room(*a).total_cmp(&room(*b)))
+                .expect("two directions");
+            if room(dir) < EFFECT_ROOM_PX {
+                (self.emit)(
+                    "measure",
+                    "ran out of platform — stand near the middle of a longer one",
+                );
+                break;
+            }
+            match self.glide(body, dir, *cast) {
+                Skip(why) => (self.emit)("measure", &format!("a flash was discarded — {why}")),
+                Got(g) => match cast {
+                    None => base.push(g),
+                    Some(_) => with.push(g),
+                },
+            }
+            body.sleep_between(0.4, 0.28, 0.7);
+            let last_of_skill = plan
+                .get(i + 1)
+                .is_none_or(|n| n.map(|s| &s.name) != cast.map(|s| &s.name));
+            if let (Some(s), true) = (cast, last_of_skill) {
+                if let Some((e, sd)) = effect_of(&s.name, &base, &with) {
+                    rows.push(json!({
+                        "skill": e.skill,
+                        "n": e.n,
+                        "dx": round_to(e.dx, 1),
+                        "hang": round_to(e.hang, 2),
+                        "rise": round_to(e.rise, 1),
+                        "sd": round_to(sd, 1),
+                    }));
+                    self.profile_rows = rows.clone();
+                    self.publish(body);
+                }
+                with.clear();
+            }
+        }
+        if rows.is_empty() {
+            (self.emit)("measure", "no skill effects recorded");
+            return;
+        }
+        body.state().reach.set_profile("skill_effects", rows);
+        (self.emit)("measure", "skill effects saved");
+    }
+
+    /// One flash jump toward `dir`, with `skill` cast after the re-press.
+    fn glide<B: Body + ?Sized>(
+        &mut self,
+        body: &mut B,
+        dir: Dir,
+        skill: Option<&Skill>,
+    ) -> Attempt<Glide> {
+        let Some(start) = settle(body, 0.9) else {
+            return Skip("player dot not visible".into());
+        };
+        let rec = self
+            .recorder
+            .as_deref_mut()
+            .expect("flights need a recorder");
+        rec.start();
+        body.sleep(0.12);
+        rec.mark("jump");
+        let jk = body.flash_key();
+        body.keys().key_down(dir.key());
+        body.keys().press(&jk, None);
+        let gap = body.repress(body.config().flash_repress_seconds);
+        body.sleep(gap);
+        body.keys().press(&jk, None);
+        if let Some(s) = skill {
+            body.sleep_between(0.12, 0.09, 0.16);
+            body.keys().press(&s.key, s.hold);
+            let now = body.now();
+            body.state().skills.mark_used(&s.name, now);
+        }
+        body.sleep(0.9);
+        body.keys().key_up(dir.key());
+        let land = settle(body, 1.5);
+        let flight = rec.stop();
+        let Some(land) = land else {
+            return Skip("player dot lost".into());
+        };
+        if (land.1 - start.1).abs() > 3.0 {
+            return Skip("it landed on another row".into());
+        }
+        let (Some((air, _)), Some((_, peak))) = (flight.landing(), flight.peak()) else {
+            return Skip("no flight recorded — is the dot visible?".into());
+        };
+        let sign = if dir == Dir::Right { 1.0 } else { -1.0 };
+        Got(Glide {
+            dx: (land.0 - start.0) * sign,
+            air,
+            peak,
+        })
     }
 
     // -- Walk taps and pace ---------------------------------------------------------------

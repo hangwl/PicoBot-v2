@@ -8,6 +8,7 @@
 pub mod anchor_stats;
 pub mod bot;
 pub mod config;
+pub mod effects;
 pub mod error;
 pub mod fileio;
 pub mod fuzzy;

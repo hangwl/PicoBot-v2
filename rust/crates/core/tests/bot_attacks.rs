@@ -135,3 +135,47 @@ fn casts_are_counted_and_age_out() {
     b.sleep(120.0);
     assert_eq!(b.attack_rate(), 0.0);
 }
+
+fn with_effect(skill: &str, dx: f64) -> Sim {
+    let mut b = sim_with(vec![
+        skill_named(skill, Stance::Any),
+        skill_named("plain", Stance::Any),
+    ]);
+    b.state.reach.set_profile(
+        "skill_effects",
+        vec![serde_json::json!({"skill": skill, "n": 3, "dx": dx, "hang": 0.4, "rise": 0.0})],
+    );
+    b
+}
+
+fn skill_named(name: &str, stance: Stance) -> Skill {
+    skill(name, stance, 1.0)
+}
+
+#[test]
+fn a_skill_that_would_overshoot_the_landing_is_held_back_in_the_air() {
+    let mut b = with_effect("pull", -12.0);
+    let names = |b: &mut Sim| -> std::collections::HashSet<String> {
+        (0..200)
+            .filter_map(|_| b.pick_attack(Window::Air))
+            .map(|s| s.name)
+            .collect()
+    };
+    assert!(names(&mut b).contains("pull")); // no slack set: unconstrained
+    b.state.air_slack = Some((5.0, 5.0));
+    let n = names(&mut b);
+    assert!(!n.contains("pull") && n.contains("plain"), "{n:?}");
+    b.state.air_slack = Some((15.0, 5.0));
+    assert!(names(&mut b).contains("pull")); // room to be pulled back
+}
+
+#[test]
+fn slack_only_limits_the_air_window() {
+    let mut b = with_effect("pull", -12.0);
+    b.state.air_slack = Some((0.0, 0.0));
+    let n: std::collections::HashSet<String> = (0..200)
+        .filter_map(|_| b.pick_attack(Window::Ground))
+        .map(|s| s.name)
+        .collect();
+    assert!(n.contains("pull"));
+}

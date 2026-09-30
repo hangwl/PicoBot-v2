@@ -83,6 +83,18 @@ export interface SweepRow {
   air: number | null;
 }
 
+/** What a skill does to a flash jump cast in the air (measured). */
+export interface SkillEffectRow {
+  skill: string;
+  n: number;
+  /** Landing shift toward the jump, px (negative: pulled back). */
+  dx: number;
+  /** Airtime added, s. */
+  hang: number;
+  rise: number;
+  sd: number;
+}
+
 /** One walk-tap length and how far it carries (minimap px). */
 export interface TapRow {
   ms: number;
@@ -100,7 +112,7 @@ export interface MeasureState {
   /** The one move being measured, or null for the whole plan. */
   only: string | null;
   /** Live rows of the sweep in progress. */
-  profile: (SweepRow | TapRow)[];
+  profile: (SweepRow | TapRow | SkillEffectRow)[];
   /** Saved sweeps by name (`up_flash`, `walk_taps`, `walk_speed`). */
   profiles: Record<string, { at: number; rows: any[] }>;
 }
