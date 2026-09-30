@@ -224,6 +224,8 @@ pub struct BotConfig {
     pub attack_keys: Vec<String>,
     pub buff_keys: Vec<String>,
     pub buff_interval_seconds: f64,
+    /// Telegram status message every this many minutes while running (0 = off).
+    pub heartbeat_minutes: f64,
     pub jump_key: String,
     pub up_jump_skill_key: Option<String>,
     pub up_jump_skill_cooldown: f64,
@@ -290,6 +292,7 @@ impl Default for BotConfig {
             attack_keys: vec!["a".into()],
             buff_keys: Vec::new(),
             buff_interval_seconds: 60.0,
+            heartbeat_minutes: 30.0,
             jump_key: "alt".into(),
             up_jump_skill_key: None,
             up_jump_skill_cooldown: 3.0,
@@ -415,6 +418,7 @@ impl BotConfig {
         }
         for (name, slot) in [
             ("buff_interval_seconds", &mut cfg.buff_interval_seconds),
+            ("heartbeat_minutes", &mut cfg.heartbeat_minutes),
             ("up_jump_skill_cooldown", &mut cfg.up_jump_skill_cooldown),
             ("nav_up_flash_px", &mut cfg.nav_up_flash_px),
             ("nav_rope_lift_px", &mut cfg.nav_rope_lift_px),
@@ -607,6 +611,7 @@ impl BotConfig {
             "attack_keys": self.attack_keys,
             "buff_keys": self.buff_keys,
             "buff_interval_seconds": self.buff_interval_seconds,
+            "heartbeat_minutes": self.heartbeat_minutes,
             "jump_key": self.jump_key,
             "up_jump_skill_key": self.up_jump_skill_key,
             "up_jump_skill_cooldown": self.up_jump_skill_cooldown,

@@ -58,6 +58,20 @@ fn a_long_pause_raises_the_watchdog_alert() {
 }
 
 #[test]
+fn a_heartbeat_reports_the_session_and_can_be_turned_off() {
+    let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+    b.stop_at = 2000.0;
+    Machine::default().run(&mut b);
+    assert!(b.log_has("Heartbeat:") && b.log_has("visits"));
+
+    let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+    b.cfg.heartbeat_minutes = 0.0;
+    b.stop_at = 2000.0;
+    Machine::default().run(&mut b);
+    assert!(!b.log_has("Heartbeat:"));
+}
+
+#[test]
 fn grind_without_a_rotation_never_leaves_grind() {
     let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
     b.state.travel_target = Some(0);

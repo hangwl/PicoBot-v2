@@ -134,6 +134,8 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   up-side or double flash rarely chains on your server.
 - `vert_jump_interval` — minimum gap between vertical jump attempts in
   non-graph movement.
+- `heartbeat_minutes` — Telegram status message every N minutes while
+  the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest

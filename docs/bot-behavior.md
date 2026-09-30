@@ -298,3 +298,10 @@ focus loss, rune marker on the minimap, other players, a map transfer
 (loading blackout) mid-leg. Solve rune checks via the dashboard's
 remote input pad. `pause_on_lie_detector` is a documented stub — keep it
 off until template images exist.
+
+Telegram hears about: a hazard pause, every stop (with its reason and
+the run's summary), a failed start, a crash (caught; keys released), a
+lost serial port, and the watchdog's three episodes — paused over 60 s,
+no player dot for 30 s, standing still for 45 s while moving states run
+(each once per episode). While running, a heartbeat message (map, state,
+uptime, visits, misses, skips, pauses) goes out every `heartbeat_minutes`.
