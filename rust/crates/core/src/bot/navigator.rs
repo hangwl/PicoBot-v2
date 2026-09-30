@@ -259,6 +259,7 @@ impl Navigator {
             );
         }
         if ok {
+            body.ground_window();
             LegStatus::Ok
         } else {
             LegStatus::Failed

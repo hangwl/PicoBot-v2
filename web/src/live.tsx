@@ -156,6 +156,7 @@ function sessionLine(x: SessionStats): string {
   const rate = tries ? ` (${Math.round((100 * x.misses) / tries)}%)` : "";
   return `up ${dur(x.up)} · ${x.visits} visits · ${x.misses} missed${rate}` +
     (x.skips ? ` · ${x.skips} skipped` : "") +
+    (x.apm != null ? ` · ${x.apm} attacks/min` : "") +
     (x.pauses ? ` · ${x.pauses} pause${x.pauses === 1 ? "" : "s"} (${dur(x.paused)})` : "");
 }
 

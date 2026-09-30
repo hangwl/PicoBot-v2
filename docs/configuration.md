@@ -140,6 +140,11 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
 - `stop_when_map_unrecognized` — pause (and alert) when the title read
   names no saved map and none is pinned. Turn it off only to farm an
   unsaved map with the global rotation.
+- `move_attack_chance` / `ground_attack_chance` (0–1; default 1 / 0) —
+  the odds a move or a landing opens an attack window;
+  `weave_double_chance` is the chance a firing window casts two;
+  `target_attacks_per_min` (default 0 = off) steers those odds toward a
+  rate. Setup → Attacks edits them (`attacks|set`).
 - `heartbeat_minutes` — Telegram status message every N minutes while
   the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.

@@ -57,6 +57,8 @@ export interface SessionStats {
   skips: number;
   pauses: number;
   paused: number;
+  /** Attacks cast in the last minute. */
+  apm?: number;
 }
 export type ViewMode = "minimap" | "window" | "title";
 export type LogFilter = "info" | "warn" | "error" | "all";
@@ -204,6 +206,10 @@ export interface AppState {
   stopRune: boolean;
   stopMap: boolean;
   heartbeat: number;
+  moveAttack: number;
+  groundAttack: number;
+  doubleChance: number;
+  targetApm: number;
   logs: EvtItem[];
   logFilter: LogFilter;
   viewMode: ViewMode;
@@ -263,6 +269,10 @@ const initial: AppState = {
   stopRune: true,
   stopMap: true,
   heartbeat: 30,
+  moveAttack: 1,
+  groundAttack: 0,
+  doubleChance: 0.4,
+  targetApm: 0,
   logs: [],
   logFilter: "info",
   viewMode: "minimap",
@@ -590,6 +600,10 @@ function onEvent(p: Record<string, any> & { event: string }) {
         stopRune: c.stop_when_rune_appears !== false,
         stopMap: c.stop_when_map_unrecognized !== false,
         heartbeat: (c.heartbeat_minutes as number) ?? 30,
+        moveAttack: (c.move_attack_chance as number) ?? 1,
+        groundAttack: (c.ground_attack_chance as number) ?? 0,
+        doubleChance: (c.weave_double_chance as number) ?? 0.4,
+        targetApm: (c.target_attacks_per_min as number) ?? 0,
       });
       return;
     }

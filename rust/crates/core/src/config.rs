@@ -250,6 +250,12 @@ pub struct BotConfig {
     pub combo_repress_seconds: f64,
     // Weave
     pub weave_double_chance: f64,
+    /// Odds a move (flash hop, blink, hop) carries an attack window.
+    pub move_attack_chance: f64,
+    /// Odds a landing carries an attack window.
+    pub ground_attack_chance: f64,
+    /// Attacks per minute to steer toward (0 = off).
+    pub target_attacks_per_min: f64,
     pub weave_range_px: i64,
     pub weave_edge_margin_px: i64,
     // Vision
@@ -318,6 +324,9 @@ impl Default for BotConfig {
             flash_repress_seconds: 0.15,
             combo_repress_seconds: 0.16,
             weave_double_chance: 0.4,
+            move_attack_chance: 1.0,
+            ground_attack_chance: 0.0,
+            target_attacks_per_min: 0.0,
             weave_range_px: 24,
             weave_edge_margin_px: 4,
             minimap_colors: MinimapColors::default(),
@@ -437,6 +446,9 @@ impl BotConfig {
             ("nav_double_gap_px", &mut cfg.nav_double_gap_px),
             ("vert_jump_interval", &mut cfg.vert_jump_interval),
             ("weave_double_chance", &mut cfg.weave_double_chance),
+            ("move_attack_chance", &mut cfg.move_attack_chance),
+            ("ground_attack_chance", &mut cfg.ground_attack_chance),
+            ("target_attacks_per_min", &mut cfg.target_attacks_per_min),
             ("anchor_float_px", &mut cfg.anchor_float_px),
             ("walk_band_px", &mut cfg.walk_band_px),
             ("flash_repress_seconds", &mut cfg.flash_repress_seconds),
@@ -649,6 +661,9 @@ impl BotConfig {
             "flash_repress_seconds": self.flash_repress_seconds,
             "combo_repress_seconds": self.combo_repress_seconds,
             "weave_double_chance": self.weave_double_chance,
+            "move_attack_chance": self.move_attack_chance,
+            "ground_attack_chance": self.ground_attack_chance,
+            "target_attacks_per_min": self.target_attacks_per_min,
             "weave_range_px": self.weave_range_px,
             "weave_edge_margin_px": self.weave_edge_margin_px,
             "minimap_colors": self.minimap_colors.to_json(),

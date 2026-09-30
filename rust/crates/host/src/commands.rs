@@ -92,6 +92,7 @@ impl Host {
             _ if msg.starts_with("patrol|policy|") => self.patrol_set(Some(&arg(2)), None),
             _ if msg.starts_with("safety|set|") => self.safety_set(&arg(2)),
             "notify|test" => self.notify_test(),
+            _ if msg.starts_with("attacks|set|") => self.attacks_set(&arg(2)),
             _ if msg.starts_with("layout|erase|") => self.layout_erase(msg),
             _ if msg.starts_with("patrol|temp|") => self.patrol_set(None, Some(&arg(2))),
             "map|stats|reset" => self.map_stats_reset(""),
@@ -396,6 +397,42 @@ impl Host {
             return;
         }
         self.bus.emit("bot", "safety settings saved");
+        self.send_config();
+    }
+
+    /// `attacks|set|{json}`: how often moves and landings carry attacks,
+    /// and the attack rate to steer toward.
+    fn attacks_set(&self, spec: &str) {
+        let Ok(Value::Object(want)) = serde_json::from_str::<Value>(spec) else {
+            self.bus
+                .emit("error", "attack settings must be a JSON object");
+            return;
+        };
+        let mut edits: Vec<(String, f64)> = Vec::new();
+        for (k, v) in &want {
+            let chance = matches!(
+                k.as_str(),
+                "move_attack_chance" | "ground_attack_chance" | "weave_double_chance"
+            );
+            match v.as_f64() {
+                Some(n) if chance && (0.0..=1.0).contains(&n) => edits.push((k.clone(), n)),
+                Some(n) if k == "target_attacks_per_min" && n >= 0.0 => edits.push((k.clone(), n)),
+                _ => {
+                    self.bus
+                        .emit("error", &format!("invalid attack setting: {k}"));
+                    return;
+                }
+            }
+        }
+        if let Err(e) = self.commit_bot(|bot| {
+            for (k, n) in edits {
+                bot.insert(k, n.into());
+            }
+        }) {
+            self.bus.emit("error", &e);
+            return;
+        }
+        self.bus.emit("bot", "attack settings saved");
         self.send_config();
     }
 

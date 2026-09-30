@@ -186,10 +186,9 @@ kit decides which moves exist and where attacks fire:
 Bot-controlled movement looks like a player farming, not a macro:
 
 - **Point to point = flash weaves** (`_flash_weave`): hold the direction,
-  jump, re-press mid-air (the flash jump), then **1–2 attacks** once the
-  flash has triggered (`weave_double_chance`, default 0.4 for two). An
-  attack before the re-press eats its input window and the flash never
-  fires.
+  jump, re-press mid-air (the flash jump), then an **attack window**
+  once the flash has triggered (see below). An attack before the
+  re-press eats its input window and the flash never fires.
 - `move_to_point` **travels by flash weaves** whenever the target is
   farther than `walk_band_px` (default 8) **and the platform leaves a hop
   of room ahead**; walking is only the final precise approach (and future
@@ -220,11 +219,22 @@ Bot-controlled movement looks like a player farming, not a macro:
   contiguous delays within 1 px of the highest peak), log-normally varied
   around its middle; without a sweep, 0.16–0.30 s around 0.22 s. Up goes
   down ~40 ms before the re-press.
-- **Every flash move attacks**: gap flashes, double flashes, up flashes
-  and up-then-side flashes all weave 1–2 attacks once the flash has
-  triggered (`_after_flash`). Attacks never fire outside a flash move in
-  the moving paths — with no player dot the bot waits instead of
-  attacking in place. There is no stationary mode.
+- **Attack windows** (`Body::attack_window`): an *air* window opens once
+  a flash has triggered (gap, double, up and up-then-side flashes; a
+  blink or a class without air attacks gets a *ground* window after
+  landing instead), and a *ground* window opens after every successful
+  landing. A window fires with odds — `move_attack_chance` (default 1)
+  after a move, `ground_attack_chance` (default 0) after a landing — and
+  a firing window casts one attack, or two with `weave_double_chance`.
+  Each cast picks among ready attacks legal in the window (`stance`),
+  cooldown skills before spam, by `weight`. A ready skill tagged for
+  only that window's stance fires at least 85% of the time, so
+  ground-only skills get cast on landings. `target_attacks_per_min`
+  (off at 0) adds the shortfall to each window's odds and subtracts the
+  excess, over a one-minute count. With no player dot the bot waits
+  instead of attacking in place; there is no stationary mode. The
+  defaults reproduce the old behaviour: every move attacks, landings
+  don't.
 - Single-anchor and roam weaving use the same primitive, bouncing
   between the drawn platform's ends.
 - All gaps are log-normal (`timing.human_between`: clamped to the game's
@@ -261,9 +271,8 @@ Registered skills have `key`, `kind`, `cooldown`:
   it in `on_arrive`, or at any anchor that lists none.
 
 Skills also carry a `stance` (`ground`, `air`, or `any` — the default)
-and a `weight` (default 1). Both are stored only when not default. They
-are data for now: the attack scheduler that will use them (windows,
-odds, a target attack rate) isn't built yet.
+and a `weight` (default 1), stored only when not default. The attack
+scheduler (windows, above) uses them.
 
 ### Walk taps
 

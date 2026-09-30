@@ -93,6 +93,9 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     per-delay peaks (live while sweeping, then the saved sweep).
   - **Patrol** — loop order + temperature, and per-anchor **stats**
     (visits, misses, skips by reason; Reset).
+  - **Attacks** — how often a move and a landing carry attacks, the
+    second-attack chance and a target attacks-per-minute; the running
+    rate shows here and in the Session row.
   - **Safety** — the pause toggles (rune, other players, unrecognized
     map), the Telegram status interval (0 = off) and a **Send test
     alert** button. Home's status list shows the running **Session**
