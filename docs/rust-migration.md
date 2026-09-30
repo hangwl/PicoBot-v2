@@ -138,6 +138,17 @@ conversion.
   with the Python navigator, patrol, machine, flight and measure suites
   ported (81 tests), and a key-recording body checks the exact key
   sequences the Pico would receive (7 more).
+- **M7a** — done: the `picobot` binary serves the dashboard. HTTP
+  (`web/dist` with the live WS port filled in, SPA fallback, `/health`)
+  and the WebSocket (hello, ping/pong, shared replies) each bind
+  dual-stack and take the next free port. The event bus keeps the
+  history; the registry tracks each client's held keys and releases them
+  on disconnect; remote keys go to the Pico through a serial writer
+  thread; commands run in order on the `DashboardCommands` thread.
+  Handled so far: `bot|query`, `config|get`, `host|state|serial|window`,
+  `events|history`, `dash|fps`. Run it with
+  `cargo run -p picobot-host -- --root ..\..\PicoBot-v2` (it shares
+  `config.json` and `maps/` with the Python host: run one at a time).
 
 ## Milestones
 

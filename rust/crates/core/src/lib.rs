@@ -2,6 +2,9 @@
 //! a screen or a Pico. Modules arrive milestone by milestone (see
 //! `docs/rust-migration.md`).
 
+// `BotConfig::snapshot` is one large `json!` literal.
+#![recursion_limit = "256"]
+
 pub mod anchor_stats;
 pub mod bot;
 pub mod config;

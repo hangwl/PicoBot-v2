@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::error::{bad, Error, Result};
 use crate::fileio::write_text_atomic;
@@ -147,6 +147,15 @@ impl Default for MinimapColors {
 }
 
 impl MinimapColors {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "player": self.player,
+            "other_player": self.other_player,
+            "rune": self.rune,
+            "border": self.border,
+        })
+    }
+
     pub fn from_json(data: &Value) -> Result<Self> {
         let mut c = MinimapColors::default();
         let Some(o) = data.as_object() else {
@@ -179,10 +188,29 @@ pub enum ClassTravel {
     Walk,
 }
 
+impl ClassTravel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClassTravel::Flash => "flash",
+            ClassTravel::Teleport => "teleport",
+            ClassTravel::Walk => "walk",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatrolPolicy {
     Weighted,
     Greedy,
+}
+
+impl PatrolPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PatrolPolicy::Weighted => "weighted",
+            PatrolPolicy::Greedy => "greedy",
+        }
+    }
 }
 
 /// Tuning knobs for the bot, from `config.json["bot"]`.
@@ -568,6 +596,67 @@ impl BotConfig {
 
     /// `nav_reach.json`, or `nav_reach_<class>.json` when a class profile
     /// is active — each class learns its own move reach.
+    /// Every field with its effective value (the dashboard's `config`
+    /// event; Python's `asdict`).
+    pub fn snapshot(&self) -> Value {
+        let rect = |r: Option<[i64; 4]>| r.map_or(Value::Null, |r| json!(r));
+        json!({
+            "stop_when_players_appear": self.stop_when_players_appear,
+            "stop_when_rune_appears": self.stop_when_rune_appears,
+            "pause_on_lie_detector": self.pause_on_lie_detector,
+            "attack_keys": self.attack_keys,
+            "buff_keys": self.buff_keys,
+            "buff_interval_seconds": self.buff_interval_seconds,
+            "jump_key": self.jump_key,
+            "up_jump_skill_key": self.up_jump_skill_key,
+            "up_jump_skill_cooldown": self.up_jump_skill_cooldown,
+            "walk_band_px": self.walk_band_px,
+            "nav_threshold_px": self.nav_threshold_px,
+            "nav_stuck_limit": self.nav_stuck_limit,
+            "vert_jump_interval": self.vert_jump_interval,
+            "nav_up_flash_px": self.nav_up_flash_px,
+            "nav_rope_lift_px": self.nav_rope_lift_px,
+            "nav_up_side_dx_px": self.nav_up_side_dx_px,
+            "nav_jump_px": self.nav_jump_px,
+            "nav_gap_px": self.nav_gap_px,
+            "nav_double_gap_px": self.nav_double_gap_px,
+            "rope_penalty": self.rope_penalty,
+            "patrol_policy": self.patrol_policy.as_str(),
+            "patrol_weight_temp": self.patrol_weight_temp,
+            "nav_reach_file": self.nav_reach_file,
+            "anchor_float_px": self.anchor_float_px,
+            "flash_repress_seconds": self.flash_repress_seconds,
+            "combo_repress_seconds": self.combo_repress_seconds,
+            "weave_double_chance": self.weave_double_chance,
+            "weave_range_px": self.weave_range_px,
+            "weave_edge_margin_px": self.weave_edge_margin_px,
+            "minimap_colors": self.minimap_colors.to_json(),
+            "minimap_region": rect(self.minimap_region),
+            "skills": crate::skills::skills_to_json(&self.skills),
+            "rotation": self.rotation.to_json(),
+            "flash_jump_enabled": self.flash_jump_enabled,
+            "flash_jump_key": self.flash_jump_key,
+            "travel_style": self.travel_style,
+            "class_profiles": self.class_profiles,
+            "class_active": self.class_active,
+            "class_travel": self.class_travel.as_str(),
+            "air_attacks": self.air_attacks,
+            "teleport_key": self.teleport_key,
+            "teleport_cooldown": self.teleport_cooldown,
+            "nav_teleport_dx": self.nav_teleport_dx,
+            "nav_teleport_rise": self.nav_teleport_rise,
+            "maps_dir": self.maps_dir,
+            "auto_select_map": self.auto_select_map,
+            "active_map": self.active_map,
+            "marker_inset_px": self.marker_inset_px,
+            "name_ocr": self.name_ocr,
+            "minimap_name_region": rect(self.minimap_name_region),
+            "name_scan_px": self.name_scan_px,
+            "debug_capture_dir": self.debug_capture_dir,
+            "debug_capture_max_events": self.debug_capture_max_events,
+        })
+    }
+
     pub fn reach_path(&self) -> String {
         if self.class_active != "default"
             && !self.class_active.is_empty()

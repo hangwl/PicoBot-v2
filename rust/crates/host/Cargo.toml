@@ -10,5 +10,9 @@ name = "picobot"
 path = "src/main.rs"
 
 [dependencies]
+axum = { version = "0.8.9", features = ["ws"] }
 picobot-core = { path = "../core" }
 picobot-io = { path = "../io" }
+socket2 = { version = "0.6.5", features = ["all"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "signal"] }
+serde_json.workspace = true
