@@ -100,6 +100,8 @@ pub struct Sim {
     /// Skill key -> px it shifts a flash's landing (toward the jump) when
     /// cast with a direction held.
     pub skill_fx: std::collections::HashMap<String, f64>,
+    /// Skill key -> px it moves a standing character, the way it faces.
+    pub ground_fx: std::collections::HashMap<String, f64>,
     /// Every takeoff from standing: "jump", or the up flash's re-press
     /// delay ("none" for the patrol's own timing) — shared with a test
     /// recorder.
@@ -158,6 +160,7 @@ impl Sim {
             tap_speed: 50.0,
             facing: None,
             skill_fx: Default::default(),
+            ground_fx: Default::default(),
             flights: Arc::default(),
             stop: Arc::default(),
             stop_on: None,
@@ -295,6 +298,17 @@ impl Keys for Sim {
         if let (Some(dx), Some(_)) = (self.skill_fx.get(key).copied(), self.held) {
             let s = self.sign();
             self.air(s * dx, 0.0);
+            return true;
+        }
+        if let (Some(dx), None, Some(face)) =
+            (self.ground_fx.get(key).copied(), self.held, self.facing)
+        {
+            let sign = if face == Dir::Right { 1.0 } else { -1.0 };
+            let g = self.physics();
+            if let Some(i) = g.locate(self.pos.0, self.pos.1) {
+                let p = g.platforms[i];
+                self.pos.0 = (self.pos.0 + sign * dx).clamp(p.x0, p.x1);
+            }
             return true;
         }
         if let (Some(h), "left" | "right") = (hold, key) {

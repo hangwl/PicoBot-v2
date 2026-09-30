@@ -80,8 +80,7 @@ export function MeasurePage({ s }: { s: AppState }) {
       <p class="hint">Switching away from the game also stops a measurement.</p>
       {plan.includes("up_flash") && <UpFlashSweep s={s} />}
       <WalkTaps s={s} />
-      {s.profiles[s.classActive]?.travel !== "teleport" &&
-        s.profiles[s.classActive]?.travel !== "walk" && <SkillEffects s={s} />}
+      <SkillEffects s={s} />
     </div>
   );
 }
@@ -103,11 +102,12 @@ function sweepNote(r: SweepRow): string {
 }
 
 export function effectNote(e: SkillEffectRow): string {
+  const ground = e.where === "ground";
   const parts: string[] = [];
   if (Math.abs(e.dx) >= 3) {
-    parts.push(`${e.dx < 0 ? "pulls back" : "carries"} ${Math.abs(e.dx)}px`);
+    parts.push(`${ground ? "on the ground " : ""}${e.dx < 0 ? "pulls back" : "carries"} ${Math.abs(e.dx)}px`);
   } else {
-    parts.push("doesn't move the landing");
+    parts.push(ground ? "doesn't move you on the ground" : "doesn't move the landing");
   }
   if (e.hang >= 0.1) parts.push(`holds ${e.hang}s`);
   return parts.join(" · ");
@@ -120,17 +120,19 @@ function SkillEffects({ s }: { s: AppState }) {
   const rows = (live ? m.profile : saved?.rows ?? []) as SkillEffectRow[];
   return (
     <Section title="Skill effects" hint={<>
-        Stand in the middle of a drawn platform at least 140px long. The
-        character flashes a few times plainly, then with each attack skill
-        cast just after the flash triggers, and records how far the skill
-        moves the landing and how long it holds the character up. Attacks
-        that would carry a landing off its platform are then kept out of
-        that hop. Skills cast on the ground only are skipped.
+        Stand in the middle of a drawn platform at least 140px long. For
+        flash-jump classes the character flashes a few times plainly, then
+        with each attack skill cast just after the flash triggers, and
+        records how far the skill moves the landing and how long it holds
+        the character up. Then each skill that can be cast on the ground is
+        cast standing still, facing one way, to see how far it moves the
+        character. Attacks that would carry the character off its platform
+        are then kept out of that hop or landing.
     </>}>
       {rows.length > 0 && (
         <ul class="rows">
           {rows.map((r) => (
-            <li key={r.skill}>
+            <li key={`${r.skill}/${r.where ?? "air"}`}>
               <b>{r.skill}</b>
               <span class="pill">{effectNote(r)}</span>
             </li>

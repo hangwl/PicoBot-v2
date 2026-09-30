@@ -6,9 +6,10 @@ import { effectNote } from "./measure";
 
 export function SkillsPage({ s }: { s: AppState }) {
   const names = Object.keys(s.skills).sort();
-  const effects = new Map(
-    ((s.measure.profiles.skill_effects?.rows ?? []) as SkillEffectRow[]).map((e) => [e.skill, e]),
-  );
+  const effects = new Map<string, SkillEffectRow[]>();
+  for (const e of (s.measure.profiles.skill_effects?.rows ?? []) as SkillEffectRow[]) {
+    effects.set(e.skill, [...(effects.get(e.skill) ?? []), e]);
+  }
   return (
     <div class="form">
       <p class="muted">
@@ -35,9 +36,9 @@ export function SkillsPage({ s }: { s: AppState }) {
               {sk.stance && sk.stance !== "any" && (
                 <span class="pill">{sk.stance} only</span>
               )}
-              {effects.has(n) && (
-                <span class="pill">{effectNote(effects.get(n)!)}</span>
-              )}
+              {(effects.get(n) ?? []).map((e) => (
+                <span key={e.where ?? "air"} class="pill">{effectNote(e)}</span>
+              ))}
               {sk.weight != null && sk.weight !== 1 && (
                 <span class="pill">weight {sk.weight}</span>
               )}

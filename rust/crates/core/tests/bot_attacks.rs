@@ -179,3 +179,57 @@ fn slack_only_limits_the_air_window() {
         .collect();
     assert!(n.contains("pull"));
 }
+
+fn with_ground_effect(dx: f64) -> Sim {
+    // A sim with a drawn map, so the bot can look up the platform room.
+    let mut b = Sim::patrol(&[FLOOR], (100.0, 100.0), &[]);
+    b.state.skills = SkillBook::new(vec![
+        skill_named("rush", Stance::Any),
+        skill_named("plain", Stance::Any),
+    ]);
+    b.state.reach.set_profile(
+        "skill_effects",
+        vec![
+            serde_json::json!({"skill": "rush", "where": "ground", "n": 3, "dx": dx, "hang": 0.0}),
+        ],
+    );
+    b
+}
+
+fn ground_names(b: &mut Sim) -> std::collections::HashSet<String> {
+    (0..200)
+        .filter_map(|_| b.pick_attack(Window::Ground))
+        .map(|s| s.name)
+        .collect()
+}
+
+#[test]
+fn a_ground_skill_that_would_cross_the_platform_end_is_skipped_on_landings() {
+    let mut b = with_ground_effect(30.0);
+    b.pos = (100.0, 100.0);
+    assert!(ground_names(&mut b).contains("rush")); // plenty of room
+    b.pos = (190.0, 100.0);
+    let n = ground_names(&mut b);
+    assert!(!n.contains("rush") && n.contains("plain"), "{n:?}");
+}
+
+#[test]
+fn ground_effects_do_not_limit_the_air_window_and_air_ones_not_the_ground() {
+    let mut b = with_ground_effect(30.0);
+    b.pos = (190.0, 100.0);
+    b.state.air_slack = Some((0.0, 0.0));
+    let air: std::collections::HashSet<String> = (0..200)
+        .filter_map(|_| b.pick_attack(Window::Air))
+        .map(|s| s.name)
+        .collect();
+    assert!(air.contains("rush"));
+}
+
+#[test]
+fn a_leg_landing_slack_also_limits_ground_skills() {
+    let mut b = with_ground_effect(30.0);
+    b.pos = (100.0, 100.0);
+    b.state.air_slack = Some((5.0, 5.0)); // a tight landing on this move
+    let n = ground_names(&mut b);
+    assert!(!n.contains("rush"), "{n:?}");
+}

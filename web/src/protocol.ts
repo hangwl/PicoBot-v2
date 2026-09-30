@@ -86,6 +86,8 @@ export interface SweepRow {
 /** What a skill does to a flash jump cast in the air (measured). */
 export interface SkillEffectRow {
   skill: string;
+  /** Where it was measured; rows from before ground casts are air. */
+  where?: "air" | "ground";
   n: number;
   /** Landing shift toward the jump, px (negative: pulled back). */
   dx: number;

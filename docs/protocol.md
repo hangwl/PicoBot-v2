@@ -46,7 +46,7 @@ and follows the same view.
 | `nav|show|on\|off` / `nav|preview|x,y` | graph overlay + route preview (minimap px) |
 | `measure|start` / `measure|stop` / `measure|status` | move measurement (the moves the active class can use); `status` re-sends the `measure` event |
 | `measure|start|<move>` | measure one move of the class's plan (e.g. `rope_lift`); others keep their reach |
-| `measure|profile|effects` | skill-effect sweep (flash classes): how far each air-capable attack shifts a flash's landing and how long it holds; saves `profiles.skill_effects` in the reach file |
+| `measure|profile|effects` | skill-effect sweep: how far each attack shifts a flash's landing and how long it holds (flash classes), and how far each ground-castable attack moves a standing character; saves `profiles.skill_effects` (rows tagged `where: air\|ground`) in the reach file |
 | `measure|profile|walk` | walk-tap sweep then walking pace (stopped with `measure|stop`); saves `profiles.walk_taps` and `profiles.walk_speed` in the reach file |
 | `measure|profile|up_flash` | up-flash timing sweep (stopped with `measure|stop`); saves `profiles.up_flash` in the reach file |
 | `host|serial\|<port\|auto>` / `host|window|<title>` | connection |

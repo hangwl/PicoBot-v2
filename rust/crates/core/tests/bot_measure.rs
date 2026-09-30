@@ -456,9 +456,36 @@ fn the_skill_sweep_measures_how_far_a_skill_moves_the_landing() {
     let rec: Box<dyn Recorder + Send> = Box::new(ArcRecorder(HashMap::new()));
     let mut m = MoveMeasurer::new(Some(rec), Box::new(|_, _| {}), Box::new(|_| {}));
     m.run(&mut b, Mode::SkillEffects, None);
-    let fx = b.state.reach.skill_effects();
-    // The ground-only skill isn't measured; the other pulls the landing back 12px.
-    assert_eq!(fx.len(), 1, "{fx:?}");
+    let all = b.state.reach.skill_effects();
+    // In the air the ground-only skill isn't measured; the other pulls the
+    // landing back 12px. (Both are measured standing too: they don't move.)
+    let fx: Vec<_> = all.iter().filter(|e| !e.on_ground).collect();
+    assert_eq!(fx.len(), 1, "{all:?}");
     assert_eq!(fx[0].skill, "pull");
     assert!((fx[0].dx + 12.0).abs() < 0.6, "{:?}", fx[0]);
+    assert_eq!(all.iter().filter(|e| e.on_ground).count(), 2, "{all:?}");
+}
+
+#[test]
+fn the_skill_sweep_measures_ground_skills_from_standing() {
+    use picobot_core::skills::{Skill, SkillBook, Stance};
+    let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
+    b.state.skills = SkillBook::new(vec![
+        Skill {
+            stance: Stance::Ground,
+            ..Skill::new("rush", "x")
+        },
+        Skill {
+            stance: Stance::Air,
+            ..Skill::new("hover", "y")
+        },
+    ]);
+    b.ground_fx.insert("x".into(), 18.0);
+    // No recorder: the air half is skipped, the ground half still runs.
+    let mut m = MoveMeasurer::new(None, Box::new(|_, _| {}), Box::new(|_| {}));
+    m.run(&mut b, Mode::SkillEffects, None);
+    let fx = b.state.reach.skill_effects();
+    assert_eq!(fx.len(), 1, "{fx:?}");
+    assert_eq!((fx[0].skill.as_str(), fx[0].on_ground), ("rush", true));
+    assert!((fx[0].dx - 18.0).abs() < 0.6, "{:?}", fx[0]);
 }

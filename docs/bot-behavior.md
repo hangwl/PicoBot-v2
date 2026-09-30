@@ -276,21 +276,33 @@ scheduler (windows, above) uses them.
 
 ### Skill effects
 
-Some attacks change a flash: they hold the character up, or shift where
-it lands. `measure|profile|effects` (flash-jump classes, with flight
-recording) flashes plainly a few times, then with each attack skill that
-isn't ground-only cast just after the re-press — where an attack window
-casts it — and saves per skill the landing shift toward the jump (`dx`,
-negative = pulled back), the airtime added (`hang`) and the peak change
-(`rise`) as `profiles.skill_effects`. A skill that needs a long cooldown
-is measured once, one that is on cooldown over 40 s is skipped.
+Some attacks change a flash — they hold the character up or shift where
+it lands — and some move the character on the ground.
+`measure|profile|effects` measures both and saves `profiles.skill_effects`
+(rows carry `where`: `air`, or `ground`):
+
+- **In the air** (flash-jump classes, with flight recording): plain
+  flashes a few times, then with each skill that isn't ground-only cast
+  just after the re-press — where an attack window casts it. Per skill:
+  the landing shift toward the jump (`dx`, negative = pulled back), the
+  airtime added (`hang`) and the peak change (`rise`).
+- **On the ground** (every class): each skill that isn't air-only, cast
+  standing still after two short taps to face a direction, nothing held —
+  how a landing window casts it. Per skill: how far it moves the
+  character the way it faces (`dx`).
+
+A skill with a long cooldown is measured once; one on cooldown over 40 s
+is skipped.
 
 While a flash is planned onto a platform, an air window only picks
-skills whose measured shift fits the room left: the navigator sets
+skills whose measured air shift fits the room left: the navigator sets
 `air_slack` (px the landing may move back and forward, from the target
 platform's ends with a 6 px margin) for each flash leg, and the weave
-sets it from the weave bounds. Unmeasured skills aren't held back. Ground
-windows ignore it.
+sets it from the weave bounds. A ground window does the same with the
+skills' ground shifts: inside a leg it uses that landing's room, else the
+platform room either side of the character (one extra capture, only when
+a skill with a measured ground shift is in the kit). Unmeasured skills
+aren't held back.
 
 ### Walk taps
 

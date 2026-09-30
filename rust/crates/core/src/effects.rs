@@ -1,10 +1,12 @@
-//! What a skill does to a flash jump when cast in the air, as measured:
-//! how far it moves the landing and how long it holds the character up.
+//! What a skill does to the character, as measured: cast in the air during
+//! a flash jump (how far it moves the landing, how long it holds the
+//! character up) or from standing on the ground (how far it moves them).
 //!
 //! Stored as the reach-file profile `skill_effects`, rows
-//! `{skill, n, dx, hang, rise, sd}`: `dx` is the landing shift in the
-//! direction of the jump (negative = pulled back), `hang` the airtime
-//! added (s), `rise` the peak height change (px).
+//! `{skill, where, n, dx, hang, rise, sd}`: `where` is `air` (the default
+//! when absent) or `ground`; `dx` is the shift in the direction of the
+//! jump or the way the character faces (negative = pulled back), `hang`
+//! the airtime added (s), `rise` the peak height change (px).
 
 use serde_json::Value;
 
@@ -15,6 +17,8 @@ pub struct SkillEffect {
     pub hang: f64,
     pub rise: f64,
     pub n: u64,
+    /// Measured standing on the ground, not in a flash.
+    pub on_ground: bool,
 }
 
 /// A skill that moves the landing less than this (px) is treated as not
@@ -31,6 +35,7 @@ impl SkillEffect {
                     hang: r.get("hang").and_then(Value::as_f64).unwrap_or(0.0),
                     rise: r.get("rise").and_then(Value::as_f64).unwrap_or(0.0),
                     n: r.get("n").and_then(Value::as_u64).unwrap_or(0),
+                    on_ground: r.get("where").and_then(Value::as_str) == Some("ground"),
                 })
             })
             .filter(|e| e.n > 0)
@@ -67,6 +72,7 @@ pub fn effect_of(skill: &str, base: &[Glide], with: &[Glide]) -> Option<(SkillEf
         hang: mean(with, |g| g.air) - mean(base, |g| g.air),
         rise: mean(with, |g| g.peak) - mean(base, |g| g.peak),
         n: with.len() as u64,
+        on_ground: false,
     };
     Some((eff, sd))
 }
@@ -111,6 +117,7 @@ mod tests {
             hang: 0.0,
             rise: 0.0,
             n: 1,
+            on_ground: false,
         };
         assert!(e.fits(15.0, 5.0));
         assert!(!e.fits(10.0, 5.0));
