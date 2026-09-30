@@ -66,6 +66,7 @@ const HAZARDS: Record<string, string> = {
   rune: "Rune appeared",
   "other players": "Another player is here",
   "unrecognized map": "Unrecognized map — not saved",
+  "identifying map": "Identifying the map…",
   "verification prompt": "Verification prompt",
 };
 

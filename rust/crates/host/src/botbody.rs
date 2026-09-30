@@ -241,6 +241,8 @@ impl Body for HostBody {
         let others = self.state.viz.others as i64;
         let reason = if loading {
             Some("map transfer (loading screen)")
+        } else if self.host.identity.identifying() {
+            Some("identifying map")
         } else if self.cfg.stop_when_map_unrecognized && self.host.identity.unrecognized() {
             Some("unrecognized map")
         } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {

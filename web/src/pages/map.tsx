@@ -35,8 +35,9 @@ export function MapPage({ s }: { s: AppState }) {
       {s.hazard === "unrecognized map" && !creating && (
         <div class="banner warn">
           <span>
-            This map isn't saved{s.title ? ` (title "${s.title}")` : ""}, so the bot is paused.
-            Save it, or pick a saved map.
+            {s.activeMap
+              ? `The title on screen${s.title ? ` ("${s.title}")` : ""} doesn't match the pinned map ${s.activeMap}, so the bot is paused. If this is ${s.activeMap}, record its title below; otherwise pick or save the right map.`
+              : `This map isn't saved${s.title ? ` (title "${s.title}")` : ""}, so the bot is paused. Save it, or pick a saved map.`}
           </span>
           <button disabled={!s.title || s.title.includes("|")}
                   onClick={() => {
