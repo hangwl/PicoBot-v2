@@ -219,6 +219,7 @@ pub struct BotConfig {
     // Behaviour toggles
     pub stop_when_players_appear: bool,
     pub stop_when_rune_appears: bool,
+    pub stop_when_map_unrecognized: bool,
     pub pause_on_lie_detector: bool,
     // Keys
     pub attack_keys: Vec<String>,
@@ -288,6 +289,7 @@ impl Default for BotConfig {
         let mut cfg = BotConfig {
             stop_when_players_appear: true,
             stop_when_rune_appears: true,
+            stop_when_map_unrecognized: true,
             pause_on_lie_detector: false,
             attack_keys: vec!["a".into()],
             buff_keys: Vec::new(),
@@ -409,6 +411,10 @@ impl BotConfig {
                 &mut cfg.stop_when_players_appear,
             ),
             ("stop_when_rune_appears", &mut cfg.stop_when_rune_appears),
+            (
+                "stop_when_map_unrecognized",
+                &mut cfg.stop_when_map_unrecognized,
+            ),
             ("pause_on_lie_detector", &mut cfg.pause_on_lie_detector),
             ("name_ocr", &mut cfg.name_ocr),
         ] {
@@ -607,6 +613,7 @@ impl BotConfig {
         json!({
             "stop_when_players_appear": self.stop_when_players_appear,
             "stop_when_rune_appears": self.stop_when_rune_appears,
+            "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,
             "attack_keys": self.attack_keys,
             "buff_keys": self.buff_keys,

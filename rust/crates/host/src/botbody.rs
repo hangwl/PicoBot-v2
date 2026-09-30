@@ -191,7 +191,7 @@ impl Body for HostBody {
     fn hazard_in(&mut self, img: &Image) -> Option<String> {
         let reason = if self.analyzer.loading() {
             Some("map transfer (loading screen)")
-        } else if self.host.identity.unrecognized() {
+        } else if self.cfg.stop_when_map_unrecognized && self.host.identity.unrecognized() {
             Some("unrecognized map")
         } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
             Some("rune")
