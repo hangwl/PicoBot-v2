@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! picobot [--root DIR] [--port COM3|auto] [--window TITLE] [--ws N] [--http N]
+//! picobot [--root DIR] --notify-test     # send one Telegram alert and exit
 //! ```
 //!
 //! `--root` is the folder holding `config.json`, `maps/`, the reach files
@@ -33,10 +34,11 @@ struct Args {
     window: Option<String>,
     ws: Option<u16>,
     http: Option<u16>,
+    notify_test: bool,
 }
 
 const USAGE: &str =
-    "usage: picobot [--root DIR] [--port COM3|auto] [--window TITLE] [--ws N] [--http N]";
+    "usage: picobot [--root DIR] [--port COM3|auto] [--window TITLE] [--ws N] [--http N] [--notify-test]";
 
 fn parse_args() -> Result<Args, String> {
     let mut a = Args {
@@ -45,6 +47,7 @@ fn parse_args() -> Result<Args, String> {
         window: None,
         ws: None,
         http: None,
+        notify_test: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -55,6 +58,7 @@ fn parse_args() -> Result<Args, String> {
             "--window" => a.window = Some(val()?),
             "--ws" => a.ws = Some(val()?.parse().map_err(|_| "--ws needs a port")?),
             "--http" => a.http = Some(val()?.parse().map_err(|_| "--http needs a port")?),
+            "--notify-test" => a.notify_test = true,
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown argument: {other}\n{USAGE}")),
         }
@@ -85,6 +89,20 @@ fn main() -> ExitCode {
     let (mut config, err) = AppConfig::load(&root.join("config.json"));
     if let Some(e) = err {
         eprintln!("config.json unreadable ({e}) — using defaults");
+    }
+    if args.notify_test {
+        let bus = std::sync::Arc::new(bus::Bus::default());
+        let tg = telegram::Telegram::new(&config.bot_token, &config.chat_id, bus);
+        return match tg.send("PicoBot (Rust host): test alert — Telegram works.") {
+            telegram::Sent::Ok => {
+                println!("Telegram: test alert sent");
+                ExitCode::SUCCESS
+            }
+            other => {
+                eprintln!("Telegram: {other:?}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if let Some(ws) = args.ws {
         config.ws_port = ws.into();
