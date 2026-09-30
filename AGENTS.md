@@ -47,8 +47,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
   `core/src/minimap.rs`), sampled only by the `MapMonitor` thread (20 Hz,
   own grabber). Never call `note_frame` from the bot or the streamer, and
   never use pixel-content change as a trigger — translucent UI defeats it.
-- **OCR is request-driven** (startup, arrival, pin, title band) and runs
-  on the `TitleOCR` worker — never per-frame, never on the frame thread.
+- **OCR is request-driven** (startup, arrival, pin, title band, Re-detect,
+  and a slow verification read every 5 s that catches a map change with no
+  blackout) and runs on the `TitleOCR` worker — never per-frame, never on
+  the frame thread.
 - **Manual geometry is authoritative**: drawn platforms/walls drive
   navigation. No line auto-detection.
 - **Panel region**: found by `find_frame` (sizes differ per map); dropped

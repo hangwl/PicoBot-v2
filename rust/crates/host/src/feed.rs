@@ -96,6 +96,9 @@ impl Feed {
             stop: stop.clone(),
             last_locate: f64::NEG_INFINITY,
             was_loading: false,
+            last_verify: monotonic(),
+            last_arrival: f64::NEG_INFINITY,
+            last_title: None,
         };
         let monitor = std::thread::Builder::new()
             .name("MapMonitor".into())
@@ -134,10 +137,16 @@ struct Monitor {
     stop: Arc<AtomicBool>,
     last_locate: f64,
     was_loading: bool,
+    last_verify: f64,
+    last_arrival: f64,
+    last_title: Option<String>,
 }
 
 const PERIOD: f64 = 0.05;
 const LOCATE_EVERY: f64 = 0.25;
+/// The title is re-read this often: a map change with no blackout (or one
+/// too short to see) still shows up in it.
+const VERIFY_EVERY: f64 = 5.0;
 
 impl Monitor {
     fn run(&mut self) {
@@ -186,6 +195,7 @@ impl Monitor {
         }
         self.was_loading = loading;
         if arrived {
+            self.last_arrival = now;
             self.bus
                 .emit("vision", "arrived on a new map — re-detecting minimap");
             self.emit(self.identity.request(true));
@@ -201,6 +211,20 @@ impl Monitor {
                     self.emit(self.identity.request(false));
                 }
             }
+        }
+        if !loading && now - self.last_verify >= VERIFY_EVERY && !self.identity.pending() {
+            self.last_verify = now;
+            self.emit(self.identity.request(false));
+        }
+        let title = self.identity.current().title;
+        if title != self.last_title {
+            if title.is_some() && self.last_title.is_some() && now - self.last_arrival > 5.0 {
+                self.bus.emit(
+                    "vision",
+                    "the map title changed with no loading screen — a transfer was missed",
+                );
+            }
+            self.last_title = title;
         }
         if !loading && self.identity.wants_band(now) {
             if let Some(tx) = &self.ocr {

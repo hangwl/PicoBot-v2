@@ -992,6 +992,9 @@ impl Host {
                 f.analyzer.reset_region();
                 self.bus
                     .emit("vision", "minimap layout reset — re-detecting");
+                for n in self.identity.request(true) {
+                    self.bus.emit("map", &n);
+                }
             }
             None => self.bus.emit("vision", "no minimap to reset"),
         }

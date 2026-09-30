@@ -130,7 +130,13 @@ stored 2-6 (0.952), and a map whose title contains another's matched
 it.
 
 **Requests**: startup, arrival, pin change, title-band change,
-panel moved (only if no title yet). Never per-frame.
+panel moved (only if no title yet), the dashboard's Re-detect (which also
+drops the panel region), and a **verification read every 5 s** while the
+monitor runs. The blackout detector only sees a full dark capture held for
+0.15 s; a transfer without one (or a shorter one) is caught by the next
+verification read, logged as `the map title changed with no loading
+screen — a transfer was missed`. A verification read doesn't unsettle an
+unknown map, so the bot doesn't resume between reads. Never per-frame.
 
 ## Resolution (`MapIdentity`, shared by host and bot)
 

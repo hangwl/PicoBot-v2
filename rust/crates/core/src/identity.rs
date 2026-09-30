@@ -56,6 +56,8 @@ struct Inner {
     pin_warned: bool,
     /// Arrived on a new map and its title isn't read yet.
     stale: bool,
+    /// A read has been accepted (or given up on) since the last arrival.
+    settled: bool,
 }
 
 pub struct MapIdentity {
@@ -149,10 +151,11 @@ impl MapIdentity {
         s.want || s.busy
     }
 
-    /// The reads are done and named no stored map (and none is pinned).
+    /// The latest reads are settled and name no stored map (and none is
+    /// pinned). A re-check of the title doesn't unsettle it.
     pub fn unrecognized(&self) -> bool {
         let s = self.inner.lock().unwrap();
-        self.ocr_enabled && !s.want && !s.busy && s.current.name.is_none()
+        self.ocr_enabled && s.settled && s.current.name.is_none()
     }
 
     /// Just arrived on a map whose title hasn't been read: nothing resolved
@@ -190,6 +193,7 @@ impl MapIdentity {
         s.next_at = 0.0;
         if clear {
             s.stale = self.ocr_enabled;
+            s.settled = false;
             s.title = None;
             return self.recompute(&mut s);
         }
@@ -280,6 +284,7 @@ impl MapIdentity {
         };
         s.want = false;
         s.stale = false;
+        s.settled = true;
         let unreadable = acc.key.is_empty();
         s.title = (!unreadable).then_some(acc);
         let mut notes = if unreadable {
@@ -532,6 +537,32 @@ mod tests {
         }
         assert_eq!(id.current().name.as_deref(), Some("East")); // the pin stands
         assert!(!id.identifying());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn rechecking_the_title_keeps_an_unknown_map_unrecognized() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, None, true);
+        id.request(true);
+        read_twice(&id, "Nowhere Special");
+        assert!(id.unrecognized());
+        id.request(false); // the periodic verification read
+        assert!(id.pending() && id.unrecognized(), "no resume between reads");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_recheck_catches_a_transfer_that_never_blacked_out() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, None, true);
+        id.request(true);
+        read_twice(&id, "Limina : 1-5 East");
+        assert_eq!(id.current().name.as_deref(), Some("East"));
+        id.request(false); // no arrival was seen; the next read says West
+        let g = id.begin_read().unwrap();
+        let notes = id.finish_read(g, Some("Limina : 1-5 West".into()), 3.0);
+        assert_eq!(id.current().name.as_deref(), Some("West"), "{notes:?}");
         std::fs::remove_dir_all(dir).ok();
     }
 
