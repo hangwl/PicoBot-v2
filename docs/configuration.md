@@ -49,6 +49,7 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
     "weave_range_px": 24,
     "stop_when_players_appear": true,
     "stop_when_rune_appears": true,
+    "stop_when_map_unrecognized": true,
     "pause_on_lie_detector": false,
     "minimap_colors": {
       "player": [12, 240, 239],
@@ -134,6 +135,11 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   up-side or double flash rarely chains on your server.
 - `vert_jump_interval` — minimum gap between vertical jump attempts in
   non-graph movement.
+- `stop_when_map_unrecognized` — pause (and alert) when the title read
+  names no saved map and none is pinned. Turn it off only to farm an
+  unsaved map with the global rotation.
+- `heartbeat_minutes` — Telegram status message every N minutes while
+  the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest

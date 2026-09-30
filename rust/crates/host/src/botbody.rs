@@ -191,7 +191,7 @@ impl Body for HostBody {
     fn hazard_in(&mut self, img: &Image) -> Option<String> {
         let reason = if self.analyzer.loading() {
             Some("map transfer (loading screen)")
-        } else if self.host.identity.unrecognized() {
+        } else if self.cfg.stop_when_map_unrecognized && self.host.identity.unrecognized() {
             Some("unrecognized map")
         } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
             Some("rune")
@@ -261,6 +261,7 @@ impl Body for HostBody {
     }
 
     fn stat(&mut self, kind: &str, anchor: &str, why: &str) {
+        self.state.session.record(kind);
         let map = self.refresh_map().map(|e| e.name.clone());
         self.host.anchor_stat(map.as_deref(), kind, anchor, why);
     }
@@ -338,7 +339,7 @@ pub fn spawn_bot(host: &Arc<Host>) -> Result<BotRun, String> {
         .name("SmartBot".into())
         .spawn(move || {
             let ended = match make_body(&h, s.clone()) {
-                Ok(body) => run_bot(&h, body).map(|()| "Bot stopped".to_owned()),
+                Ok(body) => run_bot(&h, body),
                 Err(e) => Err(format!("Bot failed to start: {e}")),
             };
             match ended {
@@ -356,9 +357,9 @@ pub fn spawn_bot(host: &Arc<Host>) -> Result<BotRun, String> {
     Ok(BotRun { stop, thread })
 }
 
-/// Run the machine to its end; a panic comes back as the error (keys
-/// released either way).
-fn run_bot(h: &Arc<Host>, mut body: HostBody) -> Result<(), String> {
+/// Run the machine to its end: the stop message with the run's summary,
+/// or the panic as the error (keys released either way).
+fn run_bot(h: &Arc<Host>, mut body: HostBody) -> Result<String, String> {
     h.bus.emit("bot", "started");
     h.send_bot_state(true);
     new_session(); // this run's pace differs from the last
@@ -376,14 +377,16 @@ fn run_bot(h: &Arc<Host>, mut body: HostBody) -> Result<(), String> {
         h.bus.emit("error", &format!("saving reach failed: {e}"));
     }
     h.put_reach(body.state.reach.clone());
-    ran.map_err(|p| {
-        let why = p
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_owned())
-            .or_else(|| p.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "unknown".into());
-        format!("Bot crashed: {why}")
-    })
+    let summary = body.state.session.summary(body.now());
+    ran.map(|()| format!("Bot stopped — {summary}"))
+        .map_err(|p| {
+            let why = p
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_owned())
+                .or_else(|| p.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown".into());
+            format!("Bot crashed: {why} — {summary}")
+        })
 }
 
 /// The dot for the flight recorder: its thread keeps its own eyes.

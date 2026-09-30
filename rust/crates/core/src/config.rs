@@ -219,11 +219,14 @@ pub struct BotConfig {
     // Behaviour toggles
     pub stop_when_players_appear: bool,
     pub stop_when_rune_appears: bool,
+    pub stop_when_map_unrecognized: bool,
     pub pause_on_lie_detector: bool,
     // Keys
     pub attack_keys: Vec<String>,
     pub buff_keys: Vec<String>,
     pub buff_interval_seconds: f64,
+    /// Telegram status message every this many minutes while running (0 = off).
+    pub heartbeat_minutes: f64,
     pub jump_key: String,
     pub up_jump_skill_key: Option<String>,
     pub up_jump_skill_cooldown: f64,
@@ -286,10 +289,12 @@ impl Default for BotConfig {
         let mut cfg = BotConfig {
             stop_when_players_appear: true,
             stop_when_rune_appears: true,
+            stop_when_map_unrecognized: true,
             pause_on_lie_detector: false,
             attack_keys: vec!["a".into()],
             buff_keys: Vec::new(),
             buff_interval_seconds: 60.0,
+            heartbeat_minutes: 30.0,
             jump_key: "alt".into(),
             up_jump_skill_key: None,
             up_jump_skill_cooldown: 3.0,
@@ -406,6 +411,10 @@ impl BotConfig {
                 &mut cfg.stop_when_players_appear,
             ),
             ("stop_when_rune_appears", &mut cfg.stop_when_rune_appears),
+            (
+                "stop_when_map_unrecognized",
+                &mut cfg.stop_when_map_unrecognized,
+            ),
             ("pause_on_lie_detector", &mut cfg.pause_on_lie_detector),
             ("name_ocr", &mut cfg.name_ocr),
         ] {
@@ -415,6 +424,7 @@ impl BotConfig {
         }
         for (name, slot) in [
             ("buff_interval_seconds", &mut cfg.buff_interval_seconds),
+            ("heartbeat_minutes", &mut cfg.heartbeat_minutes),
             ("up_jump_skill_cooldown", &mut cfg.up_jump_skill_cooldown),
             ("nav_up_flash_px", &mut cfg.nav_up_flash_px),
             ("nav_rope_lift_px", &mut cfg.nav_rope_lift_px),
@@ -603,10 +613,12 @@ impl BotConfig {
         json!({
             "stop_when_players_appear": self.stop_when_players_appear,
             "stop_when_rune_appears": self.stop_when_rune_appears,
+            "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,
             "attack_keys": self.attack_keys,
             "buff_keys": self.buff_keys,
             "buff_interval_seconds": self.buff_interval_seconds,
+            "heartbeat_minutes": self.heartbeat_minutes,
             "jump_key": self.jump_key,
             "up_jump_skill_key": self.up_jump_skill_key,
             "up_jump_skill_cooldown": self.up_jump_skill_cooldown,

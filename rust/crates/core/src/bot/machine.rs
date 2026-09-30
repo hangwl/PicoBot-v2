@@ -10,6 +10,7 @@ use super::grind::{
     publish_summons, run_travel, sync_map, weave_attack,
 };
 use super::patrol::Patrol;
+use super::session::Session;
 use super::watchdog::Watchdog;
 use crate::skills::SkillKind;
 use crate::timing::human_reaction;
@@ -82,6 +83,7 @@ impl Machine {
     /// Run until the body stops. Keys are released on the way out.
     pub fn run<B: Body + ?Sized>(&mut self, body: &mut B) {
         self.state = State::Grind;
+        body.state().session = Session::new(body.now());
         self.enter(body);
         while body.should_continue() {
             self.watch(body);
@@ -97,6 +99,17 @@ impl Machine {
         let (now, player) = (body.now(), body.state_ref().viz.player);
         if let Some(msg) = self.watchdog.tick(now, self.state, player) {
             body.notify(&msg);
+        }
+        let every = body.config().heartbeat_minutes * 60.0;
+        if body.state().session.beat_due(now, every) {
+            let name = body
+                .map()
+                .map_or("unknown map".to_owned(), |e| e.name.clone());
+            let s = body.state_ref().session.summary(now);
+            body.notify(&format!(
+                "Heartbeat: {name} — {} — {s}",
+                self.state.as_str()
+            ));
         }
     }
 
@@ -167,6 +180,8 @@ impl Machine {
                 self.travel_done = !begin_travel(body);
             }
             State::Pause => {
+                let now = body.now();
+                body.state().session.pause_begin(now);
                 body.keys().release_all();
                 body.log("PAUSE: holding until safe");
             }
@@ -176,6 +191,8 @@ impl Machine {
     fn exit<B: Body + ?Sized>(&mut self, body: &mut B) {
         body.keys().release_all();
         if self.state == State::Pause {
+            let now = body.now();
+            body.state().session.pause_end(now);
             // A person notices the all-clear before carrying on.
             body.sleep(human_reaction());
         }

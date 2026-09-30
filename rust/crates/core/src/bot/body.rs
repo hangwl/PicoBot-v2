@@ -14,6 +14,7 @@ use std::sync::Arc;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
+use super::session::Session;
 use crate::config::{BotConfig, ClassTravel};
 use crate::maps::MapEntry;
 use crate::navgraph::{GraphCache, GraphOptions, NavGraph};
@@ -127,6 +128,7 @@ pub struct BotState {
     /// No-platform patrol: anchors left to visit, and the head's deadline.
     pub route: Vec<usize>,
     pub checkpoint: Option<(usize, f64)>,
+    pub session: Session,
     log_throttle: std::collections::HashMap<&'static str, f64>,
 }
 
@@ -154,6 +156,7 @@ impl BotState {
             map_version: 0,
             route: Vec::new(),
             checkpoint: None,
+            session: Session::default(),
             log_throttle: Default::default(),
         }
     }
