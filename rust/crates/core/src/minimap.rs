@@ -401,8 +401,14 @@ impl MinimapAnalyzer {
     }
 
     pub fn has_other_players(&self, img: &Image) -> bool {
-        self.marker(img, self.colors.other_player, 10, false, None)
-            .is_some()
+        self.count_other_players(img, MARKER_MIN_PX) > 0
+    }
+
+    /// Other-player markers on the minimap: blobs of at least `min_px`
+    /// pixels (markers within 2px of each other merge into one).
+    pub fn count_other_players(&self, img: &Image, min_px: usize) -> usize {
+        let (inner, _) = self.interior(img);
+        marker_blobs(&color_mask(&inner, self.colors.other_player, 10), min_px).len()
     }
 
     /// Where a dot standing at `feet` covers (inclusive, bottom row on the feet).

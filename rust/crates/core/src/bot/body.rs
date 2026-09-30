@@ -77,6 +77,8 @@ pub struct Viz {
     pub route: Option<Vec<LegViz>>,
     pub plan: Option<Vec<LegViz>>,
     pub hazard: Option<String>,
+    /// Other-player markers on the minimap right now.
+    pub others: usize,
     /// The run's counters (`Session::snapshot`), refreshed by the host.
     pub session: Option<serde_json::Value>,
     /// Live summons: (skill, anchor, seconds left).
@@ -247,6 +249,10 @@ pub trait Body {
     fn save_map(&mut self, _entry: MapEntry) {}
     /// Anchor statistics: visit / miss / skip.
     fn stat(&mut self, _kind: &str, _anchor: &str, _why: &str) {}
+    /// Detail appended to the current hazard's alert.
+    fn hazard_note(&self) -> Option<String> {
+        None
+    }
     /// A high-priority alert (the host adds Telegram).
     fn notify(&mut self, msg: &str) {
         self.log(msg);

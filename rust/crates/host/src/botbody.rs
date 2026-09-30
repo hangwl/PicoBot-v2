@@ -140,6 +140,27 @@ impl HostBody {
         }
     }
 
+    /// Log the other-player count when it changes.
+    fn note_others(&mut self, n: usize) {
+        if n == self.state.viz.others {
+            return;
+        }
+        self.state.viz.others = n;
+        let allowed = self.cfg.allowed_other_players;
+        let (msg, level) = match n {
+            0 => ("minimap clear of other players".to_owned(), "info"),
+            1 => (
+                format!("1 other player on the minimap ({allowed} allowed)"),
+                "warn",
+            ),
+            _ => (
+                format!("{n} other players on the minimap ({allowed} allowed)"),
+                "warn",
+            ),
+        };
+        self.host.bus.emit_level("safety", &msg, level);
+    }
+
     fn refresh_map(&mut self) -> Option<Arc<MapEntry>> {
         let key = (self.host.identity.version(), self.host.map_edits());
         if let Some((k, e)) = &self.map {
@@ -191,14 +212,30 @@ impl Body for HostBody {
         self.analyzer.player_pos(img, &mut self.tracker)
     }
 
+    fn hazard_note(&self) -> Option<String> {
+        (self.state.viz.hazard.as_deref() == Some("other players")).then(|| {
+            format!(
+                " ({} on the minimap, {} allowed)",
+                self.state.viz.others, self.cfg.allowed_other_players
+            )
+        })
+    }
+
     fn hazard_in(&mut self, img: &Image) -> Option<String> {
-        let reason = if self.analyzer.loading() {
+        let loading = self.analyzer.loading();
+        if !loading {
+            let min_px = self.cfg.other_player_min_px.max(1) as usize;
+            let n = self.analyzer.count_other_players(img, min_px);
+            self.note_others(n);
+        }
+        let others = self.state.viz.others as i64;
+        let reason = if loading {
             Some("map transfer (loading screen)")
         } else if self.cfg.stop_when_map_unrecognized && self.host.identity.unrecognized() {
             Some("unrecognized map")
         } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
             Some("rune")
-        } else if self.cfg.stop_when_players_appear && self.analyzer.has_other_players(img) {
+        } else if self.cfg.stop_when_players_appear && others > self.cfg.allowed_other_players {
             Some("other players")
         } else {
             None

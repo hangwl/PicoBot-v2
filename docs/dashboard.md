@@ -100,7 +100,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     second-attack chance and a target attacks-per-minute; the running
     rate shows here and in the Session row.
   - **Safety** — the pause toggles (rune, other players, unrecognized
-    map), the Telegram status interval (0 = off) and a **Send test
+    map), how many other players are allowed and the smallest marker
+    that counts (Home shows the live count), the Telegram status interval (0 = off) and a **Send test
     alert** button. Home's status list shows the running **Session**
     (uptime, visits, misses, skips, pauses); an unrecognized map sends
     you to the Map page, whose banner offers to name and save it.

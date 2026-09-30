@@ -377,6 +377,12 @@ impl Host {
         let mut edits: Vec<(String, Value)> = Vec::new();
         for (k, v) in &want {
             match (k.as_str(), v) {
+                ("allowed_other_players", v) if v.as_i64().is_some_and(|n| n >= 0) => {
+                    edits.push((k.clone(), v.clone()))
+                }
+                ("other_player_min_px", v) if v.as_i64().is_some_and(|n| n >= 1) => {
+                    edits.push((k.clone(), v.clone()))
+                }
                 (k, Value::Bool(_)) if bools.contains(&k) => edits.push((k.into(), v.clone())),
                 ("heartbeat_minutes", v) if v.as_f64().is_some_and(|m| m >= 0.0) => {
                     edits.push((k.clone(), v.clone()))

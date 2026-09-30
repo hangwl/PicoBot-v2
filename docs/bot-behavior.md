@@ -338,7 +338,8 @@ below, so the lowest drawn platform is the map's bottom.
 ## Safety
 
 Pauses the bot (and fires a Telegram alert if configured) on: window
-focus loss, rune marker on the minimap, other players, a map transfer
+focus loss, rune marker on the minimap, more other players than
+`allowed_other_players` (the alert says how many), a map transfer
 (loading blackout) mid-leg, and a map no saved entry matches. Solve rune checks via the dashboard's
 remote input pad. `pause_on_lie_detector` is a documented stub — keep it
 off until template images exist.

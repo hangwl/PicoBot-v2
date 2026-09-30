@@ -145,6 +145,11 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   `weave_double_chance` is the chance a firing window casts two;
   `target_attacks_per_min` (default 0 = off) steers those odds toward a
   rate. Setup → Attacks edits them (`attacks|set`).
+- `allowed_other_players` (default 0) — other players tolerated on the
+  minimap before the bot pauses (`stop_when_players_appear`);
+  `other_player_min_px` (default 6) — the smallest marker that counts.
+  Markers within 2px merge into one, so players standing on top of each
+  other count once. Every change in the count is logged as a warning.
 - `heartbeat_minutes` — Telegram status message every N minutes while
   the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.

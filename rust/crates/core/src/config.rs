@@ -218,6 +218,10 @@ impl PatrolPolicy {
 pub struct BotConfig {
     // Behaviour toggles
     pub stop_when_players_appear: bool,
+    /// Other players tolerated before the bot pauses.
+    pub allowed_other_players: i64,
+    /// Smallest marker (px) that counts as another player.
+    pub other_player_min_px: i64,
     pub stop_when_rune_appears: bool,
     pub stop_when_map_unrecognized: bool,
     pub pause_on_lie_detector: bool,
@@ -296,6 +300,8 @@ impl Default for BotConfig {
     fn default() -> Self {
         let mut cfg = BotConfig {
             stop_when_players_appear: true,
+            allowed_other_players: 0,
+            other_player_min_px: crate::minimap::MARKER_MIN_PX as i64,
             stop_when_rune_appears: true,
             stop_when_map_unrecognized: true,
             pause_on_lie_detector: false,
@@ -462,6 +468,8 @@ impl BotConfig {
         }
         for (name, slot) in [
             ("nav_threshold_px", &mut cfg.nav_threshold_px),
+            ("allowed_other_players", &mut cfg.allowed_other_players),
+            ("other_player_min_px", &mut cfg.other_player_min_px),
             ("nav_stuck_limit", &mut cfg.nav_stuck_limit),
             ("marker_inset_px", &mut cfg.marker_inset_px),
             ("weave_range_px", &mut cfg.weave_range_px),
@@ -633,6 +641,8 @@ impl BotConfig {
         let rect = |r: Option<[i64; 4]>| r.map_or(Value::Null, |r| json!(r));
         json!({
             "stop_when_players_appear": self.stop_when_players_appear,
+            "allowed_other_players": self.allowed_other_players,
+            "other_player_min_px": self.other_player_min_px,
             "stop_when_rune_appears": self.stop_when_rune_appears,
             "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,
@@ -735,6 +745,18 @@ mod tests {
 
     fn obj(v: Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn other_player_settings_default_strict_and_parse() {
+        let cfg = BotConfig::from_json(&Map::new()).unwrap();
+        assert_eq!((cfg.allowed_other_players, cfg.other_player_min_px), (0, 6));
+        let cfg = BotConfig::from_json(&obj(
+            json!({"allowed_other_players": 2, "other_player_min_px": 9}),
+        ))
+        .unwrap();
+        assert_eq!((cfg.allowed_other_players, cfg.other_player_min_px), (2, 9));
+        assert_eq!(cfg.snapshot()["allowed_other_players"], 2);
     }
 
     #[test]

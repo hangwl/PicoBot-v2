@@ -36,7 +36,7 @@ and follows the same view.
 | `patrol|policy|<weighted\|greedy>` | set the loop-ordering policy |
 | `patrol|temp|<v>` | set the weighted-roulette temperature |
 | `skills|set\|{json}` (`name, key, kind, cooldown`, attacks also `stance` (ground/air/any) and `weight`, summons also `charges, duration`) / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
-| `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`: bool) and `heartbeat_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
+| `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`: bool), `allowed_other_players` (≥ 0), `other_player_min_px` (≥ 1) and `heartbeat_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
 | `attacks|set|{json}` | `move_attack_chance`, `ground_attack_chance`, `weave_double_chance` (0–1) and `target_attacks_per_min` (≥ 0); saved to `config.json`, then re-sends `config` |
 | `notify|test` | send one Telegram test alert; the host answers with a `notify` (sent) or `error` event |
 | `movekeys|set|{json}` | movement keybinds (jump/rope-lift/flash) + nav radius |
@@ -98,7 +98,7 @@ charges: {skill: [have, max]}}`) and `patrol` (`{target, leg, legs, move,
 misses, next: [anchor], arrived, halted}` — the loop's current target,
 the leg being run, misses toward it, the next anchors, anchors reached
 this run, and whether it's halted with no plan) in every view,
-`player`, `session` (the run's `{up, visits, misses, skips, pauses, paused}` in seconds and counts; only while the bot runs), and map identity (`map`, `map_via`,
+`player`, `others` (other-player markers on the minimap), `session` (the run's `{up, visits, misses, skips, pauses, paused}` in seconds and counts; only while the bot runs), and map identity (`map`, `map_via`,
 `map_conf`, `map_title`, `layout`, `no_rotation`). Overlays (platforms,
 ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
 view shifted by `ox`/`oy`, in the Window view shifted to where the
