@@ -357,6 +357,62 @@ def title_bands() -> None:
     (d / "trace_title.json").write_text(json.dumps(cases))
 
 
+def fuzzy() -> None:
+    """Title matching: difflib ratios, sibling calls and title scores of
+    synthetic titles against OCR-style variants (drops, doubles, swaps,
+    merged words, clipped tails, region prefixes, other numbers)."""
+    import random
+    from difflib import SequenceMatcher
+
+    from picobot.vision.mapname import looks_like_sibling, title_score
+
+    titles = [
+        "Limina : 1-5 East", "Limina : 1-5 West", "Lake of Oblivion Nameless Town",
+        "Cernium Western City Ramparts 2", "Cernium Western City Ramparts 3",
+        "Arcana Cavern Lower Path", "Arcana Cavern Upper Path", "Storehouse",
+        "Storehouse Entrance", "Road of Happiness", "Weathered Land of Rage 4",
+        "Moonbridge Outpost", "Hotel Arcus Lobby", "EZFZ", "Odium Main Street 1",
+    ]
+    rng = random.Random(5)
+
+    def noisy(t: str) -> str:
+        s = list(t)
+        for _ in range(rng.randint(0, 3)):
+            op = rng.random()
+            i = rng.randrange(len(s))
+            if op < 0.25:
+                del s[i]
+            elif op < 0.45:
+                s.insert(i, s[i])
+            elif op < 0.6 and i + 1 < len(s):
+                s[i], s[i + 1] = s[i + 1], s[i]
+            elif op < 0.75:
+                s[i] = rng.choice("abcdefghijklmnopqrstuvwxyz0123456789 .:-")
+        out = "".join(s)
+        r = rng.random()
+        if r < 0.15:
+            out = out.replace(" ", "", 1)
+        elif r < 0.3:
+            out = out[: rng.randint(4, max(4, len(out)))]
+        elif r < 0.4:
+            out = "Lake of Oblivion " + out
+        elif r < 0.5:
+            out = "".join(str((int(c) + 1) % 10) if c.isdigit() else c for c in out)
+        return out
+
+    cases = []
+    for _ in range(600):
+        cand = rng.choice(titles)
+        ocr = noisy(rng.choice(titles) if rng.random() < 0.3 else cand)
+        cases.append({
+            "ocr": ocr, "cand": cand,
+            "ratio": SequenceMatcher(None, ocr, cand).ratio(),
+            "sibling": looks_like_sibling(ocr, cand),
+            "score": title_score(ocr, cand),
+        })
+    (OUT / "trace_fuzzy.json").write_text(json.dumps(cases))
+
+
 if __name__ == "__main__":
     shutil.rmtree(OUT, ignore_errors=True)
     OUT.mkdir(parents=True)
@@ -366,5 +422,6 @@ if __name__ == "__main__":
     traces()
     nav_trace()
     title_bands()
+    fuzzy()
     for p in sorted(OUT.rglob("*.json")):
         print(p.relative_to(OUT))

@@ -3,6 +3,7 @@
 #[cfg(windows)]
 pub mod capture;
 pub mod hid;
+pub mod ocr;
 #[cfg(windows)]
 pub mod perf;
 pub mod serial;

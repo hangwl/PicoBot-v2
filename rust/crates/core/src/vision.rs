@@ -50,6 +50,40 @@ impl Image {
     }
 
     /// The `(x, y, w, h)` part of the image, clamped to its bounds.
+    /// Bilinear resize with pixel-centre alignment (OpenCV's
+    /// `INTER_LINEAR`).
+    pub fn resize(&self, w: usize, h: usize) -> Image {
+        let mut out = Image::new(w, h);
+        if self.width == 0 || self.height == 0 {
+            return out;
+        }
+        let axis = |dst: usize, src_len: usize, dst_len: usize| {
+            let f = ((dst as f64 + 0.5) * src_len as f64 / dst_len as f64 - 0.5).max(0.0);
+            let i = (f.floor() as usize).min(src_len - 1);
+            let j = (i + 1).min(src_len - 1);
+            (i, j, f - i as f64)
+        };
+        for y in 0..h {
+            let (y0, y1, fy) = axis(y, self.height, h);
+            for x in 0..w {
+                let (x0, x1, fx) = axis(x, self.width, w);
+                let (a, b, c, d) = (
+                    self.bgr(x0, y0),
+                    self.bgr(x1, y0),
+                    self.bgr(x0, y1),
+                    self.bgr(x1, y1),
+                );
+                let px = std::array::from_fn(|k| {
+                    let top = a[k] as f64 * (1.0 - fx) + b[k] as f64 * fx;
+                    let bot = c[k] as f64 * (1.0 - fx) + d[k] as f64 * fx;
+                    (top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8
+                });
+                out.set_bgr(x, y, px);
+            }
+        }
+        out
+    }
+
     pub fn crop(&self, x: usize, y: usize, w: usize, h: usize) -> Image {
         let x1 = (x + w).min(self.width);
         let y1 = (y + h).min(self.height);

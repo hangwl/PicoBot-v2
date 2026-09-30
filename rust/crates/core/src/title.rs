@@ -252,6 +252,64 @@ pub fn title_scan(band: &Image, o: &ScanOptions) -> (Vec<LineBox>, Option<Divide
     (lines, div)
 }
 
+/// What the recogniser reads: the title lines (and the faded tail up to
+/// the divider's end) framed by `margin` px of the crop's median colour —
+/// glyphs touching the edge are misread, and padding from the band itself
+/// would pull the region icon back in. Returns the image and each line's
+/// row range in it; None without text lines.
+pub fn title_crop(
+    band: &Image,
+    vpad: usize,
+    margin: usize,
+) -> Option<(Image, Vec<(usize, usize)>)> {
+    let (lines, div) = title_scan(band, &ScanOptions::default());
+    if lines.is_empty() {
+        return None;
+    }
+    let y0 = lines.iter().map(|l| l.1).min()?.saturating_sub(vpad);
+    let y1 = (lines.iter().map(|l| l.3).max()? + vpad).min(band.height);
+    let x0 = lines.iter().map(|l| l.0).min()?;
+    let mut x1 = lines.iter().map(|l| l.2).max()?;
+    if let Some(d) = div {
+        x1 = x1.max(d.2);
+    }
+    let x1 = x1.min(band.width);
+    let (cw, ch) = (x1.saturating_sub(x0), y1.saturating_sub(y0));
+    if cw == 0 || ch == 0 {
+        return None;
+    }
+    let crop = band.crop(x0, y0, cw, ch);
+    let bg: [u8; 3] = std::array::from_fn(|c| {
+        let mut v: Vec<u8> = (0..ch)
+            .flat_map(|y| (0..cw).map(move |x| (x, y)))
+            .map(|(x, y)| crop.bgr(x, y)[c])
+            .collect();
+        v.sort_unstable();
+        let n = v.len();
+        if n % 2 == 1 {
+            v[n / 2]
+        } else {
+            ((v[n / 2 - 1] as f64 + v[n / 2] as f64) / 2.0) as u8
+        }
+    });
+    let mut out = Image::new(cw + 2 * margin, ch + 2 * margin);
+    for y in 0..out.height {
+        for x in 0..out.width {
+            out.set_bgr(x, y, bg);
+        }
+    }
+    for y in 0..ch {
+        for x in 0..cw {
+            out.set_bgr(x + margin, y + margin, crop.bgr(x, y));
+        }
+    }
+    let rows = lines
+        .iter()
+        .map(|l| (l.1 - y0 + margin, l.3 - y0 + margin))
+        .collect();
+    Some((out, rows))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,6 +6,7 @@
 //! moved panel, and asks identity for title reads on arrival.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -73,6 +74,7 @@ impl Feed {
         cfg: &BotConfig,
         identity: Arc<MapIdentity>,
         bus: Arc<Bus>,
+        ocr: Option<Sender<TitleJob>>,
     ) -> Option<Feed> {
         GameWindow::find(title)?;
         let region = cfg
@@ -89,6 +91,8 @@ impl Feed {
             analyzer: analyzer.clone(),
             identity,
             bus,
+            ocr,
+            cfg: cfg.clone(),
             stop: stop.clone(),
             last_locate: f64::NEG_INFINITY,
             was_loading: false,
@@ -114,7 +118,15 @@ impl Drop for Feed {
     }
 }
 
+/// A title band to read, for identity read generation `gen`.
+pub struct TitleJob {
+    pub band: Image,
+    pub gen: u64,
+}
+
 struct Monitor {
+    ocr: Option<Sender<TitleJob>>,
+    cfg: BotConfig,
     title: String,
     analyzer: Arc<MinimapAnalyzer>,
     identity: Arc<MapIdentity>,
@@ -190,6 +202,16 @@ impl Monitor {
                 }
             }
         }
-        // Title reads (OCR) are pumped here once the reader lands (M8).
+        if !loading && self.identity.wants_band(now) {
+            if let Some(tx) = &self.ocr {
+                let band = name_region(&self.cfg, mm.region()).and_then(|r| eyes.capture(r));
+                // Claim the read only once a band was captured.
+                if let Some(band) = band {
+                    if let Some(gen) = self.identity.begin_read() {
+                        let _ = tx.send(TitleJob { band, gen });
+                    }
+                }
+            }
+        }
     }
 }

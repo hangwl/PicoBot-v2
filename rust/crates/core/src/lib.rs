@@ -10,6 +10,7 @@ pub mod bot;
 pub mod config;
 pub mod error;
 pub mod fileio;
+pub mod fuzzy;
 pub mod identity;
 pub mod json;
 pub mod layout;

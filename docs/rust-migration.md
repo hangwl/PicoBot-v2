@@ -60,6 +60,7 @@ cd rust
 cargo test                                   # all crates
 $env:PICOBOT_DATA = "..\..\PicoBot-v2"; cargo test -p picobot-core --test parity   # + real data
 ..\..\PicoBot-v2\.venv\Scripts\python.exe tools\vision_trace.py ..\..\PicoBot-v2 trace.json; $env:PICOBOT_VISION_TRACE = "trace.json"; cargo test -p picobot-core --test vision_parity
+cargo run --release -p picobot-io --example ocr_check -- ..\..\PicoBot-v2   # OCR vs the recorded Python reads
 cargo clippy --all-targets; cargo fmt
 ..\..\PicoBot-v2\.venv\Scripts\python.exe tools\gen_fixtures.py   # regenerate parity fixtures (Python writers)
 ```
@@ -153,8 +154,7 @@ conversion.
   own thread and grabber, 20 Hz) locates the panel, feeds the blackout
   detector, relocates a moved panel and requests title reads on arrival.
   `core::identity` resolves the map from the pin and title reads (voting,
-  stale-read generations, pin override); until the OCR reader lands (M8)
-  titles match exactly and the pin decides. `core::title` segments the
+  stale-read generations, pin override). `core::title` segments the
   title band — identical to Python on 60 generated bands
   (`tests/title_parity.rs`). The `FrameStreamer` thread captures the
   Panel / Window / Title view only while someone subscribes, draws the
@@ -182,8 +182,24 @@ conversion.
   platforms and ropes with undo/clear/tidy, `plat|here|feet`, rope delete,
   anchors) uses `core::layout` (tidy, anchors following their lines, the
   line under the feet); `map|stats|reset`, `map|title`, `nav|show|preview`.
-  Blank-name layout writes need a title-verified map, so until OCR (M8)
-  the dashboard must name the map.
+  Blank-name layout writes need a title-verified map (M8).
+- **M8** — done: title OCR. `io::ocr::TitleReader` runs PaddleOCR's
+  recogniser (`PP-OCRv6_rec_small.onnx`, the model RapidOCR ships; its
+  character list is in the model) through `ort` on each title line that
+  `title_scan` finds — no text detector: each line is cut to its own
+  bright text (faint background art beside a short line would read as
+  letters), resized to 48 px, and CTC-decoded. The model is found in
+  `models/` under the data folder, else in the Python venv. `core::fuzzy`
+  ports `difflib`'s ratio, the sibling rules and `title_score` (identical
+  to Python on 600 generated pairs, `tests/fuzzy_parity.rs`), and
+  `match_title` takes the exact title, else a fuzzy winner (≥ 0.93, 0.05
+  clear). The map monitor captures the band when identity wants a read;
+  the `TitleOCR` thread reads it; a startup read is requested; the bot
+  reinstalls a title-verified map's stored layout. On the 41 recorded
+  title bands (`examples/ocr_check.rs`) every Rust read is clean — 33
+  equal Python's after normalising, the other 8 are Python reads with
+  icon residue (`FQY …`, `Lake e of …`) — in ~40 ms per read (Python
+  ~2 s); against those titles stored, each resolves to the same map.
 
 ## Milestones
 
@@ -203,7 +219,6 @@ then the code, and ends with the Rust tests green.
 | M8 | Title OCR via `ort` + the PaddleOCR ONNX models RapidOCR ships; fuzzy title matching | `vision/mapname.py` | FFI-backed crates, model I/O |
 | M9 | Parity run: same maps, both hosts; compare CPU, capture latency, landing/miss stats; switch over | — | profiling (`cargo flamegraph`) |
 
-Until M8 lands, the Rust host can run with OCR off (a pinned map).
 
 ## Parity checks
 

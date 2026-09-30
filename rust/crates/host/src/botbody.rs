@@ -117,6 +117,25 @@ impl HostBody {
         }
     }
 
+    /// Reinstall a title-verified map's remembered region, so its anchors
+    /// and platforms line up with the layout they were drawn in (not when
+    /// the region is pinned in config).
+    fn apply_stored_layout(&mut self, entry: Option<&MapEntry>) {
+        let Some([x, y, w, h]) = entry.and_then(|e| e.minimap_region) else {
+            return;
+        };
+        if self.cfg.minimap_region.is_some() {
+            return;
+        }
+        let region = (x as i32, y as i32, w as i32, h as i32);
+        if self.analyzer.region() != Some(region) {
+            self.analyzer.set_region(region, false);
+            self.host
+                .bus
+                .emit("vision", &format!("layout restored: [{x}, {y}, {w}, {h}]"));
+        }
+    }
+
     fn refresh_map(&mut self) -> Option<Arc<MapEntry>> {
         let key = (self.host.identity.version(), self.host.map_edits());
         if let Some((k, e)) = &self.map {
@@ -125,6 +144,9 @@ impl HostBody {
             }
         }
         let entry = self.host.identity.entry().map(Arc::new);
+        if self.host.identity.current().via == Some("ocr") {
+            self.apply_stored_layout(entry.as_deref());
+        }
         let name = entry.as_ref().map(|e| e.name.clone());
         if name != self.map_name {
             self.map_name = name;

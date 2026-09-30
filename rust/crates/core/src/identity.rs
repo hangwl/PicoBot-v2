@@ -15,6 +15,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::fuzzy::title_score;
 use crate::maps::{MapEntry, MapStore};
 use crate::title::normalize_name;
 
@@ -63,22 +64,44 @@ pub struct MapIdentity {
     version: AtomicU64,
 }
 
-/// The stored map a title names, and the match score. Exact (normalised)
-/// titles only; fuzzy scoring comes with the OCR reader.
+/// The stored map a title names, and the match score. The exact title
+/// wins outright; otherwise every map scores under its recorded title and
+/// its alias, and the best must reach `MIN_SCORE` and lead the runner-up
+/// by `MARGIN` (else no map, with the best score).
 pub fn match_title(store: &mut MapStore, text: &str) -> (Option<String>, f64) {
+    const MIN_SCORE: f64 = 0.93;
+    const MARGIN: f64 = 0.05;
     let want = normalize_name(text);
-    if want.is_empty() {
+    let entries = store.load_all();
+    if !want.is_empty() {
+        if let Some(e) = entries.iter().find(|e| {
+            e.map_name
+                .as_deref()
+                .is_some_and(|m| normalize_name(m) == want)
+        }) {
+            return (Some(e.name.clone()), 1.0);
+        }
+    }
+    let mut scored: Vec<(f64, usize)> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            (
+                title_score(text, e.map_name.as_deref().unwrap_or(""))
+                    .max(title_score(text, &e.name)),
+                i,
+            )
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let Some(&(best, i)) = scored.first() else {
         return (None, 0.0);
+    };
+    let second = scored.get(1).map_or(0.0, |s| s.0);
+    if best < MIN_SCORE || best - second < MARGIN {
+        return (None, best);
     }
-    let hit = store.load_all().iter().find(|e| {
-        e.map_name
-            .as_deref()
-            .is_some_and(|m| normalize_name(m) == want)
-    });
-    match hit {
-        Some(e) => (Some(e.name.clone()), 1.0),
-        None => (None, 0.0),
-    }
+    (Some(entries[i].name.clone()), best)
 }
 
 impl MapIdentity {
@@ -365,6 +388,23 @@ mod tests {
             .set_pin(Some("East"))
             .contains(&"map: East (pin)".to_owned()));
         assert!(id.version() > v);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn fuzzy_titles_need_a_clear_winner() {
+        let (st, dir) = store();
+        let mut s = st.lock().unwrap();
+        // A misread as close to both siblings: no winner. A clipped read is clear.
+        let (hit, score) = match_title(&mut s, "Limina 1-5 Est");
+        assert!(hit.is_none() && score > 0.5);
+        assert_eq!(
+            match_title(&mut s, "Limina 1-5 Eas").0.as_deref(),
+            Some("East")
+        );
+        // The alias names it.
+        assert_eq!(match_title(&mut s, "West").0.as_deref(), Some("West"));
+        drop(s);
         std::fs::remove_dir_all(dir).ok();
     }
 

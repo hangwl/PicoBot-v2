@@ -23,6 +23,7 @@ use picobot_core::rotation::resolve_coord;
 use picobot_core::skills::Skill;
 use picobot_core::timing::monotonic;
 use picobot_core::vision::Region;
+use picobot_io::ocr::{find_model, TitleReader};
 use picobot_io::serial::{discover_data_port, list_ports, SerialLink};
 use serde_json::{json, Map, Value};
 
@@ -30,7 +31,7 @@ use crate::botbody::{epoch, spawn_bot, spawn_measure, BotRun};
 use crate::bus::Bus;
 use crate::clients::Clients;
 use crate::commands::UndoStep;
-use crate::feed::Feed;
+use crate::feed::{Feed, TitleJob};
 use crate::frames::Overlay;
 
 /// WS message prefixes handled by the host; anything else is HID input
@@ -91,6 +92,27 @@ pub struct Host {
     pub(crate) nav_preview: Mutex<Option<(Vec<LegViz>, f64)>>,
     /// (map, field) -> the edits this session can undo.
     pub(crate) layout_undo: Mutex<HashMap<(String, &'static str), Vec<UndoStep>>>,
+    /// Title bands for the TitleOCR worker (None without a reader).
+    pub(crate) ocr_tx: Mutex<Option<Sender<TitleJob>>>,
+}
+
+/// The title recogniser, if its model is found and loads.
+fn load_reader(root: &std::path::Path, bus: &Bus) -> Option<TitleReader> {
+    let Some(model) = find_model(root) else {
+        bus.emit_level(
+            "map",
+            "title OCR off: PP-OCRv6_rec_small.onnx not found (models/ or the Python venv)",
+            "warn",
+        );
+        return None;
+    };
+    match TitleReader::load(&model) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            bus.emit_level("map", &format!("title OCR off: {e}"), "warn");
+            None
+        }
+    }
 }
 
 pub(crate) fn dash(payload: Value) -> String {
@@ -118,9 +140,16 @@ impl Host {
             BotConfig::default()
         });
         let maps = Arc::new(Mutex::new(MapStore::new(root.join(&bot_config.maps_dir))));
-        // Title reads need the OCR reader (M8); until then the pin decides.
-        let (identity, notes) =
-            MapIdentity::new(maps.clone(), bot_config.active_map.clone(), false);
+        let reader = if bot_config.name_ocr {
+            load_reader(&root, &bus)
+        } else {
+            None
+        };
+        let (identity, notes) = MapIdentity::new(
+            maps.clone(),
+            bot_config.active_map.clone(),
+            reader.is_some(),
+        );
         for n in notes {
             bus.emit("map", &n);
         }
@@ -149,6 +178,7 @@ impl Host {
             config_version: AtomicU64::new(0),
             nav_preview: Mutex::new(None),
             layout_undo: Mutex::default(),
+            ocr_tx: Mutex::new(None),
             bus,
             clients,
             root,
@@ -166,6 +196,15 @@ impl Host {
             .name("SerialWriter".into())
             .spawn(move || h.serial_writer(serial_rx))
             .expect("spawn the serial writer");
+        if let Some(reader) = reader {
+            let (tx, rx) = channel();
+            *host.ocr_tx.lock().unwrap() = Some(tx);
+            let h = host.clone();
+            std::thread::Builder::new()
+                .name("TitleOCR".into())
+                .spawn(move || h.title_worker(reader, rx))
+                .expect("spawn the title reader");
+        }
         let (jobs_tx, jobs_rx) = channel();
         *host.jobs.lock().unwrap() = Some(jobs_tx);
         let h = host.clone();
@@ -751,8 +790,14 @@ impl Host {
         if slot.is_none() {
             let title = self.window_title();
             let cfg = self.bot_config();
-            *slot =
-                Feed::start(&title, &cfg, self.identity.clone(), self.bus.clone()).map(Arc::new);
+            *slot = Feed::start(
+                &title,
+                &cfg,
+                self.identity.clone(),
+                self.bus.clone(),
+                self.ocr_tx.lock().unwrap().clone(),
+            )
+            .map(Arc::new);
         }
         slot.clone()
     }
@@ -981,5 +1026,29 @@ impl Host {
             &format!("active map: {}", pin.as_deref().unwrap_or("auto")),
         );
         self.send_maps();
+    }
+
+    // -- Title OCR --------------------------------------------------------------------
+
+    /// Read title bands off the map monitor, one at a time (~40 ms each).
+    fn title_worker(self: Arc<Self>, mut reader: TitleReader, rx: Receiver<TitleJob>) {
+        for job in rx {
+            let text = reader.read(&job.band);
+            let before = self.identity.version();
+            let notes = self.identity.finish_read(job.gen, text, monotonic());
+            for n in notes {
+                self.bus.emit("map", &n);
+            }
+            if self.identity.version() != before {
+                self.send_maps();
+            }
+        }
+    }
+
+    /// Ask for a title read (startup, re-detect).
+    pub fn request_title(&self) {
+        for n in self.identity.request(false) {
+            self.bus.emit("map", &n);
+        }
     }
 }

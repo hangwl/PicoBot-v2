@@ -135,6 +135,7 @@ fn main() -> ExitCode {
             );
         }
     });
+    host.request_title();
     if let Some(p) = &port {
         // Degraded-tolerant: a stale remembered port must not keep the
         // dashboard from coming up.
