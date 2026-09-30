@@ -15,8 +15,8 @@ use picobot_core::bot::measure::plan_for;
 use picobot_core::bot::navigator::legs_viz;
 use picobot_core::config::{BotConfig, ClassTravel};
 use picobot_core::layout::{
-    line_under_feet, next_anchor_name, r4, resnap_anchors, restore_anchors, same_lines, shift_line,
-    tidy, Moved,
+    erase_target, line_under_feet, next_anchor_name, r4, resnap_anchors, restore_anchors,
+    same_lines, shift_line, tidy, Erase, Moved,
 };
 use picobot_core::maps::MapEntry;
 use picobot_core::minimap::PlayerTracker;
@@ -30,6 +30,7 @@ use serde_json::{json, Map, Value};
 
 use crate::feed::Eyes;
 use crate::host::{dash, Host};
+use crate::telegram::Sent;
 
 /// The line under the feet for "align here": this close to it.
 const HERE_REACH_PX: f64 = 10.0;
@@ -88,6 +89,9 @@ impl Host {
                 self.class_add(name, spec);
             }
             _ if msg.starts_with("patrol|policy|") => self.patrol_set(Some(&arg(2)), None),
+            _ if msg.starts_with("safety|set|") => self.safety_set(&arg(2)),
+            "notify|test" => self.notify_test(),
+            _ if msg.starts_with("layout|erase|") => self.layout_erase(msg),
             _ if msg.starts_with("patrol|temp|") => self.patrol_set(None, Some(&arg(2))),
             "map|stats|reset" => self.map_stats_reset(""),
             _ if msg.starts_with("map|stats|reset|") => self.map_stats_reset(&arg(3)),
@@ -315,6 +319,103 @@ impl Host {
             ),
         );
         self.send_class();
+    }
+
+    /// `safety|set|{json}`: the stop-when toggles and the heartbeat.
+    fn safety_set(&self, spec: &str) {
+        let Ok(Value::Object(want)) = serde_json::from_str::<Value>(spec) else {
+            self.bus
+                .emit("error", "safety settings must be a JSON object");
+            return;
+        };
+        let bools = [
+            "stop_when_players_appear",
+            "stop_when_rune_appears",
+            "stop_when_map_unrecognized",
+        ];
+        let mut edits: Vec<(String, Value)> = Vec::new();
+        for (k, v) in &want {
+            match (k.as_str(), v) {
+                (k, Value::Bool(_)) if bools.contains(&k) => edits.push((k.into(), v.clone())),
+                ("heartbeat_minutes", v) if v.as_f64().is_some_and(|m| m >= 0.0) => {
+                    edits.push((k.clone(), v.clone()))
+                }
+                _ => {
+                    self.bus
+                        .emit("error", &format!("invalid safety setting: {k}"));
+                    return;
+                }
+            }
+        }
+        if let Err(e) = self.commit_bot(|bot| {
+            for (k, v) in edits {
+                bot.insert(k, v);
+            }
+        }) {
+            self.bus.emit("error", &e);
+            return;
+        }
+        self.bus.emit("bot", "safety settings saved");
+        self.send_config();
+    }
+
+    /// `notify|test`: one Telegram message, answered in the log.
+    fn notify_test(&self) {
+        match self
+            .telegram
+            .send("PicoBot (Rust host): test alert — Telegram works.")
+        {
+            Sent::Ok => self.bus.emit("notify", "test alert sent to Telegram"),
+            other => self
+                .bus
+                .emit("error", &format!("Telegram test failed: {other:?}")),
+        }
+    }
+
+    /// `layout|erase|x,y[|name]`: delete the anchor or learned rope under
+    /// a click (minimap px); a stray click deletes nothing.
+    fn layout_erase(&self, msg: &str) {
+        let mut p = msg.splitn(4, '|').skip(2);
+        let coords = p.next().unwrap_or("");
+        let Some((x, y)) = coords.split_once(',').and_then(|(a, b)| {
+            Some((a.trim().parse::<f64>().ok()?, b.trim().parse::<f64>().ok()?))
+        }) else {
+            return;
+        };
+        let Some(mut entry) = self.target_or_report(p.next().unwrap_or("").trim()) else {
+            return;
+        };
+        let Some((w, h)) = self.minimap_size() else {
+            self.bus.emit("error", "no minimap frame — can't erase");
+            return;
+        };
+        let ropes = entry.ropes.clone().unwrap_or_default();
+        let name = entry.name.clone();
+        match erase_target(&entry.rotation.anchors, &ropes, x, y, w, h) {
+            Erase::Anchor(i) => {
+                let removed = entry.rotation.anchors[i].name.clone();
+                entry.rotation.remove_anchor(i);
+                self.save_entry(entry);
+                self.bus
+                    .emit("map", &format!("{name}: removed anchor {removed}"));
+            }
+            Erase::Rope(i) => {
+                let mut left = ropes.clone();
+                self.push_undo(&name, "ropes", (ropes, Vec::new()));
+                left.remove(i);
+                let n = left.len();
+                Host::set_lines(&mut entry, "ropes", left);
+                self.save_entry(entry);
+                self.bus.emit(
+                    "map",
+                    &format!("{name}: removed the rope ({n} left) — it is re-learned if the bot hangs there again"),
+                );
+            }
+            Erase::Nothing => self.bus.emit(
+                "map",
+                "nothing to erase there — click on an anchor or a rope",
+            ),
+        }
     }
 
     pub(crate) fn send_skills(&self) {

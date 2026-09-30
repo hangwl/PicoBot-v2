@@ -77,6 +77,8 @@ pub struct Viz {
     pub route: Option<Vec<LegViz>>,
     pub plan: Option<Vec<LegViz>>,
     pub hazard: Option<String>,
+    /// The run's counters (`Session::snapshot`), refreshed by the host.
+    pub session: Option<serde_json::Value>,
     /// Live summons: (skill, anchor, seconds left).
     pub summons: Vec<(String, String, f64)>,
     /// Summon charges: (skill, have, max).

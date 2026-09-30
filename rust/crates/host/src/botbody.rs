@@ -114,6 +114,7 @@ impl HostBody {
         let now = monotonic();
         if now - self.viz_at >= 0.05 {
             self.viz_at = now;
+            self.state.viz.session = Some(self.state.session.snapshot(now));
             self.host.set_bot_viz(Some(self.state.viz.clone()));
         }
     }

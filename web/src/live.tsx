@@ -8,6 +8,7 @@ import {
   type CanvasMode,
   type LogFilter,
   type PatrolStatus,
+  type SessionStats,
   type ViewMode,
   go,
   send,
@@ -64,6 +65,7 @@ export function TopBar({ s }: { s: AppState }) {
 const HAZARDS: Record<string, string> = {
   rune: "Rune appeared",
   "other players": "Another player is here",
+  "unrecognized map": "Unrecognized map — not saved",
   "verification prompt": "Verification prompt",
 };
 
@@ -109,6 +111,7 @@ export function StatusList({ s }: { s: AppState }) {
     ...(p ? patrolRows(p) : [["Map", s.detected
       ? `${s.detected}${s.via ? ` · ${s.via}` : ""}${conf}`
       : "Not identified"] as [string, string]]),
+    ...(s.botRunning && s.session ? [["Session", sessionLine(s.session)] as [string, string]] : []),
     ["Class", kitLabel(s.classActive, s.profiles[s.classActive])],
     ["Last skill", last ? `${last.msg}${last.t ? ` · ${ago(last.t)}` : ""}` : "–"],
     ...(s.summons && Object.keys(s.summons.charges).length
@@ -143,6 +146,17 @@ function patrolRows(p: PatrolStatus): [string, string][] {
   if (p.next.length) rows.push(["Then", p.next.join(" → ")]);
   rows.push(["Reached", `${p.arrived} anchor${p.arrived === 1 ? "" : "s"} this run`]);
   return rows;
+}
+
+function sessionLine(x: SessionStats): string {
+  const dur = (sec: number) => sec >= 3600
+    ? `${Math.floor(sec / 3600)}h${String(Math.floor(sec / 60) % 60).padStart(2, "0")}m`
+    : sec >= 60 ? `${Math.floor(sec / 60)}m${String(sec % 60).padStart(2, "0")}s` : `${sec}s`;
+  const tries = x.visits + x.misses;
+  const rate = tries ? ` (${Math.round((100 * x.misses) / tries)}%)` : "";
+  return `up ${dur(x.up)} · ${x.visits} visits · ${x.misses} missed${rate}` +
+    (x.skips ? ` · ${x.skips} skipped` : "") +
+    (x.pauses ? ` · ${x.pauses} pause${x.pauses === 1 ? "" : "s"} (${dur(x.paused)})` : "");
 }
 
 function summonLine(sm: NonNullable<AppState["summons"]>): string {
@@ -256,6 +270,8 @@ export function Viewer({ s, tools = false, compact = false }: {
                    `${r(x - ox)},${r(y - oy)}${suffix}`);
             } else if (drawing === "anchors") {
               send(`layout|anchor|${r(sx - ox)},${r(sy - oy)}${suffix}`);
+            } else if (drawing === "erase") {
+              send(`layout|erase|${r(x - ox)},${r(y - oy)}${suffix}`);
             } else if (drawing === "route") {
               send(`nav|preview|${r(sx - ox)},${r(sy - oy)}`);
             }
@@ -303,6 +319,7 @@ function DrawTools({ s, suffix }: { s: AppState; suffix: string }) {
       <button onClick={() => send(`layout|plat|undo${suffix}`)}>Undo platform</button>
       {tool("anchors", "Place anchors")}
       <button onClick={() => send(`layout|anchor|undo${suffix}`)}>Undo anchor</button>
+      {tool("erase", "Erase anchor/rope")}
       {tool("route", "Preview route")}
     </div>
   );
@@ -472,7 +489,7 @@ export function LogView({ s }: { s: AppState }) {
            }}>
         {!shown.length && <div class="muted">No events yet.</div>}
         {shown.map((it) => (
-          <div key={it.id} class={`line ${it.level ?? ""}`}>
+          <div key={it.id} class={`line ${it.level ?? ""}${it.kind === "notify" ? " notify" : ""}`}>
             <span class="t">
               {it.t ? new Date(it.t * 1000).toLocaleTimeString() : ""}
             </span>

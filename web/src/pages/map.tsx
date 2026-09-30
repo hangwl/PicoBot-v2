@@ -32,6 +32,21 @@ export function MapPage({ s }: { s: AppState }) {
         </Field>
       )}
       {bad && <p class="hint warn">Map names can't contain "|".</p>}
+      {s.hazard === "unrecognized map" && !creating && (
+        <div class="banner warn">
+          <span>
+            This map isn't saved{s.title ? ` (title "${s.title}")` : ""}, so the bot is paused.
+            Save it, or pick a saved map.
+          </span>
+          <button disabled={!s.title || s.title.includes("|")}
+                  onClick={() => {
+                    setNewName(s.title);
+                    setCreating(true);
+                  }}>
+            Name it…
+          </button>
+        </div>
+      )}
       <dl class="kv">
         <div><dt>Detected</dt><dd>
           {s.detected || "–"}{s.via ? ` · ${s.via}` : ""}{conf}

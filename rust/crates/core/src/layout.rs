@@ -13,6 +13,42 @@ pub fn r4(v: f64) -> f64 {
 /// An anchor an edit moved: (name, before, after), normalised.
 pub type Moved = Vec<(String, (f64, f64), (f64, f64))>;
 
+/// What a click with the erase tool hits.
+#[derive(Debug, PartialEq)]
+pub enum Erase {
+    Anchor(usize),
+    Rope(usize),
+    Nothing,
+}
+
+/// The anchor (within `ANCHOR_HIT_PX`), else the rope (within
+/// `ROPE_HIT_PX` of its column and span), a click at (x, y) minimap px
+/// lands on.
+pub fn erase_target(anchors: &[Anchor], ropes: &[Seg], x: f64, y: f64, w: f64, h: f64) -> Erase {
+    const ANCHOR_HIT_PX: f64 = 12.0;
+    const ROPE_HIT_PX: f64 = 6.0;
+    let near = anchors
+        .iter()
+        .enumerate()
+        .map(|(i, a)| (i, ((a.x * w - x).powi(2) + (a.y * h - y).powi(2)).sqrt()))
+        .filter(|(_, d)| *d <= ANCHOR_HIT_PX)
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    if let Some((i, _)) = near {
+        return Erase::Anchor(i);
+    }
+    let rope = ropes
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| {
+            let (top, bottom) = ((r[1] * h).min(r[3] * h), (r[1] * h).max(r[3] * h));
+            y >= top - ROPE_HIT_PX && y <= bottom + ROPE_HIT_PX
+        })
+        .map(|(i, r)| (i, ((r[0] + r[2]) / 2.0 * w - x).abs()))
+        .filter(|(_, d)| *d <= ROPE_HIT_PX)
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    rope.map_or(Erase::Nothing, |(i, _)| Erase::Rope(i))
+}
+
 /// Straighten and merge normalised segments (thresholds in px).
 pub fn tidy(segs: &[Seg], w: f64, h: f64) -> Vec<Seg> {
     let px: Vec<Seg> = segs
@@ -161,6 +197,18 @@ pub fn next_anchor_name(anchors: &[Anchor]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn erase_hits_an_anchor_then_a_rope_and_ignores_stray_clicks() {
+        use super::*;
+        let anchors = [Anchor::new("A", 0.5, 0.5)]; // (100, 75) on 200x150
+        let ropes: [Seg; 1] = [[0.25, 0.2, 0.25, 0.8]]; // x 50, y 30..120
+        let hit = |x, y| erase_target(&anchors, &ropes, x, y, 200.0, 150.0);
+        assert_eq!(hit(105.0, 80.0), Erase::Anchor(0));
+        assert_eq!(hit(52.0, 90.0), Erase::Rope(0));
+        assert_eq!(hit(52.0, 130.0), Erase::Nothing); // below the rope
+        assert_eq!(hit(150.0, 40.0), Erase::Nothing);
+    }
+
     use super::*;
 
     const W: f64 = 200.0;

@@ -232,6 +232,7 @@ button.small { min-height: 36px; padding: 0 10px; font-size: 14px; }
 .line .t { color: var(--muted); margin-right: 8px; }
 .line.warn { color: var(--warn); }
 .line.error { color: var(--bad); }
+.line.notify { font-weight: 600; border-left: 3px solid var(--warn); padding-left: 6px; }
 .line.debug { color: var(--muted); }
 .fresh {
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);

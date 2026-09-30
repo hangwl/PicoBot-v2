@@ -51,6 +51,18 @@ impl Session {
         true
     }
 
+    /// The dashboard's view of the run so far.
+    pub fn snapshot(&self, now: f64) -> serde_json::Value {
+        serde_json::json!({
+            "up": (now - self.started).max(0.0).round(),
+            "visits": self.visits,
+            "misses": self.misses,
+            "skips": self.skips,
+            "pauses": self.pauses,
+            "paused": (self.paused_secs + self.paused_at.map_or(0.0, |t| now - t)).round(),
+        })
+    }
+
     pub fn summary(&self, now: f64) -> String {
         let paused = self.paused_secs + self.paused_at.map_or(0.0, |t| now - t);
         let tries = self.visits + self.misses;

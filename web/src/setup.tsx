@@ -7,6 +7,7 @@ import { LayoutPage } from "./pages/layout";
 import { MapPage } from "./pages/map";
 import { MeasurePage, allMeasured } from "./pages/measure";
 import { PatrolPage } from "./pages/patrol";
+import { SafetyPage } from "./pages/safety";
 import { SkillsPage } from "./pages/skills";
 import { type AppState, go } from "./protocol";
 
@@ -85,6 +86,15 @@ const ENTRIES: Entry[] = [
       (s.anchorStats.length ? ` · ${s.anchorStats.length} anchors tracked` : ""),
   },
   {
+    page: "safety", title: "Safety", icon: "alert",
+    sub: (s) => {
+      const on = [s.stopRune && "rune", s.stopPlayers && "players", s.stopMap && "unknown map"]
+        .filter(Boolean);
+      return (on.length ? `pauses on ${on.join(", ")}` : "no automatic pauses") +
+        (s.heartbeat ? ` · status every ${s.heartbeat} min` : "");
+    },
+  },
+  {
     page: "connection", title: "Connection", icon: "plug",
     sub: (s) => `${s.serial || "no serial"}${s.serialOpen ? "" : " (closed)"} · ` +
       `${s.window || "no window"}`,
@@ -148,6 +158,7 @@ function SetupPage({ page, s, wide }: { page: string; s: AppState; wide: boolean
     case "skills": return <SkillsPage s={s} />;
     case "measure": return <MeasurePage s={s} />;
     case "patrol": return <PatrolPage s={s} />;
+    case "safety": return <SafetyPage s={s} />;
     case "connection": return <ConnectionPage s={s} />;
     default: return null;
   }
