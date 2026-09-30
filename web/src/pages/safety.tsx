@@ -5,8 +5,8 @@ import { Field, NumberField, Reply, Section, useReply } from "../ui";
 const TOGGLES: [key: string, on: (s: AppState) => boolean, label: string, hint: string][] = [
   ["stop_when_rune_appears", (s) => s.stopRune, "Pause on a rune",
     "The rune marker appears on the minimap."],
-  ["stop_when_players_appear", (s) => s.stopPlayers, "Pause when another player appears",
-    "Another player's dot is on the minimap."],
+  ["stop_when_players_appear", (s) => s.stopPlayers, "Pause when other players appear",
+    "Another player's dot is on the minimap (more than the number allowed below)."],
   ["stop_when_map_unrecognized", (s) => s.stopMap, "Pause on an unrecognized map",
     "The title names no saved map. Off lets the bot farm an unsaved map with the global rotation."],
 ];
@@ -25,6 +25,18 @@ export function SafetyPage({ s }: { s: AppState }) {
                    onChange={(e) => save({ [key]: (e.target as HTMLInputElement).checked })} />
           </Field>
         ))}
+      </Section>
+      <Section title="Other players"
+               hint="Every change in the count is logged as a warning. The bot pauses only when more than this many are on the minimap.">
+        <Field label="Allowed other players">
+          <NumberField value={s.allowedPlayers} min={0} step={1}
+                       onCommit={(v) => save({ allowed_other_players: Math.round(v) })} />
+        </Field>
+        <Field label="Smallest marker (px)"
+               hint="Specks smaller than this are ignored. Raise it if stray pixels are counted as players.">
+          <NumberField value={s.playerMinPx} min={1} step={1}
+                       onCommit={(v) => save({ other_player_min_px: Math.round(v) })} />
+        </Field>
       </Section>
       <Section title="Telegram"
                hint="Alerts go out for hazards, every stop, crashes, a lost serial port, and a bot that stalls (paused 60 s, no player dot 30 s, or not moving 45 s).">

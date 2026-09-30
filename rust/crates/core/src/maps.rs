@@ -35,6 +35,56 @@ pub struct Walls {
     pub floor: Option<f64>,
 }
 
+/// How one map treats other-player markers, instead of the global setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerRule {
+    /// Markers here aren't players (monsters drawn as players): never pause.
+    Ignore,
+    /// Pause only above this many.
+    Allow(i64),
+}
+
+impl PlayerRule {
+    pub fn from_json(v: &Value) -> Option<Self> {
+        match v.get("mode")?.as_str()? {
+            "ignore" => Some(PlayerRule::Ignore),
+            "allow" => Some(PlayerRule::Allow(v.get("allowed")?.as_i64()?.max(0))),
+            _ => None,
+        }
+    }
+
+    pub fn to_json(self) -> Value {
+        match self {
+            PlayerRule::Ignore => json!({"mode": "ignore"}),
+            PlayerRule::Allow(n) => json!({"mode": "allow", "allowed": n}),
+        }
+    }
+
+    /// `follow`, `ignore` or `allow:N` (what the dashboard sends).
+    pub fn parse(s: &str) -> Result<Option<Self>> {
+        match s.trim() {
+            "follow" => Ok(None),
+            "ignore" => Ok(Some(PlayerRule::Ignore)),
+            other => match other
+                .strip_prefix("allow:")
+                .and_then(|n| n.trim().parse::<i64>().ok())
+            {
+                Some(n) if n >= 0 => Ok(Some(PlayerRule::Allow(n))),
+                _ => bad("rule must be follow, ignore or allow:N"),
+            },
+        }
+    }
+
+    /// The form `parse` reads; `follow` for no rule.
+    pub fn label(rule: Option<Self>) -> String {
+        match rule {
+            None => "follow".into(),
+            Some(PlayerRule::Ignore) => "ignore".into(),
+            Some(PlayerRule::Allow(n)) => format!("allow:{n}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapEntry {
     pub name: String,
@@ -47,6 +97,8 @@ pub struct MapEntry {
     pub ropes: Option<Vec<Segment>>,
     pub rotation: Rotation,
     pub skills: Vec<Skill>,
+    /// Other-player handling for this map; None follows the global setting.
+    pub other_players: Option<PlayerRule>,
     /// Where this entry was loaded from / last saved to.
     pub path: Option<PathBuf>,
 }
@@ -63,6 +115,7 @@ impl MapEntry {
             ropes: None,
             rotation: Rotation::default(),
             skills: Vec::new(),
+            other_players: None,
             path: None,
         }
     }
@@ -87,6 +140,7 @@ impl MapEntry {
             ropes: segments(obj.get("ropes")),
             rotation: Rotation::from_json(obj.get("rotation").unwrap_or(&Value::Null))?,
             skills: skills_from_json(obj.get("skills").unwrap_or(&Value::Null))?,
+            other_players: obj.get("other_players").and_then(PlayerRule::from_json),
             path,
         })
     }
@@ -112,7 +166,7 @@ impl MapEntry {
             }
             None => Value::Null,
         };
-        json!({
+        let mut out = json!({
             "name": self.name,
             "map_name": self.map_name,
             "fingerprint": self.fingerprint,
@@ -122,7 +176,11 @@ impl MapEntry {
             "ropes": segs(&self.ropes),
             "rotation": self.rotation.to_json(),
             "skills": skills_to_json(&self.skills),
-        })
+        });
+        if let Some(rule) = self.other_players {
+            out["other_players"] = rule.to_json();
+        }
+        out
     }
 }
 
@@ -281,6 +339,33 @@ fn scan(dir: &Path) -> (Vec<MapEntry>, Vec<(PathBuf, String)>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_player_rule_round_trips_and_absent_stays_absent() {
+        let mut e = MapEntry::new("Crowded");
+        assert!(e.to_json().get("other_players").is_none());
+        for rule in [PlayerRule::Ignore, PlayerRule::Allow(3)] {
+            e.other_players = Some(rule);
+            let back = MapEntry::from_json(&e.to_json(), None).unwrap();
+            assert_eq!(back.other_players, Some(rule));
+        }
+    }
+
+    #[test]
+    fn player_rules_parse_the_dashboard_form() {
+        assert_eq!(PlayerRule::parse("follow").unwrap(), None);
+        assert_eq!(
+            PlayerRule::parse("ignore").unwrap(),
+            Some(PlayerRule::Ignore)
+        );
+        assert_eq!(
+            PlayerRule::parse("allow:2").unwrap(),
+            Some(PlayerRule::Allow(2))
+        );
+        assert!(PlayerRule::parse("allow:-1").is_err());
+        assert!(PlayerRule::parse("sometimes").is_err());
+        assert_eq!(PlayerRule::label(Some(PlayerRule::Allow(2))), "allow:2");
+    }
+
     use super::*;
 
     #[test]

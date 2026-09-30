@@ -1,8 +1,10 @@
 //! Map identity: the title read off the screen, and the user's pin.
 //!
 //! Resolution order: a confident title match for a *different* stored map
-//! overrides the pin; otherwise the pin stands; otherwise the title match;
-//! otherwise unknown. Reads are request-driven (startup, arrival, pin,
+//! overrides the pin; otherwise the pin stands — unless the accepted title
+//! read matches neither the pinned map's recorded title nor its alias, in
+//! which case the map is unknown; otherwise the title match; otherwise
+//! unknown. Reads are request-driven (startup, arrival, pin,
 //! panel moved) and voted: a strong match is taken at once, else two
 //! agreeing reads, else the last readable one after `max_reads`.
 //!
@@ -52,6 +54,10 @@ struct Inner {
     current: Resolution,
     pin: Option<String>,
     pin_warned: bool,
+    /// Arrived on a new map and its title isn't read yet.
+    stale: bool,
+    /// A read has been accepted (or given up on) since the last arrival.
+    settled: bool,
 }
 
 pub struct MapIdentity {
@@ -145,10 +151,30 @@ impl MapIdentity {
         s.want || s.busy
     }
 
-    /// The reads are done and named no stored map (and none is pinned).
+    /// The latest reads are settled and name no stored map (and none is
+    /// pinned). A re-check of the title doesn't unsettle it.
     pub fn unrecognized(&self) -> bool {
         let s = self.inner.lock().unwrap();
-        self.ocr_enabled && !s.want && !s.busy && s.current.name.is_none()
+        self.ocr_enabled && s.settled && s.current.name.is_none()
+    }
+
+    /// Just arrived on a map whose title hasn't been read: nothing resolved
+    /// before the arrival (a pin included) says where this is.
+    pub fn identifying(&self) -> bool {
+        let s = self.inner.lock().unwrap();
+        self.ocr_enabled && s.stale && s.want
+    }
+
+    /// Does an accepted title read fit the pinned map: its recorded title
+    /// or its alias? A pin with neither close to the read is contradicted.
+    fn pin_confirmed(&self, pin: &str, text: &str) -> bool {
+        const CONFIRM: f64 = 0.7;
+        let mut store = self.store.lock().unwrap();
+        let Some(e) = store.get(pin) else {
+            return true;
+        };
+        title_score(text, e.map_name.as_deref().unwrap_or("")).max(title_score(text, &e.name))
+            >= CONFIRM
     }
 
     /// The resolved map's stored entry (fresh after saves).
@@ -166,6 +192,8 @@ impl MapIdentity {
         s.reads.clear();
         s.next_at = 0.0;
         if clear {
+            s.stale = self.ocr_enabled;
+            s.settled = false;
             s.title = None;
             return self.recompute(&mut s);
         }
@@ -255,6 +283,8 @@ impl MapIdentity {
             return Vec::new();
         };
         s.want = false;
+        s.stale = false;
+        s.settled = true;
         let unreadable = acc.key.is_empty();
         s.title = (!unreadable).then_some(acc);
         let mut notes = if unreadable {
@@ -279,8 +309,17 @@ impl MapIdentity {
                 notes.push(format!("pinned map '{pin}' not found"));
             }
         }
+        let contradicted = match (
+            &pinned,
+            &title_map,
+            s.title.as_ref().and_then(|t| t.text.as_deref()),
+        ) {
+            (Some(p), None, Some(text)) => !self.pin_confirmed(p, text),
+            _ => false,
+        };
         let (name, via) = match (&pinned, &title_map) {
             (Some(p), Some(t)) if t != p => (Some(t.clone()), Some("ocr")),
+            (Some(_), None) if contradicted => (None, None),
             (Some(p), t) => (
                 Some(p.clone()),
                 Some(if t.as_ref() == Some(p) { "ocr" } else { "pin" }),
@@ -312,6 +351,9 @@ impl MapIdentity {
                     .filter(|p| via == Some("ocr") && name.as_ref() != Some(*p))
                 {
                     detail += &format!(" (overrides pin '{p}')");
+                }
+                if let (true, Some(p)) = (contradicted, pinned.as_ref()) {
+                    detail += &format!(" (doesn't match pin '{p}')");
                 }
                 notes.push(format!(
                     "map: {} ({}){detail}",
@@ -430,6 +472,109 @@ mod tests {
         let g = id.begin_read().unwrap();
         id.finish_read(g, Some("Limina : 1-5 East".into()), 3.0);
         assert!(!id.unrecognized());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Read the title twice (two agreeing reads are accepted).
+    fn read_twice(id: &MapIdentity, text: &str) -> Vec<String> {
+        let mut notes = Vec::new();
+        for t in [1.0, 1.5] {
+            let g = id.begin_read().unwrap();
+            notes.extend(id.finish_read(g, Some(text.into()), t));
+        }
+        notes
+    }
+
+    fn with_plain(st: &Arc<Mutex<MapStore>>) {
+        // A saved map with no recorded title: only its alias can vouch for it.
+        st.lock()
+            .unwrap()
+            .save(MapEntry::new("Plain Farm"))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_pin_does_not_hold_when_the_title_names_somewhere_unsaved() {
+        let (st, dir) = store();
+        with_plain(&st);
+        let (id, _) = MapIdentity::new(st, Some("Plain Farm".into()), true);
+        id.request(true);
+        let notes = read_twice(&id, "Plain Farm Entrance"); // the sibling next door
+        assert!(id.current().name.is_none(), "{:?}", id.current());
+        assert!(id.unrecognized());
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("doesn't match pin 'Plain Farm'")),
+            "{notes:?}"
+        );
+        // Back on the pinned map, the pin holds again.
+        id.request(true);
+        read_twice(&id, "Plain Farm");
+        assert_eq!(id.current().name.as_deref(), Some("Plain Farm"));
+        assert!(!id.unrecognized());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_pin_holds_against_a_misread_of_its_own_title() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, Some("East".into()), true);
+        id.request(true);
+        read_twice(&id, "Limina 1-5 Eas"); // clipped, still East
+        assert_eq!(id.current().name.as_deref(), Some("East"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_pin_with_nothing_to_judge_by_does_not_pause_on_an_unreadable_title() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, Some("East".into()), true);
+        id.request(true);
+        for t in 0..5 {
+            let g = id.begin_read().unwrap();
+            id.finish_read(g, None, f64::from(t));
+        }
+        assert_eq!(id.current().name.as_deref(), Some("East")); // the pin stands
+        assert!(!id.identifying());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn rechecking_the_title_keeps_an_unknown_map_unrecognized() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, None, true);
+        id.request(true);
+        read_twice(&id, "Nowhere Special");
+        assert!(id.unrecognized());
+        id.request(false); // the periodic verification read
+        assert!(id.pending() && id.unrecognized(), "no resume between reads");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_recheck_catches_a_transfer_that_never_blacked_out() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, None, true);
+        id.request(true);
+        read_twice(&id, "Limina : 1-5 East");
+        assert_eq!(id.current().name.as_deref(), Some("East"));
+        id.request(false); // no arrival was seen; the next read says West
+        let g = id.begin_read().unwrap();
+        let notes = id.finish_read(g, Some("Limina : 1-5 West".into()), 3.0);
+        assert_eq!(id.current().name.as_deref(), Some("West"), "{notes:?}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn arrival_is_identifying_until_the_title_is_read() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, Some("East".into()), true);
+        assert!(!id.identifying()); // the startup read trusts the pin
+        id.request(true);
+        assert!(id.identifying());
+        read_twice(&id, "Limina : 1-5 East");
+        assert!(!id.identifying());
         std::fs::remove_dir_all(dir).ok();
     }
 

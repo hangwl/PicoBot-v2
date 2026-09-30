@@ -1,6 +1,12 @@
 // Setup → Measure moves (and the up-flash timing sweep).
 import { Icon } from "../icons";
-import { type AppState, type SweepRow, send } from "../protocol";
+import {
+  type AppState,
+  type SkillEffectRow,
+  type SweepRow,
+  type TapRow,
+  send,
+} from "../protocol";
 import { Section } from "../ui";
 
 export function allMeasured(s: AppState): boolean {
@@ -73,6 +79,9 @@ export function MeasurePage({ s }: { s: AppState }) {
       {s.botRunning && <p class="hint warn">Stop the bot first.</p>}
       <p class="hint">Switching away from the game also stops a measurement.</p>
       {plan.includes("up_flash") && <UpFlashSweep s={s} />}
+      <WalkTaps s={s} />
+      {s.profiles[s.classActive]?.travel !== "teleport" &&
+        s.profiles[s.classActive]?.travel !== "walk" && <SkillEffects s={s} />}
     </div>
   );
 }
@@ -93,11 +102,106 @@ function sweepNote(r: SweepRow): string {
   return parts.join(" · ");
 }
 
+export function effectNote(e: SkillEffectRow): string {
+  const parts: string[] = [];
+  if (Math.abs(e.dx) >= 3) {
+    parts.push(`${e.dx < 0 ? "pulls back" : "carries"} ${Math.abs(e.dx)}px`);
+  } else {
+    parts.push("doesn't move the landing");
+  }
+  if (e.hang >= 0.1) parts.push(`holds ${e.hang}s`);
+  return parts.join(" · ");
+}
+
+function SkillEffects({ s }: { s: AppState }) {
+  const m = s.measure;
+  const live = m.running && m.mode === "skill_effects";
+  const saved = m.profiles.skill_effects;
+  const rows = (live ? m.profile : saved?.rows ?? []) as SkillEffectRow[];
+  return (
+    <Section title="Skill effects" hint={<>
+        Stand in the middle of a drawn platform at least 140px long. The
+        character flashes a few times plainly, then with each attack skill
+        cast just after the flash triggers, and records how far the skill
+        moves the landing and how long it holds the character up. Attacks
+        that would carry a landing off its platform are then kept out of
+        that hop. Skills cast on the ground only are skipped.
+    </>}>
+      {rows.length > 0 && (
+        <ul class="rows">
+          {rows.map((r) => (
+            <li key={r.skill}>
+              <b>{r.skill}</b>
+              <span class="pill">{effectNote(r)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!live && saved && (
+        <p class="hint">Saved {new Date(saved.at * 1000).toLocaleString()}.</p>
+      )}
+      {!m.running && (
+        <div class="actions">
+          <button disabled={s.botRunning || s.ws !== "on"}
+                  onClick={() => send("measure|profile|effects")}>
+            {saved ? "Measure skill effects again" : "Measure skill effects"}
+          </button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function WalkTaps({ s }: { s: AppState }) {
+  const m = s.measure;
+  const live = m.running && m.mode === "walk_taps";
+  const saved = m.profiles.walk_taps;
+  const rows = (live ? m.profile : saved?.rows ?? []) as TapRow[];
+  const pace = m.profiles.walk_speed?.rows?.[0] as
+    { speed: number; slide: number } | undefined;
+  const top = Math.max(1, ...rows.map((r) => r.dx));
+  return (
+    <Section title="Walk taps" hint={<>
+        Stand on a drawn platform at least 120px long. The character
+        taps left and right with keypresses of several lengths and records
+        how far each one carries, then walks for a moment to time its pace.
+        Precise final approaches then step in with the tap that fits
+        instead of holding a key and overshooting.
+    </>}>
+      {rows.length > 0 && (
+        <ul class="rows sweep">
+          {rows.map((r) => (
+            <li key={r.ms}>
+              <b>{r.ms} ms</b>
+              <span class="bar"><i style={{ width: `${(r.dx / top) * 100}%` }} /></span>
+              <span class="pill">{r.dx}px{r.n > 1 ? ` ±${r.sd}` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!live && pace && (
+        <p class="hint">
+          Pace {pace.speed} px/s, {pace.slide} px slide after release.
+          {saved && ` Saved ${new Date(saved.at * 1000).toLocaleString()}.`}
+        </p>
+      )}
+      {!m.running && (
+        <div class="actions">
+          <button disabled={s.botRunning || s.ws !== "on"}
+                  onClick={() => send("measure|profile|walk")}>
+            {saved ? "Measure taps again" : "Measure walk taps"}
+          </button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function UpFlashSweep({ s }: { s: AppState }) {
   const m = s.measure;
   const live = m.running && m.mode === "up_flash_profile";
   const saved = m.profiles.up_flash;
-  const rows = live ? m.profile : saved?.rows ?? [];
+  const rows = (live ? m.profile : saved?.rows ?? []) as SweepRow[];
   const top = Math.max(1, ...rows.map((r) => r.max ?? 0));
   return (
     <Section title="Up-flash timing" hint={<>

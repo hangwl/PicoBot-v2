@@ -74,7 +74,8 @@ fn safety<B: Body + ?Sized>(body: &mut B, notify: bool) -> Option<State> {
         if let Some(c) = r.get_mut(0..1) {
             c.make_ascii_uppercase();
         }
-        body.notify(&format!("{r} detected — pausing"));
+        let note = body.hazard_note().unwrap_or_default();
+        body.notify(&format!("{r} detected — pausing{note}"));
     }
     Some(State::Pause)
 }

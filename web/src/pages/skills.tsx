@@ -1,10 +1,14 @@
 // Setup → Skills.
 import { useState } from "preact/hooks";
-import { type AppState, send } from "../protocol";
+import { type AppState, type SkillEffectRow, send } from "../protocol";
 import { Field, val } from "../ui";
+import { effectNote } from "./measure";
 
 export function SkillsPage({ s }: { s: AppState }) {
   const names = Object.keys(s.skills).sort();
+  const effects = new Map(
+    ((s.measure.profiles.skill_effects?.rows ?? []) as SkillEffectRow[]).map((e) => [e.skill, e]),
+  );
   return (
     <div class="form">
       <p class="muted">
@@ -28,6 +32,15 @@ export function SkillsPage({ s }: { s: AppState }) {
               <span class="pill">{sk.kind}</span>
               <span class="pill">{sk.key}</span>
               {!!sk.cooldown && <span class="pill">{sk.cooldown}s</span>}
+              {sk.stance && sk.stance !== "any" && (
+                <span class="pill">{sk.stance} only</span>
+              )}
+              {effects.has(n) && (
+                <span class="pill">{effectNote(effects.get(n)!)}</span>
+              )}
+              {sk.weight != null && sk.weight !== 1 && (
+                <span class="pill">weight {sk.weight}</span>
+              )}
               {sk.kind === "summon" && (sk.charges ?? 1) > 1 && (
                 <span class="pill">{sk.charges} charges</span>
               )}
@@ -54,12 +67,16 @@ function SkillAdd() {
   const [cd, setCd] = useState("");
   const [charges, setCharges] = useState("");
   const [dur, setDur] = useState("");
+  const [stance, setStance] = useState("any");
+  const [weight, setWeight] = useState("");
   const n = name.trim();
   const cdNum = cd.trim() === "" ? 0 : Number(cd);
   const chNum = charges.trim() === "" ? 1 : Number(charges);
   const durNum = dur.trim() === "" ? 0 : Number(dur);
+  const wNum = weight.trim() === "" ? 1 : Number(weight);
   const summon = kind === "summon";
-  const ok = !!n && !n.includes("|") && !!key.trim() &&
+  const attack = kind === "attack" || kind === "movement";
+  const ok = !!n && Number.isFinite(wNum) && wNum >= 0 && !n.includes("|") && !!key.trim() &&
     Number.isFinite(cdNum) && cdNum >= 0 &&
     (!summon || (Number.isInteger(chNum) && chNum >= 1 &&
                  Number.isFinite(durNum) && durNum >= 0));
@@ -74,12 +91,18 @@ function SkillAdd() {
         spec.charges = chNum;
         spec.duration = durNum;
       }
+      if (attack) {
+        spec.stance = stance;
+        spec.weight = wNum;
+      }
       send(`skills|set|` + JSON.stringify(spec));
       setName("");
       setKey("");
       setCd("");
       setCharges("");
       setDur("");
+      setStance("any");
+      setWeight("");
     }}>
       <div class="grid2">
         <Field label="Name"><input value={name} placeholder="burst"
@@ -98,6 +121,22 @@ function SkillAdd() {
           <input type="number" inputMode="decimal" step="0.1" min="0"
                  placeholder="0" value={cd} onInput={(e) => setCd(val(e))} />
         </Field>
+        {attack && (
+          <Field label="Cast" hint="Where it can be used.">
+            <select value={stance} onChange={(e) => setStance(val(e))}>
+              <option value="any">Ground or air</option>
+              <option value="ground">Ground only</option>
+              <option value="air">Air only</option>
+            </select>
+          </Field>
+        )}
+        {attack && (
+          <Field label="Weight" hint="Higher is picked more often.">
+            <input type="number" inputMode="decimal" step="0.5" min="0"
+                   placeholder="1" value={weight}
+                   onInput={(e) => setWeight(val(e))} />
+          </Field>
+        )}
         {summon && (
           <Field label="Charges" hint="Out at once, max.">
             <input type="number" inputMode="numeric" step="1" min="1"

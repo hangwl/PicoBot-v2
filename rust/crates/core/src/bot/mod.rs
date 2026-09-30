@@ -11,7 +11,7 @@ pub mod patrol;
 pub mod session;
 pub mod watchdog;
 
-pub use body::{Body, BotState, Dir, Keys, LegViz, PatrolStatus, Travel, Viz};
+pub use body::{Body, BotState, Dir, Keys, LegViz, PatrolStatus, Travel, Viz, Window};
 pub use flight::{Flight, FlightRecorder};
 pub use machine::{Machine, State};
 pub use measure::{MeasureStatus, Mode, MoveMeasurer, Recorder};

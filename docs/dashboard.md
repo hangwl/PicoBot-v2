@@ -72,6 +72,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     identity), or `New map…` (*Create map* saves and pins it); detected
     map, how it was resolved, the title on screen and the recorded one;
     Save map / Re-detect / Forget (confirmed); Record / Clear title.
+    **Other players on this map** follows the global setting, ignores
+    the markers (maps that draw monsters as players) or allows up to N.
   - **Layout** — the map's platforms, anchors and ropes: counts, Tidy
     platforms / Undo platform / Align platform to feet, the **platform
     fit** list (per platform, whether the feet settle on its line or it
@@ -91,10 +93,17 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     While measuring, the top bar says so and Start bot is replaced.
     Flash classes also get **Up-flash timing**: a sweep button and the
     per-delay peaks (live while sweeping, then the saved sweep).
+    Every class also gets **Walk taps** (tap lengths, pace), and flash
+    classes **Skill effects** (what each air attack does to a flash;
+    shown on the Skills page too).
   - **Patrol** — loop order + temperature, and per-anchor **stats**
     (visits, misses, skips by reason; Reset).
+  - **Attacks** — how often a move and a landing carry attacks, the
+    second-attack chance and a target attacks-per-minute; the running
+    rate shows here and in the Session row.
   - **Safety** — the pause toggles (rune, other players, unrecognized
-    map), the Telegram status interval (0 = off) and a **Send test
+    map), how many other players are allowed and the smallest marker
+    that counts (Home shows the live count), the Telegram status interval (0 = off) and a **Send test
     alert** button. Home's status list shows the running **Session**
     (uptime, visits, misses, skips, pauses); an unrecognized map sends
     you to the Map page, whose banner offers to name and save it.

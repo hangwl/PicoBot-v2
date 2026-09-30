@@ -263,7 +263,18 @@ pub fn weave_around<B: Body + ?Sized>(body: &mut B, ax: f64, ay: f64, home: Opti
         }
     }
     body.state().weave_dir = Some(dir);
+    // A skill cast mid-hop mustn't carry the landing past the weave bounds.
+    body.state().air_slack = pos.map(|p| {
+        let land = p.0 + if dir == Dir::Right { hop } else { -hop };
+        let (low, high) = ((land - lo).max(0.0), (hi - land).max(0.0));
+        if dir == Dir::Right {
+            (low, high)
+        } else {
+            (high, low)
+        }
+    });
     body.weave_move(dir);
+    body.state().air_slack = None;
 }
 
 /// A single anchor (or none reachable): keep moving on its platform.

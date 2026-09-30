@@ -15,7 +15,7 @@ use picobot_core::bot::measure::plan_for;
 use picobot_core::bot::{LegViz, MeasureStatus, Mode, Viz};
 use picobot_core::config::{AppConfig, BotConfig, ClassTravel};
 use picobot_core::identity::MapIdentity;
-use picobot_core::maps::{MapEntry, MapStore};
+use picobot_core::maps::{MapEntry, MapStore, PlayerRule};
 use picobot_core::navgraph::{GraphCache, GraphOptions, NavGraph};
 use picobot_core::platform_fit::{PlatformFit, SegKey};
 use picobot_core::reach::{base_reach, ReachModel};
@@ -37,7 +37,7 @@ use crate::telegram::Telegram;
 
 /// WS message prefixes handled by the host; anything else is HID input
 /// for the Pico.
-const DASHBOARD_PREFIXES: [&str; 13] = [
+const DASHBOARD_PREFIXES: [&str; 16] = [
     "bot|",
     "map|",
     "measure|",
@@ -51,6 +51,9 @@ const DASHBOARD_PREFIXES: [&str; 13] = [
     "nav|",
     "class|",
     "patrol|",
+    "safety|",
+    "notify|",
+    "attacks|",
 ];
 
 pub struct Host {
@@ -688,6 +691,8 @@ impl Host {
                 self.measure_start(Mode::Moves, Some(arg(2).trim().to_owned()))
             }
             "measure|profile|up_flash" => self.measure_start(Mode::UpFlashProfile, None),
+            "measure|profile|walk" => self.measure_start(Mode::WalkTaps, None),
+            "measure|profile|effects" => self.measure_start(Mode::SkillEffects, None),
             "measure|stop" => Host::stop_slot(&self.measurer),
             "measure|status" => self.send_measure(None),
             _ => return self.handle_edit(msg),
@@ -1012,6 +1017,7 @@ impl Host {
             "platform_fit": fit,
             "ropes": self.rope_rows(entry.as_ref(), region),
             "recorded_title": entry.as_ref().and_then(|e| e.map_name.clone()),
+            "players_rule": PlayerRule::label(entry.as_ref().and_then(|e| e.other_players)),
             "anchor_stats": stats,
         });
         self.clients.broadcast(&dash(payload));
@@ -1058,5 +1064,47 @@ impl Host {
         for n in self.identity.request(false) {
             self.bus.emit("map", &n);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DASHBOARD_PREFIXES;
+
+    /// A command the dashboard handles but whose prefix is missing from
+    /// `DASHBOARD_PREFIXES` would be sent to the Pico as HID input.
+    #[test]
+    fn every_dashboard_command_prefix_is_routed() {
+        let mut found = Vec::new();
+        for src in [include_str!("commands.rs"), include_str!("host.rs")] {
+            for line in src.lines() {
+                let quoted = line
+                    .split("starts_with(\"")
+                    .skip(1)
+                    .map(|rest| rest.split('"').next().unwrap_or(""))
+                    .chain(
+                        line.trim_start()
+                            .strip_prefix('"')
+                            .filter(|_| line.contains("\" =>"))
+                            .and_then(|rest| rest.split('"').next()),
+                    );
+                for q in quoted {
+                    if let Some((head, _)) = q.split_once('|') {
+                        found.push(format!("{head}|"));
+                    }
+                }
+            }
+        }
+        found.sort();
+        found.dedup();
+        assert!(found.len() >= 10, "scan found too little: {found:?}");
+        let missing: Vec<_> = found
+            .iter()
+            .filter(|p| p.as_str() != "hid|" && !DASHBOARD_PREFIXES.contains(&p.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not routed as dashboard commands: {missing:?}"
+        );
     }
 }

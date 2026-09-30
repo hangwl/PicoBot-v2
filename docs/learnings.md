@@ -299,3 +299,13 @@ A whole-codebase pass before the Rust port found, among others:
   it revisits far anchors sooner. The logs pointed at skips (no route,
   missed landings) instead, so per-anchor stats went on the Map page
   rather than a heat-map policy.
+- **A pin outlived the map it named** (2026-10-01): walking into
+  "Identisk Tisk Food Storehouse Entrance" from the pinned "Identisk Tisk
+  Food Storehouse", the title read matched no stored map, so the pin
+  stood (`(pin)` in the log) and the bot farmed the wrong map — the pause
+  also ended before the title read finished, because the pin was trusted
+  in the gap after the arrival cleared the old title. The stored map had
+  no recorded title, so only its alias could vouch for it; the sibling
+  title scores 0.6 against it. Now an accepted read that fits neither the
+  recorded title nor the alias (0.7) contradicts the pin, and an arrival
+  holds the bot until the read is settled.

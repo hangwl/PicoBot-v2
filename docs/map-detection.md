@@ -130,15 +130,28 @@ stored 2-6 (0.952), and a map whose title contains another's matched
 it.
 
 **Requests**: startup, arrival, pin change, title-band change,
-panel moved (only if no title yet). Never per-frame.
+panel moved (only if no title yet), the dashboard's Re-detect (which also
+drops the panel region), and a **verification read every 5 s** while the
+monitor runs. The blackout detector only sees a full dark capture held for
+0.15 s; a transfer without one (or a shorter one) is caught by the next
+verification read, logged as `the map title changed with no loading
+screen — a transfer was missed`. A verification read doesn't unsettle an
+unknown map, so the bot doesn't resume between reads. Never per-frame.
 
 ## Resolution (`MapIdentity`, shared by host and bot)
 
 1. The title matches a stored map that differs from the pin → that map
    (`via: ocr`, logged as overriding the pin).
 2. Else a pin → the pin (`via: ocr` if the title confirms it, else
-   `pin`).
+   `pin`) — **unless** the accepted title read is close (≥ 0.7) to neither
+   the pinned map's recorded title nor its alias: then the map is
+   unknown (`(doesn't match pin 'X')` in the log) and the bot pauses as an
+   unrecognized map. An unreadable title leaves the pin standing.
 3. Else the title's map, or unknown.
+
+After an arrival the old title is cleared and the map is **identifying**
+until the new read is accepted or given up: the bot holds in PAUSE
+("identifying map") instead of trusting the pin in between.
 
 Consumers poll `identity.version`. The bot applies changes on its own
 thread (`_sync_map`); the host broadcasts a `maps` payload when the

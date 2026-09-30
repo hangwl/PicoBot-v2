@@ -105,7 +105,9 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   are planned only when no jump/rope-lift path is within this much
   cheaper. Set 0 to allow ropes freely.
 - `class` — named class profiles with an active selector; the active
-  profile overlays `travel` (flash|teleport|walk), `air_attacks`, the
+  profile overlays `travel` (flash|teleport|walk), `air_attacks`,
+  `double_flash` (default true; false drops double-flash edges and its
+  measurement), the
   teleport keys, **its own movement keys** (`jump_key`,
   `up_jump_skill_key`, `flash_jump`) and **its own `skills` kit**. When
   every profile carries its kit, the top-level `skills`/`jump_key`/
@@ -138,6 +140,21 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
 - `stop_when_map_unrecognized` — pause (and alert) when the title read
   names no saved map and none is pinned. Turn it off only to farm an
   unsaved map with the global rotation.
+- `move_attack_chance` / `ground_attack_chance` (0–1; default 1 / 0) —
+  the odds a move or a landing opens an attack window;
+  `weave_double_chance` is the chance a firing window casts two;
+  `target_attacks_per_min` (default 0 = off) steers those odds toward a
+  rate. Setup → Attacks edits them (`attacks|set`).
+- `allowed_other_players` (default 0) — other players tolerated on the
+  minimap before the bot pauses (`stop_when_players_appear`);
+  `other_player_min_px` (default 6) — the smallest marker that counts.
+  Markers within 2px merge into one, so players standing on top of each
+  other count once. Every change in the count is logged as a warning.
+- A map file may carry `"other_players": {"mode": "ignore"}` or
+  `{"mode": "allow", "allowed": N}` — that map ignores other-player
+  markers (monsters drawn as players) or tolerates N, instead of the
+  global setting; absent follows it. Set on the Map page
+  (`map|players`). On an ignoring map the count is logged at debug level.
 - `heartbeat_minutes` — Telegram status message every N minutes while
   the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.

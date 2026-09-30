@@ -66,6 +66,7 @@ const HAZARDS: Record<string, string> = {
   rune: "Rune appeared",
   "other players": "Another player is here",
   "unrecognized map": "Unrecognized map — not saved",
+  "identifying map": "Identifying the map…",
   "verification prompt": "Verification prompt",
 };
 
@@ -111,6 +112,9 @@ export function StatusList({ s }: { s: AppState }) {
     ...(p ? patrolRows(p) : [["Map", s.detected
       ? `${s.detected}${s.via ? ` · ${s.via}` : ""}${conf}`
       : "Not identified"] as [string, string]]),
+    ...(s.botRunning && s.others > 0
+      ? [["Other players", `${s.others} on the minimap`] as [string, string]]
+      : []),
     ...(s.botRunning && s.session ? [["Session", sessionLine(s.session)] as [string, string]] : []),
     ["Class", kitLabel(s.classActive, s.profiles[s.classActive])],
     ["Last skill", last ? `${last.msg}${last.t ? ` · ${ago(last.t)}` : ""}` : "–"],
@@ -156,6 +160,7 @@ function sessionLine(x: SessionStats): string {
   const rate = tries ? ` (${Math.round((100 * x.misses) / tries)}%)` : "";
   return `up ${dur(x.up)} · ${x.visits} visits · ${x.misses} missed${rate}` +
     (x.skips ? ` · ${x.skips} skipped` : "") +
+    (x.apm != null ? ` · ${x.apm} attacks/min` : "") +
     (x.pauses ? ` · ${x.pauses} pause${x.pauses === 1 ? "" : "s"} (${dur(x.paused)})` : "");
 }
 

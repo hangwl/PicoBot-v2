@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use picobot_core::bot::{Body, BotState, FlightRecorder, Keys, Machine, Mode, MoveMeasurer};
 use picobot_core::config::BotConfig;
-use picobot_core::maps::MapEntry;
+use picobot_core::maps::{MapEntry, PlayerRule};
 use picobot_core::minimap::{MinimapAnalyzer, PlayerTracker};
 use picobot_core::timing::{monotonic, new_session};
 use picobot_core::vision::Image;
@@ -78,6 +78,8 @@ pub struct HostBody {
     viz_at: f64,
     minimap_warned: bool,
     cfg_version: u64,
+    /// Other players tolerated on the current map (global or its rule).
+    players_allowed: i64,
 }
 
 impl HostBody {
@@ -106,6 +108,7 @@ impl HostBody {
             viz_at: f64::NEG_INFINITY,
             minimap_warned: false,
             cfg_version: host_version,
+            players_allowed: 0,
         }
     }
 
@@ -114,7 +117,9 @@ impl HostBody {
         let now = monotonic();
         if now - self.viz_at >= 0.05 {
             self.viz_at = now;
-            self.state.viz.session = Some(self.state.session.snapshot(now));
+            let mut session = self.state.session.snapshot(now);
+            session["apm"] = self.attack_rate().round().into();
+            self.state.viz.session = Some(session);
             self.host.set_bot_viz(Some(self.state.viz.clone()));
         }
     }
@@ -136,6 +141,28 @@ impl HostBody {
                 .bus
                 .emit("vision", &format!("layout restored: [{x}, {y}, {w}, {h}]"));
         }
+    }
+
+    /// Log the other-player count when it changes.
+    fn note_others(&mut self, n: usize, ignored: bool) {
+        if n == self.state.viz.others {
+            return;
+        }
+        self.state.viz.others = n;
+        let allowed = self.players_allowed;
+        let s = if n == 1 { "" } else { "s" };
+        let (msg, level) = match n {
+            0 => ("minimap clear of other players".to_owned(), "info"),
+            _ if ignored => (
+                format!("{n} other player marker{s} on the minimap (ignored on this map)"),
+                "debug",
+            ),
+            _ => (
+                format!("{n} other player{s} on the minimap ({allowed} allowed)"),
+                "warn",
+            ),
+        };
+        self.host.bus.emit_level("safety", &msg, level);
     }
 
     fn refresh_map(&mut self) -> Option<Arc<MapEntry>> {
@@ -189,14 +216,38 @@ impl Body for HostBody {
         self.analyzer.player_pos(img, &mut self.tracker)
     }
 
+    fn hazard_note(&self) -> Option<String> {
+        (self.state.viz.hazard.as_deref() == Some("other players")).then(|| {
+            format!(
+                " ({} on the minimap, {} allowed)",
+                self.state.viz.others, self.players_allowed
+            )
+        })
+    }
+
     fn hazard_in(&mut self, img: &Image) -> Option<String> {
-        let reason = if self.analyzer.loading() {
+        let loading = self.analyzer.loading();
+        let rule = self.refresh_map().and_then(|e| e.other_players);
+        self.players_allowed = match rule {
+            Some(PlayerRule::Ignore) => i64::MAX,
+            Some(PlayerRule::Allow(n)) => n,
+            None => self.cfg.allowed_other_players,
+        };
+        if !loading {
+            let min_px = self.cfg.other_player_min_px.max(1) as usize;
+            let n = self.analyzer.count_other_players(img, min_px);
+            self.note_others(n, rule == Some(PlayerRule::Ignore));
+        }
+        let others = self.state.viz.others as i64;
+        let reason = if loading {
             Some("map transfer (loading screen)")
+        } else if self.host.identity.identifying() {
+            Some("identifying map")
         } else if self.cfg.stop_when_map_unrecognized && self.host.identity.unrecognized() {
             Some("unrecognized map")
         } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
             Some("rune")
-        } else if self.cfg.stop_when_players_appear && self.analyzer.has_other_players(img) {
+        } else if self.cfg.stop_when_players_appear && others > self.players_allowed {
             Some("other players")
         } else {
             None

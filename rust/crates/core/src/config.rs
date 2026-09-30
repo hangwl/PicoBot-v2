@@ -218,6 +218,10 @@ impl PatrolPolicy {
 pub struct BotConfig {
     // Behaviour toggles
     pub stop_when_players_appear: bool,
+    /// Other players tolerated before the bot pauses.
+    pub allowed_other_players: i64,
+    /// Smallest marker (px) that counts as another player.
+    pub other_player_min_px: i64,
     pub stop_when_rune_appears: bool,
     pub stop_when_map_unrecognized: bool,
     pub pause_on_lie_detector: bool,
@@ -250,6 +254,12 @@ pub struct BotConfig {
     pub combo_repress_seconds: f64,
     // Weave
     pub weave_double_chance: f64,
+    /// Odds a move (flash hop, blink, hop) carries an attack window.
+    pub move_attack_chance: f64,
+    /// Odds a landing carries an attack window.
+    pub ground_attack_chance: f64,
+    /// Attacks per minute to steer toward (0 = off).
+    pub target_attacks_per_min: f64,
     pub weave_range_px: i64,
     pub weave_edge_margin_px: i64,
     // Vision
@@ -267,6 +277,8 @@ pub struct BotConfig {
     pub class_active: String,
     pub class_travel: ClassTravel,
     pub air_attacks: bool,
+    /// Can chain two flashes in one jump (flash-jump classes).
+    pub double_flash: bool,
     pub teleport_key: Option<String>,
     pub teleport_cooldown: f64,
     pub nav_teleport_dx: f64,
@@ -288,6 +300,8 @@ impl Default for BotConfig {
     fn default() -> Self {
         let mut cfg = BotConfig {
             stop_when_players_appear: true,
+            allowed_other_players: 0,
+            other_player_min_px: crate::minimap::MARKER_MIN_PX as i64,
             stop_when_rune_appears: true,
             stop_when_map_unrecognized: true,
             pause_on_lie_detector: false,
@@ -316,6 +330,9 @@ impl Default for BotConfig {
             flash_repress_seconds: 0.15,
             combo_repress_seconds: 0.16,
             weave_double_chance: 0.4,
+            move_attack_chance: 1.0,
+            ground_attack_chance: 0.0,
+            target_attacks_per_min: 0.0,
             weave_range_px: 24,
             weave_edge_margin_px: 4,
             minimap_colors: MinimapColors::default(),
@@ -329,6 +346,7 @@ impl Default for BotConfig {
             class_active: "default".into(),
             class_travel: ClassTravel::Flash,
             air_attacks: true,
+            double_flash: true,
             teleport_key: None,
             teleport_cooldown: 1.0,
             nav_teleport_dx: 25.0,
@@ -434,6 +452,9 @@ impl BotConfig {
             ("nav_double_gap_px", &mut cfg.nav_double_gap_px),
             ("vert_jump_interval", &mut cfg.vert_jump_interval),
             ("weave_double_chance", &mut cfg.weave_double_chance),
+            ("move_attack_chance", &mut cfg.move_attack_chance),
+            ("ground_attack_chance", &mut cfg.ground_attack_chance),
+            ("target_attacks_per_min", &mut cfg.target_attacks_per_min),
             ("anchor_float_px", &mut cfg.anchor_float_px),
             ("walk_band_px", &mut cfg.walk_band_px),
             ("flash_repress_seconds", &mut cfg.flash_repress_seconds),
@@ -447,6 +468,8 @@ impl BotConfig {
         }
         for (name, slot) in [
             ("nav_threshold_px", &mut cfg.nav_threshold_px),
+            ("allowed_other_players", &mut cfg.allowed_other_players),
+            ("other_player_min_px", &mut cfg.other_player_min_px),
             ("nav_stuck_limit", &mut cfg.nav_stuck_limit),
             ("marker_inset_px", &mut cfg.marker_inset_px),
             ("weave_range_px", &mut cfg.weave_range_px),
@@ -516,6 +539,9 @@ impl BotConfig {
         if let Some(v) = get("air_attacks") {
             cfg.air_attacks = truthy(v);
         }
+        if let Some(v) = get("double_flash") {
+            cfg.double_flash = truthy(v);
+        }
         if data.contains_key("teleport_key") {
             cfg.teleport_key = opt_string(get("teleport_key"));
         }
@@ -563,6 +589,9 @@ impl BotConfig {
             }
             if let Some(v) = p.get("air_attacks") {
                 self.air_attacks = truthy(v);
+            }
+            if let Some(v) = p.get("double_flash") {
+                self.double_flash = truthy(v);
             }
             if p.contains_key("teleport_key") {
                 self.teleport_key = opt_string(p.get("teleport_key"));
@@ -612,6 +641,8 @@ impl BotConfig {
         let rect = |r: Option<[i64; 4]>| r.map_or(Value::Null, |r| json!(r));
         json!({
             "stop_when_players_appear": self.stop_when_players_appear,
+            "allowed_other_players": self.allowed_other_players,
+            "other_player_min_px": self.other_player_min_px,
             "stop_when_rune_appears": self.stop_when_rune_appears,
             "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,
@@ -640,6 +671,9 @@ impl BotConfig {
             "flash_repress_seconds": self.flash_repress_seconds,
             "combo_repress_seconds": self.combo_repress_seconds,
             "weave_double_chance": self.weave_double_chance,
+            "move_attack_chance": self.move_attack_chance,
+            "ground_attack_chance": self.ground_attack_chance,
+            "target_attacks_per_min": self.target_attacks_per_min,
             "weave_range_px": self.weave_range_px,
             "weave_edge_margin_px": self.weave_edge_margin_px,
             "minimap_colors": self.minimap_colors.to_json(),
@@ -653,6 +687,7 @@ impl BotConfig {
             "class_active": self.class_active,
             "class_travel": self.class_travel.as_str(),
             "air_attacks": self.air_attacks,
+            "double_flash": self.double_flash,
             "teleport_key": self.teleport_key,
             "teleport_cooldown": self.teleport_cooldown,
             "nav_teleport_dx": self.nav_teleport_dx,
@@ -710,6 +745,18 @@ mod tests {
 
     fn obj(v: Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn other_player_settings_default_strict_and_parse() {
+        let cfg = BotConfig::from_json(&Map::new()).unwrap();
+        assert_eq!((cfg.allowed_other_players, cfg.other_player_min_px), (0, 6));
+        let cfg = BotConfig::from_json(&obj(
+            json!({"allowed_other_players": 2, "other_player_min_px": 9}),
+        ))
+        .unwrap();
+        assert_eq!((cfg.allowed_other_players, cfg.other_player_min_px), (2, 9));
+        assert_eq!(cfg.snapshot()["allowed_other_players"], 2);
     }
 
     #[test]

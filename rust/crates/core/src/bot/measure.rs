@@ -13,10 +13,13 @@ use serde_json::{json, Map, Value};
 use super::body::{Body, Dir};
 use super::flight::{Flight, FlightRecorder};
 use crate::config::{BotConfig, ClassTravel};
+use crate::effects::{effect_of, Glide};
 use crate::reach::Move;
+use crate::skills::{Skill, SkillKind, Stance};
 use crate::vision::platform_span_at;
 
 const FLASH_PLAN: &[&str] = &["flash", "double_flash", "jump", "rope_lift", "up_flash"];
+const SINGLE_FLASH_PLAN: &[&str] = &["flash", "jump", "rope_lift", "up_flash"];
 const TELEPORT_PLAN: &[&str] = &["jump", "teleport", "rope_lift", "teleport_up"];
 const WALK_PLAN: &[&str] = &["jump", "rope_lift"];
 const VERTICAL: &[&str] = &["up_flash", "rope_lift", "teleport_up"];
@@ -24,6 +27,15 @@ const VERTICAL: &[&str] = &["up_flash", "rope_lift", "teleport_up"];
 pub const PROFILE_DELAYS: [f64; 8] = [0.08, 0.12, 0.16, 0.20, 0.25, 0.30, 0.36, 0.44];
 pub const PROFILE_REPS: usize = 3;
 pub const PROFILE_CLEAR_PX: f64 = 45.0;
+/// Walk-tap sweep: key-hold lengths (ms) and the measured taps for each.
+pub const TAP_MS: [u32; 6] = [30, 50, 80, 120, 180, 260];
+pub const TAP_REPS: usize = 4;
+/// Skill-effect flashes: each is measured this many times, and needs this
+/// much platform ahead.
+const EFFECT_REPS: usize = 3;
+const EFFECT_ROOM_PX: f64 = 70.0;
+/// A tap sweep stays this far from a platform end (turning round before it).
+const TAP_ROOM_PX: f64 = 30.0;
 
 fn room(m: &str) -> f64 {
     match m {
@@ -38,7 +50,8 @@ fn room(m: &str) -> f64 {
 pub fn plan_for(cfg: &BotConfig) -> &'static [&'static str] {
     match cfg.class_travel {
         ClassTravel::Teleport if cfg.teleport_key.is_some() => TELEPORT_PLAN,
-        ClassTravel::Flash if cfg.flash_jump_enabled => FLASH_PLAN,
+        ClassTravel::Flash if cfg.flash_jump_enabled && cfg.double_flash => FLASH_PLAN,
+        ClassTravel::Flash if cfg.flash_jump_enabled => SINGLE_FLASH_PLAN,
         _ => WALK_PLAN,
     }
 }
@@ -67,6 +80,8 @@ impl Recorder for FlightRecorder {
 pub enum Mode {
     Moves,
     UpFlashProfile,
+    WalkTaps,
+    SkillEffects,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,9 +195,11 @@ impl MoveMeasurer {
             );
             return;
         }
-        if self.mode == Mode::UpFlashProfile {
-            self.profile(body);
-            return;
+        match self.mode {
+            Mode::UpFlashProfile => return self.profile(body),
+            Mode::WalkTaps => return self.walk_taps(body),
+            Mode::SkillEffects => return self.skill_effects(body),
+            Mode::Moves => {}
         }
         let mut plan: Vec<&str> = plan_for(body.config()).to_vec();
         if let Some(only) = self.only.clone() {
@@ -452,6 +469,351 @@ impl MoveMeasurer {
             ));
         }
         Got(flight)
+    }
+
+    // -- Skill effects -------------------------------------------------------------------
+    /// What each air-capable attack does to a flash jump: plain flashes
+    /// for a baseline, then flashes with the skill cast a moment after the
+    /// re-press — the same moment an attack window casts it.
+    fn skill_effects<B: Body + ?Sized>(&mut self, body: &mut B) {
+        if self.recorder.is_none() {
+            (self.emit)("measure", "skill effects need flight recording");
+            return;
+        }
+        let cfg = body.config();
+        if cfg.class_travel != ClassTravel::Flash || !cfg.flash_jump_enabled {
+            (self.emit)(
+                "measure",
+                "skill effects are measured for flash-jump classes",
+            );
+            return;
+        }
+        let skills: Vec<Skill> = body
+            .state_ref()
+            .skills
+            .skills()
+            .iter()
+            .filter(|s| matches!(s.kind, SkillKind::Attack | SkillKind::Movement))
+            .filter(|s| s.stance != Stance::Ground)
+            .cloned()
+            .collect();
+        if skills.is_empty() {
+            (self.emit)("measure", "no attack skills that can be cast in the air");
+            return;
+        }
+        let Some(start) = settle(body, 0.9) else {
+            (self.emit)("measure", "player dot not visible");
+            return;
+        };
+        let graph = body.graph().expect("checked before the run");
+        let Some(pi) = graph.locate(start.0, start.1) else {
+            (self.emit)("measure", "stand on a drawn platform first");
+            return;
+        };
+        let plat = graph.platforms[pi];
+        if plat.x1 - plat.x0 < 2.0 * EFFECT_ROOM_PX {
+            (self.emit)(
+                "measure",
+                &format!(
+                    "this platform is too short — stand on one at least {:.0}px long",
+                    2.0 * EFFECT_ROOM_PX
+                ),
+            );
+            return;
+        }
+        (self.emit)(
+            "measure",
+            &format!(
+                "measuring {} skill(s) in the air — keep the game focused",
+                skills.len()
+            ),
+        );
+        let mut base: Vec<Glide> = Vec::new();
+        let mut with: Vec<Glide> = Vec::new();
+        let mut rows: Vec<Value> = Vec::new();
+        let mut plan: Vec<Option<&Skill>> = vec![None; EFFECT_REPS];
+        for s in &skills {
+            let reps = if s.cooldown <= 12.0 { EFFECT_REPS } else { 1 };
+            plan.extend(std::iter::repeat_n(Some(s), reps));
+        }
+        for (i, cast) in plan.iter().enumerate() {
+            if !body.should_continue() || !body.focused() {
+                (self.emit)("measure", "measurement stopped");
+                break;
+            }
+            self.current = Some(cast.map_or("plain flash".into(), |s| s.name.clone()));
+            self.publish(body);
+            if let Some(s) = cast {
+                let now = body.now();
+                let wait = body.state().skills.remaining(&s.name, now);
+                if wait > 40.0 {
+                    (self.emit)(
+                        "measure",
+                        &format!("{}: on cooldown for {wait:.0}s — skipped", s.name),
+                    );
+                    continue;
+                }
+                body.sleep(wait + 0.3);
+            }
+            let Some(pos) = settle(body, 0.9) else {
+                (self.emit)("measure", "player dot lost");
+                break;
+            };
+            let room = |d: Dir| match d {
+                Dir::Right => plat.x1 - pos.0,
+                Dir::Left => pos.0 - plat.x0,
+            };
+            let dir = [Dir::Right, Dir::Left]
+                .into_iter()
+                .max_by(|a, b| room(*a).total_cmp(&room(*b)))
+                .expect("two directions");
+            if room(dir) < EFFECT_ROOM_PX {
+                (self.emit)(
+                    "measure",
+                    "ran out of platform — stand near the middle of a longer one",
+                );
+                break;
+            }
+            match self.glide(body, dir, *cast) {
+                Skip(why) => (self.emit)("measure", &format!("a flash was discarded — {why}")),
+                Got(g) => match cast {
+                    None => base.push(g),
+                    Some(_) => with.push(g),
+                },
+            }
+            body.sleep_between(0.4, 0.28, 0.7);
+            let last_of_skill = plan
+                .get(i + 1)
+                .is_none_or(|n| n.map(|s| &s.name) != cast.map(|s| &s.name));
+            if let (Some(s), true) = (cast, last_of_skill) {
+                if let Some((e, sd)) = effect_of(&s.name, &base, &with) {
+                    rows.push(json!({
+                        "skill": e.skill,
+                        "n": e.n,
+                        "dx": round_to(e.dx, 1),
+                        "hang": round_to(e.hang, 2),
+                        "rise": round_to(e.rise, 1),
+                        "sd": round_to(sd, 1),
+                    }));
+                    self.profile_rows = rows.clone();
+                    self.publish(body);
+                }
+                with.clear();
+            }
+        }
+        if rows.is_empty() {
+            (self.emit)("measure", "no skill effects recorded");
+            return;
+        }
+        body.state().reach.set_profile("skill_effects", rows);
+        (self.emit)("measure", "skill effects saved");
+    }
+
+    /// One flash jump toward `dir`, with `skill` cast after the re-press.
+    fn glide<B: Body + ?Sized>(
+        &mut self,
+        body: &mut B,
+        dir: Dir,
+        skill: Option<&Skill>,
+    ) -> Attempt<Glide> {
+        let Some(start) = settle(body, 0.9) else {
+            return Skip("player dot not visible".into());
+        };
+        let rec = self
+            .recorder
+            .as_deref_mut()
+            .expect("flights need a recorder");
+        rec.start();
+        body.sleep(0.12);
+        rec.mark("jump");
+        let jk = body.flash_key();
+        body.keys().key_down(dir.key());
+        body.keys().press(&jk, None);
+        let gap = body.repress(body.config().flash_repress_seconds);
+        body.sleep(gap);
+        body.keys().press(&jk, None);
+        if let Some(s) = skill {
+            body.sleep_between(0.12, 0.09, 0.16);
+            body.keys().press(&s.key, s.hold);
+            let now = body.now();
+            body.state().skills.mark_used(&s.name, now);
+        }
+        body.sleep(0.9);
+        body.keys().key_up(dir.key());
+        let land = settle(body, 1.5);
+        let flight = rec.stop();
+        let Some(land) = land else {
+            return Skip("player dot lost".into());
+        };
+        if (land.1 - start.1).abs() > 3.0 {
+            return Skip("it landed on another row".into());
+        }
+        let (Some((air, _)), Some((_, peak))) = (flight.landing(), flight.peak()) else {
+            return Skip("no flight recorded — is the dot visible?".into());
+        };
+        let sign = if dir == Dir::Right { 1.0 } else { -1.0 };
+        Got(Glide {
+            dx: (land.0 - start.0) * sign,
+            air,
+            peak,
+        })
+    }
+
+    // -- Walk taps and pace ---------------------------------------------------------------
+    /// How far taps of several lengths carry, then the walking pace and
+    /// slide. Turning round before a platform end; each direction change
+    /// spends one discarded tap (the first only turns the character).
+    fn walk_taps<B: Body + ?Sized>(&mut self, body: &mut B) {
+        let Some(start) = settle(body, 0.9) else {
+            (self.emit)("measure", "player dot not visible");
+            return;
+        };
+        let graph = body.graph().expect("checked before the run");
+        let Some(pi) = graph.locate(start.0, start.1) else {
+            (self.emit)("measure", "stand on a drawn platform first");
+            return;
+        };
+        let plat = graph.platforms[pi];
+        if plat.x1 - plat.x0 < 4.0 * TAP_ROOM_PX {
+            (self.emit)(
+                "measure",
+                &format!(
+                    "this platform is too short — stand on one at least {:.0}px long",
+                    4.0 * TAP_ROOM_PX
+                ),
+            );
+            return;
+        }
+        (self.emit)(
+            "measure",
+            &format!(
+                "walk-tap sweep: {} taps — keep the game focused",
+                TAP_MS.len() * (TAP_REPS + 1)
+            ),
+        );
+        let room = |dir: Dir, x: f64| match dir {
+            Dir::Right => plat.x1 - x,
+            Dir::Left => x - plat.x0,
+        };
+        let mut dir = if room(Dir::Right, start.0) >= room(Dir::Left, start.0) {
+            Dir::Right
+        } else {
+            Dir::Left
+        };
+        let mut facing: Option<Dir> = None;
+        let mut rows: Vec<Value> = Vec::new();
+        for ms in TAP_MS {
+            let mut dxs: Vec<f64> = Vec::new();
+            while dxs.len() < TAP_REPS {
+                if !body.should_continue() || !body.focused() {
+                    (self.emit)("measure", "sweep stopped");
+                    self.save_taps(body, rows);
+                    return;
+                }
+                self.current = Some(format!("tap {ms}ms"));
+                self.publish(body);
+                let Some(pos) = settle(body, 0.9) else {
+                    (self.emit)("measure", "sweep stopped — player dot lost");
+                    self.save_taps(body, rows);
+                    return;
+                };
+                if room(dir, pos.0) < TAP_ROOM_PX {
+                    dir = dir.flip();
+                }
+                if facing != Some(dir) {
+                    body.tap(dir, f64::from(ms) / 1000.0);
+                    facing = Some(dir);
+                    continue;
+                }
+                body.tap(dir, f64::from(ms) / 1000.0);
+                let Some(after) = settle(body, 0.9) else {
+                    (self.emit)("measure", "sweep stopped — player dot lost");
+                    self.save_taps(body, rows);
+                    return;
+                };
+                let sign = if dir == Dir::Right { 1.0 } else { -1.0 };
+                dxs.push((after.0 - pos.0) * sign);
+                body.sleep_between(0.2, 0.12, 0.4);
+            }
+            let m = mean(&dxs);
+            let sd = (dxs.iter().map(|d| (d - m).powi(2)).sum::<f64>() / dxs.len() as f64).sqrt();
+            rows.push(json!({
+                "ms": ms,
+                "n": dxs.len(),
+                "dx": round_to(m, 1),
+                "sd": round_to(sd, 1),
+            }));
+            self.profile_rows = rows.clone();
+            self.publish(body);
+        }
+        self.save_taps(body, rows);
+        self.walk_pace(body, plat.x0, plat.x1);
+    }
+
+    fn save_taps<B: Body + ?Sized>(&mut self, body: &mut B, rows: Vec<Value>) {
+        if rows.is_empty() {
+            (self.emit)("measure", "sweep recorded nothing");
+            return;
+        }
+        body.state().reach.set_profile("walk_taps", rows);
+        (self.emit)("measure", "walk taps saved");
+    }
+
+    /// Hold a direction ~0.6 s for the pace, release for the slide; two
+    /// runs, one each way.
+    fn walk_pace<B: Body + ?Sized>(&mut self, body: &mut B, x0: f64, x1: f64) {
+        let (mut speeds, mut slides) = (Vec::new(), Vec::new());
+        for dir in [Dir::Right, Dir::Left, Dir::Right, Dir::Left] {
+            if !body.should_continue() || !body.focused() {
+                break;
+            }
+            let Some(a) = settle(body, 0.9) else { break };
+            let room = if dir == Dir::Right {
+                x1 - a.0
+            } else {
+                a.0 - x0
+            };
+            if room < 2.0 * TAP_ROOM_PX {
+                continue;
+            }
+            self.current = Some("walking pace".into());
+            self.publish(body);
+            body.keys().key_down(dir.key());
+            let (t0, mut last) = (body.now(), a);
+            let mut t1 = t0;
+            while body.now() - t0 < 0.6 {
+                body.sleep(0.1);
+                if let Some(p) = body.pos() {
+                    last = p;
+                    t1 = body.now();
+                }
+            }
+            body.keys().key_up(dir.key());
+            let Some(rest) = settle(body, 0.9) else { break };
+            if t1 - t0 > 0.2 {
+                speeds.push((last.0 - a.0).abs() / (t1 - t0));
+                slides.push((rest.0 - last.0).abs());
+            }
+        }
+        if speeds.is_empty() {
+            (self.emit)("measure", "walking pace not measured — not enough room");
+            return;
+        }
+        let row = json!({
+            "speed": round_to(mean(&speeds), 1),
+            "slide": round_to(mean(&slides), 1),
+            "n": speeds.len(),
+        });
+        body.state()
+            .reach
+            .set_profile("walk_speed", vec![row.clone()]);
+        (self.emit)(
+            "measure",
+            &format!(
+                "walking pace saved — {} px/s, {} px slide",
+                row["speed"], row["slide"]
+            ),
+        );
     }
 
     // -- Up-flash timing sweep ---------------------------------------------------------

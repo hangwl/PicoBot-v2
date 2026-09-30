@@ -18,7 +18,7 @@ use picobot_core::layout::{
     erase_target, line_under_feet, next_anchor_name, r4, resnap_anchors, restore_anchors,
     same_lines, shift_line, tidy, Erase, Moved,
 };
-use picobot_core::maps::MapEntry;
+use picobot_core::maps::{MapEntry, PlayerRule};
 use picobot_core::minimap::PlayerTracker;
 use picobot_core::platform_fit::{Seg, SegKey};
 use picobot_core::rotation::Anchor;
@@ -83,6 +83,7 @@ impl Host {
             "skills|list" => self.send_skills(),
             "layout|reset" => self.layout_reset(),
             _ if msg.starts_with("class|use|") => self.class_use(arg(2).trim()),
+            _ if msg.starts_with("class|caps|") => self.class_caps(&arg(2)),
             _ if msg.starts_with("class|add|") => {
                 let mut p = msg.splitn(4, '|').skip(2);
                 let (name, spec) = (p.next().unwrap_or(""), p.next().unwrap_or(""));
@@ -91,11 +92,13 @@ impl Host {
             _ if msg.starts_with("patrol|policy|") => self.patrol_set(Some(&arg(2)), None),
             _ if msg.starts_with("safety|set|") => self.safety_set(&arg(2)),
             "notify|test" => self.notify_test(),
+            _ if msg.starts_with("attacks|set|") => self.attacks_set(&arg(2)),
             _ if msg.starts_with("layout|erase|") => self.layout_erase(msg),
             _ if msg.starts_with("patrol|temp|") => self.patrol_set(None, Some(&arg(2))),
             "map|stats|reset" => self.map_stats_reset(""),
             _ if msg.starts_with("map|stats|reset|") => self.map_stats_reset(&arg(3)),
             _ if msg.starts_with("map|title|") => self.map_title(msg),
+            _ if msg.starts_with("map|players|") => self.map_players(msg),
             _ if msg.starts_with("skills|set|") => self.skills_set(&arg(2)),
             _ if msg.starts_with("skills|del|") => self.skills_del(&arg(2)),
             _ if msg.starts_with("movekeys|set|") => self.movekeys_set(&arg(2)),
@@ -162,6 +165,7 @@ impl Host {
                 let row = json!({
                     "travel": p.get("travel").cloned().unwrap_or_else(|| "flash".into()),
                     "air_attacks": p.get("air_attacks").is_none_or(picobot_core::json::truthy),
+                    "double_flash": p.get("double_flash").is_none_or(picobot_core::json::truthy),
                     "teleport_key": p.get("teleport_key").cloned().unwrap_or(Value::Null),
                 });
                 (name.clone(), row)
@@ -210,6 +214,7 @@ impl Host {
         let keep = [
             "travel",
             "air_attacks",
+            "double_flash",
             "teleport_key",
             "teleport_cooldown",
             "skills",
@@ -234,6 +239,43 @@ impl Host {
         self.bus
             .emit("bot", &format!("class profile {name} created"));
         self.class_use(name);
+    }
+
+    /// `class|caps|{json}`: the active profile's capabilities
+    /// (`double_flash`, `air_attacks`).
+    fn class_caps(self: &Arc<Self>, spec: &str) {
+        let Ok(Value::Object(want)) = serde_json::from_str::<Value>(spec) else {
+            self.bus
+                .emit("error", "class capabilities must be a JSON object");
+            return;
+        };
+        let mut edits: Vec<(String, bool)> = Vec::new();
+        for (k, v) in &want {
+            match (k.as_str(), v) {
+                ("double_flash" | "air_attacks", Value::Bool(b)) => edits.push((k.clone(), *b)),
+                _ => {
+                    self.bus
+                        .emit("error", &format!("invalid class capability: {k}"));
+                    return;
+                }
+            }
+        }
+        let active = self.bot_config().class_active;
+        if let Err(e) = self.commit_bot(|bot| {
+            let profiles = obj(class_block(bot)
+                .entry("profiles")
+                .or_insert_with(|| json!({})));
+            let profile = obj(profiles.entry(active).or_insert_with(|| json!({})));
+            for (k, b) in edits {
+                profile.insert(k, b.into());
+            }
+        }) {
+            self.bus.emit("error", &e);
+            return;
+        }
+        self.bus.emit("bot", "class capabilities saved");
+        self.send_class();
+        self.send_config();
     }
 
     /// Apply a class profile live: the kit decides which moves exist, so
@@ -336,6 +378,12 @@ impl Host {
         let mut edits: Vec<(String, Value)> = Vec::new();
         for (k, v) in &want {
             match (k.as_str(), v) {
+                ("allowed_other_players", v) if v.as_i64().is_some_and(|n| n >= 0) => {
+                    edits.push((k.clone(), v.clone()))
+                }
+                ("other_player_min_px", v) if v.as_i64().is_some_and(|n| n >= 1) => {
+                    edits.push((k.clone(), v.clone()))
+                }
                 (k, Value::Bool(_)) if bools.contains(&k) => edits.push((k.into(), v.clone())),
                 ("heartbeat_minutes", v) if v.as_f64().is_some_and(|m| m >= 0.0) => {
                     edits.push((k.clone(), v.clone()))
@@ -356,6 +404,67 @@ impl Host {
             return;
         }
         self.bus.emit("bot", "safety settings saved");
+        self.send_config();
+    }
+
+    /// `map|players|<follow|ignore|allow:N>[|<name>]`: how this map treats
+    /// other-player markers.
+    fn map_players(&self, msg: &str) {
+        let mut p = msg.splitn(4, '|').skip(2);
+        let rule = match PlayerRule::parse(p.next().unwrap_or("")) {
+            Ok(r) => r,
+            Err(e) => {
+                self.bus.emit("error", &e.to_string());
+                return;
+            }
+        };
+        let Some(mut entry) = self.target_or_report(p.next().unwrap_or("").trim()) else {
+            return;
+        };
+        entry.other_players = rule;
+        let name = entry.name.clone();
+        self.save_entry(entry);
+        let what = match rule {
+            None => "follows the global setting".to_owned(),
+            Some(PlayerRule::Ignore) => "ignores other-player markers".to_owned(),
+            Some(PlayerRule::Allow(n)) => format!("allows up to {n} other players"),
+        };
+        self.bus.emit("map", &format!("{name} {what}"));
+    }
+
+    /// `attacks|set|{json}`: how often moves and landings carry attacks,
+    /// and the attack rate to steer toward.
+    fn attacks_set(&self, spec: &str) {
+        let Ok(Value::Object(want)) = serde_json::from_str::<Value>(spec) else {
+            self.bus
+                .emit("error", "attack settings must be a JSON object");
+            return;
+        };
+        let mut edits: Vec<(String, f64)> = Vec::new();
+        for (k, v) in &want {
+            let chance = matches!(
+                k.as_str(),
+                "move_attack_chance" | "ground_attack_chance" | "weave_double_chance"
+            );
+            match v.as_f64() {
+                Some(n) if chance && (0.0..=1.0).contains(&n) => edits.push((k.clone(), n)),
+                Some(n) if k == "target_attacks_per_min" && n >= 0.0 => edits.push((k.clone(), n)),
+                _ => {
+                    self.bus
+                        .emit("error", &format!("invalid attack setting: {k}"));
+                    return;
+                }
+            }
+        }
+        if let Err(e) = self.commit_bot(|bot| {
+            for (k, n) in edits {
+                bot.insert(k, n.into());
+            }
+        }) {
+            self.bus.emit("error", &e);
+            return;
+        }
+        self.bus.emit("bot", "attack settings saved");
         self.send_config();
     }
 
@@ -883,6 +992,9 @@ impl Host {
                 f.analyzer.reset_region();
                 self.bus
                     .emit("vision", "minimap layout reset — re-detecting");
+                for n in self.identity.request(true) {
+                    self.bus.emit("map", &n);
+                }
             }
             None => self.bus.emit("vision", "no minimap to reset"),
         }

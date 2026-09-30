@@ -19,11 +19,14 @@ export interface SkillSpec {
   charges?: number;
   duration?: number;
   hold?: number | null;
+  stance?: "ground" | "air" | "any";
+  weight?: number;
 }
 
 export interface ProfileKit {
   travel?: string;
   air_attacks?: boolean;
+  double_flash?: boolean;
   teleport_key?: string | null;
 }
 
@@ -54,6 +57,8 @@ export interface SessionStats {
   skips: number;
   pauses: number;
   paused: number;
+  /** Attacks cast in the last minute. */
+  apm?: number;
 }
 export type ViewMode = "minimap" | "window" | "title";
 export type LogFilter = "info" | "warn" | "error" | "all";
@@ -78,6 +83,26 @@ export interface SweepRow {
   air: number | null;
 }
 
+/** What a skill does to a flash jump cast in the air (measured). */
+export interface SkillEffectRow {
+  skill: string;
+  n: number;
+  /** Landing shift toward the jump, px (negative: pulled back). */
+  dx: number;
+  /** Airtime added, s. */
+  hang: number;
+  rise: number;
+  sd: number;
+}
+
+/** One walk-tap length and how far it carries (minimap px). */
+export interface TapRow {
+  ms: number;
+  n: number;
+  dx: number;
+  sd: number;
+}
+
 export interface MeasureState {
   running: boolean;
   move: string | null;
@@ -87,9 +112,9 @@ export interface MeasureState {
   /** The one move being measured, or null for the whole plan. */
   only: string | null;
   /** Live rows of the sweep in progress. */
-  profile: SweepRow[];
-  /** Saved sweeps by move. */
-  profiles: Record<string, { at: number; rows: SweepRow[] }>;
+  profile: (SweepRow | TapRow | SkillEffectRow)[];
+  /** Saved sweeps by name (`up_flash`, `walk_taps`, `walk_speed`). */
+  profiles: Record<string, { at: number; rows: any[] }>;
 }
 
 /** Where the feet settle on one drawn platform (minimap px). */
@@ -154,6 +179,8 @@ export interface AppState {
   via: string;
   title: string;
   recordedTitle: string;
+  /** This map's other-player rule: follow | ignore | allow:N. */
+  playersRule: string;
   score: number | null;
   reading: boolean;
   platformsN: number;
@@ -193,6 +220,13 @@ export interface AppState {
   stopRune: boolean;
   stopMap: boolean;
   heartbeat: number;
+  allowedPlayers: number;
+  playerMinPx: number;
+  others: number;
+  moveAttack: number;
+  groundAttack: number;
+  doubleChance: number;
+  targetApm: number;
   logs: EvtItem[];
   logFilter: LogFilter;
   viewMode: ViewMode;
@@ -210,6 +244,7 @@ const initial: AppState = {
   via: "",
   title: "",
   recordedTitle: "",
+  playersRule: "follow",
   score: null,
   reading: false,
   platformsN: 0,
@@ -252,6 +287,13 @@ const initial: AppState = {
   stopRune: true,
   stopMap: true,
   heartbeat: 30,
+  allowedPlayers: 0,
+  playerMinPx: 6,
+  others: 0,
+  moveAttack: 1,
+  groundAttack: 0,
+  doubleChance: 0.4,
+  targetApm: 0,
   logs: [],
   logFilter: "info",
   viewMode: "minimap",
@@ -479,6 +521,7 @@ function onFrame(buf: ArrayBuffer) {
     summons: (meta.summons as SummonState | undefined) ?? state.summons,
     patrol: (meta.patrol as PatrolStatus | undefined) ?? null,
     session: (meta.session as SessionStats | undefined) ?? null,
+    others: (meta.others as number | undefined) ?? 0,
     botState: meta.state ? String(meta.state) : "–",
     viewMode: (meta.mode as ViewMode) ?? state.viewMode,
   });
@@ -539,6 +582,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         via: (p.via as string) ?? "",
         title: (p.title as string) ?? "",
         recordedTitle: (p.recorded_title as string) ?? "",
+        playersRule: (p.players_rule as string) ?? "follow",
         score: (p.score as number | null) ?? null,
         reading: Boolean(p.reading),
         platformsN: (p.platforms_n as number) ?? 0,
@@ -579,6 +623,12 @@ function onEvent(p: Record<string, any> & { event: string }) {
         stopRune: c.stop_when_rune_appears !== false,
         stopMap: c.stop_when_map_unrecognized !== false,
         heartbeat: (c.heartbeat_minutes as number) ?? 30,
+        allowedPlayers: (c.allowed_other_players as number) ?? 0,
+        playerMinPx: (c.other_player_min_px as number) ?? 6,
+        moveAttack: (c.move_attack_chance as number) ?? 1,
+        groundAttack: (c.ground_attack_chance as number) ?? 0,
+        doubleChance: (c.weave_double_chance as number) ?? 0.4,
+        targetApm: (c.target_attacks_per_min as number) ?? 0,
       });
       return;
     }

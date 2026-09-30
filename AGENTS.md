@@ -47,8 +47,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
   `core/src/minimap.rs`), sampled only by the `MapMonitor` thread (20 Hz,
   own grabber). Never call `note_frame` from the bot or the streamer, and
   never use pixel-content change as a trigger — translucent UI defeats it.
-- **OCR is request-driven** (startup, arrival, pin, title band) and runs
-  on the `TitleOCR` worker — never per-frame, never on the frame thread.
+- **OCR is request-driven** (startup, arrival, pin, title band, Re-detect,
+  and a slow verification read every 5 s that catches a map change with no
+  blackout) and runs on the `TitleOCR` worker — never per-frame, never on
+  the frame thread.
 - **Manual geometry is authoritative**: drawn platforms/walls drive
   navigation. No line auto-detection.
 - **Panel region**: found by `find_frame` (sizes differ per map); dropped
@@ -62,9 +64,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
   landing (mages can't attack suspended). Teleport is a move kind with
   a learned envelope and cooldown-aware planning.
 - **Movement rule (human-like)**: bot-controlled travel between points
-  is flash hops — jump, then the mid-air re-press — with **1–2 attacks
-  woven after the flash triggers** (never before: it eats the re-press
-  window). Walk only for short final approaches. Delays are log-normal
+  is flash hops — jump, then the mid-air re-press — with an **air attack
+  window after the flash triggers** (never before: it eats the re-press
+  window; odds `move_attack_chance`, default 1 = every hop; a firing
+  window casts 1–2 attacks). Walk only for short final approaches. Delays are log-normal
   (`timing::human_between`/`human_delay`), never flat `uniform`, and
   scaled by the session `TEMPO` (means only — clamps still hold).
   `HidController` spaces consecutive key events; don't bypass it with
@@ -77,9 +80,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
   current one ends, and with no planned path the bot halts (break) rather
   than improvise. Anchors are pure pass-through waypoints (no linger).
   No wander state, dwell timers, breathers, or stationary attack loops.
-  **Every flash move weaves attacks; no attack outside a flash move** in
-  moving paths — except a rope-grab flash, which weaves none (an attack
-  mid-air costs the grab).
+  Attacks are cast only in **windows** — after a flash triggers (air) or
+  after a landing (ground, `ground_attack_chance`) — never in a stationary
+  loop, and a rope-grab flash opens none (an attack mid-air costs the
+  grab). Skills carry a `stance` (ground|air|any) and `weight`; a
+  `target_attacks_per_min` steers the odds toward a rate.
 - **Summons**: one live summon per anchor (any kind), cast only while
   standing on a platform (two stable reads, on a drawn line), never
   waited for; up to `charges` instances per skill, the oldest replaced.

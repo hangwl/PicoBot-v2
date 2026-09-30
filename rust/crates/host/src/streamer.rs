@@ -126,6 +126,7 @@ fn send(host: &Host, mode: &str, mut img: Image, overlay: &Overlay, extra: Map<S
         "map_conf",
         "map_title",
         "hazard",
+        "others",
         "player",
         "summons",
         "patrol",
@@ -160,6 +161,7 @@ fn provide(host: &Host, mode: &str, eyes: &mut Eyes, tracker: &mut PlayerTracker
     if let Some(v) = &viz {
         meta.insert("state".into(), v.state.clone().into());
         meta.insert("hazard".into(), v.hazard.clone().into());
+        meta.insert("others".into(), v.others.into());
         let placed: Vec<Value> = v
             .summons
             .iter()

@@ -20,7 +20,7 @@ use crate::maps::MapEntry;
 use crate::navgraph::{GraphCache, GraphOptions, NavGraph};
 use crate::reach::{base_reach, ReachModel};
 use crate::rotation::{resolve_coord, Rotation};
-use crate::skills::{Skill, SkillBook, SkillKind};
+use crate::skills::{Skill, SkillBook, SkillKind, Stance};
 use crate::summons::SummonTracker;
 use crate::timing::{human_between, human_hold, key_gap, release_lag};
 use crate::vision::{platform_row_at, platform_span_at, Image};
@@ -77,6 +77,8 @@ pub struct Viz {
     pub route: Option<Vec<LegViz>>,
     pub plan: Option<Vec<LegViz>>,
     pub hazard: Option<String>,
+    /// Other-player markers on the minimap right now.
+    pub others: usize,
     /// The run's counters (`Session::snapshot`), refreshed by the host.
     pub session: Option<serde_json::Value>,
     /// Live summons: (skill, anchor, seconds left).
@@ -100,6 +102,34 @@ pub struct PatrolStatus {
     pub halted: bool,
 }
 
+/// Where an attack is cast: the stance a skill is tagged for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Window {
+    Air,
+    Ground,
+}
+
+impl Window {
+    fn allows(self, s: Stance) -> bool {
+        matches!(
+            (s, self),
+            (Stance::Any, _) | (Stance::Air, Window::Air) | (Stance::Ground, Window::Ground)
+        )
+    }
+
+    fn exclusive(self) -> Stance {
+        match self {
+            Window::Air => Stance::Air,
+            Window::Ground => Stance::Ground,
+        }
+    }
+}
+
+/// A ready skill tagged only for its window is cast at least this often.
+const EXCLUSIVE_READY_CHANCE: f64 = 0.85;
+/// The attack rate is counted over this many seconds.
+const RATE_WINDOW_S: f64 = 60.0;
+
 /// Everything the bot remembers between ticks. Owned by the bot thread.
 pub struct BotState {
     pub skills: SkillBook,
@@ -114,6 +144,11 @@ pub struct BotState {
     /// Learned minimap px one flash weave covers.
     pub hop_px: f64,
     pub travel_attack_at: f64,
+    /// Px a skill may shift the current move's landing (back, forward),
+    /// while a flash is planned onto a platform; None = unconstrained.
+    pub air_slack: Option<(f64, f64)>,
+    /// When each attack was cast, over the last `RATE_WINDOW_S`.
+    pub attack_log: std::collections::VecDeque<f64>,
     pub anchor_idx: usize,
     pub travel_target: Option<usize>,
     /// Anchor index → monotonic time its ban lapses.
@@ -147,6 +182,8 @@ impl BotState {
             last_teleport: f64::NEG_INFINITY,
             hop_px: 14.0,
             travel_attack_at: f64::NEG_INFINITY,
+            air_slack: None,
+            attack_log: Default::default(),
             anchor_idx: 0,
             travel_target: None,
             bans: Default::default(),
@@ -212,6 +249,10 @@ pub trait Body {
     fn save_map(&mut self, _entry: MapEntry) {}
     /// Anchor statistics: visit / miss / skip.
     fn stat(&mut self, _kind: &str, _anchor: &str, _why: &str) {}
+    /// Detail appended to the current hazard's alert.
+    fn hazard_note(&self) -> Option<String> {
+        None
+    }
     /// A high-priority alert (the host adds Telegram).
     fn notify(&mut self, msg: &str) {
         self.log(msg);
@@ -278,6 +319,12 @@ pub trait Body {
         GraphOptions {
             rope_penalty: cfg.rope_penalty,
             allow_flash: cfg.class_travel == ClassTravel::Flash && cfg.flash_jump_enabled,
+            allow_double_flash: cfg.double_flash,
+            walk_speed: self
+                .state_ref()
+                .reach
+                .walk_stats()
+                .map_or(GraphOptions::default().walk_speed, |w| w.speed),
             allow_teleport: cfg.class_travel == ClassTravel::Teleport && cfg.teleport_key.is_some(),
             ..Default::default()
         }
@@ -322,31 +369,112 @@ pub trait Body {
         if self.keys().press(&skill.key, skill.hold) {
             let now = self.now();
             self.state().skills.mark_used(&skill.name, now);
+            if skill.kind == SkillKind::Attack {
+                self.state().attack_log.push_back(now);
+            }
             self.log(&format!("Skill: {}", skill.name));
             return true;
         }
         false
     }
 
-    fn pick_attack(&mut self) -> Option<Skill> {
+    /// A ready attack that may be cast in `w`: skills on cooldown are
+    /// preferred over spam, and `weight` sets the odds within the pool.
+    fn pick_attack(&mut self, w: Window) -> Option<Skill> {
         let now = self.now();
         let st = self.state();
-        let ready = st.skills.ready_attacks(now);
-        if ready.is_empty() {
-            return None;
-        }
+        // In the air, a skill measured to shift the landing further than the
+        // move has room for would land it off the platform.
+        let effects = match (w, st.air_slack) {
+            (Window::Air, Some(slack)) => Some((slack, st.reach.skill_effects())),
+            _ => None,
+        };
+        let ready: Vec<Skill> = st
+            .skills
+            .ready_attacks(now)
+            .into_iter()
+            .filter(|s| w.allows(s.stance) && s.weight > 0.0)
+            .filter(|s| match &effects {
+                Some(((back, fwd), all)) => all
+                    .iter()
+                    .find(|e| e.skill == s.name)
+                    .is_none_or(|e| e.fits(*back, *fwd)),
+                None => true,
+            })
+            .collect();
         let with_cd: Vec<&Skill> = ready.iter().filter(|s| s.cooldown > 0.0).collect();
         let pool: Vec<&Skill> = if with_cd.is_empty() {
             ready.iter().collect()
         } else {
             with_cd
         };
-        let i = st.rng.random_range(0..pool.len());
-        Some(pool[i].clone())
+        let total: f64 = pool.iter().map(|s| s.weight).sum();
+        if pool.is_empty() {
+            return None;
+        }
+        let mut roll = st.rng.random::<f64>() * total;
+        for s in &pool {
+            roll -= s.weight;
+            if roll < 0.0 {
+                return Some((*s).clone());
+            }
+        }
+        pool.last().map(|s| (*s).clone())
+    }
+
+    /// Attacks cast in the last minute.
+    fn attack_rate(&mut self) -> f64 {
+        let now = self.now();
+        let log = &mut self.state().attack_log;
+        while log.front().is_some_and(|t| now - *t > RATE_WINDOW_S) {
+            log.pop_front();
+        }
+        log.len() as f64 * 60.0 / RATE_WINDOW_S
+    }
+
+    /// The odds a window fires: `base`, pushed up while the recent rate is
+    /// under `target_attacks_per_min` and down while it is over.
+    fn window_odds(&mut self, base: f64) -> f64 {
+        let target = self.config().target_attacks_per_min;
+        if target <= 0.0 {
+            return base;
+        }
+        let deficit = (target - self.attack_rate()) / target;
+        (base + deficit).clamp(0.0, 1.0)
+    }
+
+    /// One attack window in `w`: rolled against `base` (see `window_odds`;
+    /// a ready skill tagged for only this window fires at least
+    /// `EXCLUSIVE_READY_CHANCE` of the time), then 1 attack, or 2 with
+    /// `weave_double_chance`. Returns how many landed.
+    fn attack_window(&mut self, w: Window, base: f64) -> usize {
+        let mut p = self.window_odds(base);
+        let now = self.now();
+        let exclusive = w.exclusive();
+        if p < EXCLUSIVE_READY_CHANCE
+            && self
+                .state()
+                .skills
+                .ready_attacks(now)
+                .iter()
+                .any(|s| s.stance == exclusive && s.weight > 0.0)
+        {
+            p = EXCLUSIVE_READY_CHANCE;
+        }
+        if p < 1.0 && (p <= 0.0 || self.state().rng.random::<f64>() >= p) {
+            return 0;
+        }
+        self.weave_attacks(w)
+    }
+
+    /// The attack window a landing carries (`ground_attack_chance`).
+    fn ground_window(&mut self) -> usize {
+        let base = self.config().ground_attack_chance;
+        self.attack_window(Window::Ground, base)
     }
 
     /// 1 attack, or 2 with `weave_double_chance`; returns how many landed.
-    fn weave_attacks(&mut self) -> usize {
+    fn weave_attacks(&mut self, w: Window) -> usize {
         let chance = self.config().weave_double_chance;
         let n = if self.state().rng.random::<f64>() < chance {
             2
@@ -355,7 +483,7 @@ pub trait Body {
         };
         let mut done = 0;
         for i in 0..n {
-            let Some(skill) = self.pick_attack() else {
+            let Some(skill) = self.pick_attack(w) else {
                 break;
             };
             if i > 0 {
@@ -366,17 +494,18 @@ pub trait Body {
         done
     }
 
-    /// The movement rule's tail: once a flash has triggered, weave 1–2
-    /// attacks, then ride out the rest of the airtime. Classes that can't
-    /// attack airborne attack after landing instead.
+    /// A move's attack window (`move_attack_chance`): once a flash has
+    /// triggered, then the rest of the airtime. Classes that can't attack
+    /// airborne attack after landing instead.
     fn after_flash(&mut self, airtime: f64) {
+        let chance = self.config().move_attack_chance;
         if !self.config().air_attacks {
             self.sleep_between(airtime, airtime * 0.6, airtime * 1.6);
-            self.weave_attacks();
+            self.attack_window(Window::Ground, chance);
             return;
         }
         self.sleep_between(0.09, 0.05, 0.15);
-        let n = self.weave_attacks();
+        let n = self.attack_window(Window::Air, chance);
         let rest = if n < 2 { airtime } else { airtime * 0.65 };
         self.sleep_between(rest, rest * 0.6, rest * 1.6);
     }
@@ -740,10 +869,43 @@ pub trait Body {
         if self.config().flash_jump_enabled {
             self.flash_hop();
         } else {
-            self.weave_attacks();
+            let chance = self.config().move_attack_chance;
+            self.attack_window(Window::Ground, chance);
             self.sleep_between(0.4, 0.28, 0.6);
         }
         self.keys().key_up(dir.key());
+    }
+
+    /// A tap on `dir`: the key held exactly `secs`.
+    fn tap(&mut self, dir: Dir, secs: f64) -> bool {
+        self.keys().press(dir.key(), Some(secs))
+    }
+
+    /// Step to within `tol` px of `x` in calibrated taps: the longest that
+    /// doesn't overshoot, re-reading the dot after each. False without a
+    /// tap table, or when 8 taps don't get there.
+    fn nudge_to(&mut self, x: f64, tol: f64) -> bool {
+        let Some(table) = self.state_ref().reach.tap_table() else {
+            return false;
+        };
+        let tol = tol.max(table.resolution() * 0.5);
+        for _ in 0..8 {
+            if !self.should_continue() || !self.focused() {
+                return false;
+            }
+            let Some(pos) = super::measure::settle(self, 0.7) else {
+                return false;
+            };
+            let need = x - pos.0;
+            if need.abs() <= tol {
+                return true;
+            }
+            let Some(row) = table.choose(need.abs()) else {
+                return true;
+            };
+            self.tap(Dir::toward(need), row.secs);
+        }
+        false
     }
 
     /// Weave an attack into a walked leg, spaced ~0.4s.
@@ -752,7 +914,7 @@ pub trait Body {
         if now < self.state().travel_attack_at {
             return;
         }
-        if let Some(skill) = self.pick_attack() {
+        if let Some(skill) = self.pick_attack(Window::Ground) {
             if self.use_skill(&skill) {
                 let gap = human_between(0.43, 0.33, 0.6, 0.3);
                 self.state().travel_attack_at = now + gap;

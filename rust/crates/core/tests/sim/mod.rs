@@ -93,6 +93,13 @@ pub struct Sim {
     pub up_held: bool,
     /// Px walked per sleep tick while a direction is held.
     pub walk: f64,
+    /// Px per second carried by a timed tap, and the way the character
+    /// faces (a tap in a new direction only turns it).
+    pub tap_speed: f64,
+    pub facing: Option<Dir>,
+    /// Skill key -> px it shifts a flash's landing (toward the jump) when
+    /// cast with a direction held.
+    pub skill_fx: std::collections::HashMap<String, f64>,
     /// Every takeoff from standing: "jump", or the up flash's re-press
     /// delay ("none" for the patrol's own timing) — shared with a test
     /// recorder.
@@ -148,6 +155,9 @@ impl Sim {
             tele: (25.0, 6.0),
             up_held: false,
             walk: 4.0,
+            tap_speed: 50.0,
+            facing: None,
+            skill_fx: Default::default(),
             flights: Arc::default(),
             stop: Arc::default(),
             stop_on: None,
@@ -280,8 +290,32 @@ impl Keys for Sim {
         true
     }
 
-    fn press(&mut self, key: &str, _hold: Option<f64>) -> bool {
+    fn press(&mut self, key: &str, hold: Option<f64>) -> bool {
         self.presses.push(key.into());
+        if let (Some(dx), Some(_)) = (self.skill_fx.get(key).copied(), self.held) {
+            let s = self.sign();
+            self.air(s * dx, 0.0);
+            return true;
+        }
+        if let (Some(h), "left" | "right") = (hold, key) {
+            let dir = if key == "right" {
+                Dir::Right
+            } else {
+                Dir::Left
+            };
+            self.clock += h;
+            self.slept += h;
+            if self.facing == Some(dir) {
+                let sign = if dir == Dir::Right { 1.0 } else { -1.0 };
+                let g = self.physics();
+                if let Some(i) = g.locate(self.pos.0, self.pos.1) {
+                    let p = g.platforms[i];
+                    self.pos.0 = (self.pos.0 + sign * self.tap_speed * h).clamp(p.x0, p.x1);
+                }
+            }
+            self.facing = Some(dir);
+            return true;
+        }
         if key == "space" && self.held.is_none() {
             self.flights.lock().unwrap().push("jump".into());
         }

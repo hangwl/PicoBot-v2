@@ -184,6 +184,7 @@ pub struct GraphOptions {
     pub rope_max_px: Option<f64>,
     pub rope_penalty: f64,
     pub allow_flash: bool,
+    pub allow_double_flash: bool,
     pub allow_teleport: bool,
 }
 
@@ -197,6 +198,7 @@ impl Default for GraphOptions {
             rope_max_px: None,
             rope_penalty: 5.0,
             allow_flash: true,
+            allow_double_flash: true,
             allow_teleport: false,
         }
     }
@@ -410,6 +412,9 @@ impl NavGraph {
         rise: f64,
     ) {
         if kind.needs_flash() && !self.opts.allow_flash {
+            return;
+        }
+        if kind == MoveKind::DoubleFlash && !self.opts.allow_double_flash {
             return;
         }
         if kind == MoveKind::Teleport && !self.opts.allow_teleport {

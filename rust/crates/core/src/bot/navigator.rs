@@ -183,7 +183,38 @@ impl Navigator {
         false
     }
 
+    /// How far a skill cast in the air may shift this leg's landing, back
+    /// and forward, before it leaves the target platform.
+    fn landing_slack(&self, leg: &Leg) -> Option<(f64, f64)> {
+        const MARGIN: f64 = 6.0;
+        if !matches!(
+            leg.kind,
+            MoveKind::Jump
+                | MoveKind::Flash
+                | MoveKind::DoubleFlash
+                | MoveKind::UpFlash
+                | MoveKind::UpSideFlash
+        ) {
+            return None;
+        }
+        let p = self.graph.platforms[self.graph.locate(leg.x1, leg.y1)?];
+        let (low, high) = (leg.x1 - p.x0 - MARGIN, p.x1 - leg.x1 - MARGIN);
+        let (back, fwd) = if leg.x1 >= leg.x0 {
+            (low, high)
+        } else {
+            (high, low)
+        };
+        Some((back.max(0.0), fwd.max(0.0)))
+    }
+
     fn leg<B: Body + ?Sized>(&self, body: &mut B, leg: &Leg) -> LegStatus {
+        body.state().air_slack = self.landing_slack(leg);
+        let status = self.leg_inner(body, leg);
+        body.state().air_slack = None;
+        status
+    }
+
+    fn leg_inner<B: Body + ?Sized>(&self, body: &mut B, leg: &Leg) -> LegStatus {
         if !body.should_continue() || !body.focused() {
             return LegStatus::Failed;
         }
@@ -259,6 +290,7 @@ impl Navigator {
             );
         }
         if ok {
+            body.ground_window();
             LegStatus::Ok
         } else {
             LegStatus::Failed
@@ -303,6 +335,16 @@ impl Navigator {
         });
         if (pos.0 - x).abs() <= tol {
             return true;
+        }
+        if exact && body.state_ref().reach.tap_table().is_some() {
+            // Hold-and-release overshoots a tight target: close in, then tap.
+            return body.move_to_point(
+                x.round(),
+                pos.1,
+                Some(tol.max(6.0).trunc()),
+                Travel::Mixed,
+                true,
+            ) && body.nudge_to(x, tol);
         }
         body.move_to_point(x.round(), pos.1, Some(tol.trunc()), Travel::Mixed, true)
     }

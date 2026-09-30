@@ -2,6 +2,7 @@
 import { Icon, type IconName } from "./icons";
 import { kitLabel } from "./live";
 import { ClassPage } from "./pages/class";
+import { AttacksPage } from "./pages/attacks";
 import { ConnectionPage } from "./pages/connection";
 import { LayoutPage } from "./pages/layout";
 import { MapPage } from "./pages/map";
@@ -81,6 +82,12 @@ const ENTRIES: Entry[] = [
     flag: (s) => (allMeasured(s) ? "ok" : "todo"),
   },
   {
+    page: "attacks", title: "Attacks", icon: "bolt",
+    sub: (s) => `${Math.round(s.moveAttack * 100)}% of moves` +
+      (s.groundAttack ? ` · ${Math.round(s.groundAttack * 100)}% of landings` : "") +
+      (s.targetApm ? ` · aiming for ${s.targetApm}/min` : ""),
+  },
+  {
     page: "patrol", title: "Patrol", icon: "route",
     sub: (s) => `${s.policy} · temperature ${s.temp}` +
       (s.anchorStats.length ? ` · ${s.anchorStats.length} anchors tracked` : ""),
@@ -157,6 +164,7 @@ function SetupPage({ page, s, wide }: { page: string; s: AppState; wide: boolean
     case "class": return <ClassPage s={s} />;
     case "skills": return <SkillsPage s={s} />;
     case "measure": return <MeasurePage s={s} />;
+    case "attacks": return <AttacksPage s={s} />;
     case "patrol": return <PatrolPage s={s} />;
     case "safety": return <SafetyPage s={s} />;
     case "connection": return <ConnectionPage s={s} />;
