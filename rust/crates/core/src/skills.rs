@@ -41,6 +41,34 @@ impl SkillKind {
     }
 }
 
+/// Where a skill can be cast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Stance {
+    Ground,
+    Air,
+    #[default]
+    Any,
+}
+
+impl Stance {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stance::Ground => "ground",
+            Stance::Air => "air",
+            Stance::Any => "any",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "ground" => Stance::Ground,
+            "air" => Stance::Air,
+            "any" => Stance::Any,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Skill {
     pub name: String,
@@ -56,6 +84,10 @@ pub struct Skill {
     pub charges: u32,
     /// Summon uptime in seconds (0 = until its cooldown ends).
     pub duration: f64,
+    /// Cast on the ground, in the air, or either.
+    pub stance: Stance,
+    /// Relative odds of being picked among ready skills.
+    pub weight: f64,
 }
 
 impl Skill {
@@ -69,6 +101,8 @@ impl Skill {
             hold: None,
             charges: 1,
             duration: 0.0,
+            stance: Stance::Any,
+            weight: 1.0,
         }
     }
 
@@ -118,6 +152,14 @@ impl Skill {
                 crate::Error::Format(format!("skill {name:?}: hold must be a number"))
             })?),
         };
+        let stance = match obj.get("stance") {
+            None | Some(Value::Null) => Stance::Any,
+            Some(v) => Stance::parse(&as_string(v)).ok_or_else(|| {
+                crate::Error::Format(format!(
+                    "skill {name:?}: stance must be one of ground, air, any"
+                ))
+            })?,
+        };
         Ok(Skill {
             name: name.into(),
             key: as_string(key),
@@ -127,6 +169,8 @@ impl Skill {
             hold,
             charges: charges.max(1) as u32,
             duration: num("duration", 0.0)?.max(0.0),
+            stance,
+            weight: num("weight", 1.0)?.max(0.0),
         })
     }
 
@@ -149,6 +193,12 @@ impl Skill {
         }
         if self.duration != 0.0 {
             out.insert("duration".into(), self.duration.into());
+        }
+        if self.stance != Stance::Any {
+            out.insert("stance".into(), self.stance.as_str().into());
+        }
+        if self.weight != 1.0 {
+            out.insert("weight".into(), self.weight.into());
         }
         Value::Object(out)
     }
@@ -357,6 +407,18 @@ mod tests {
             Skill::new("a", "a").to_json(),
             json!({"key": "a", "kind": "attack"})
         );
+    }
+
+    #[test]
+    fn stance_and_weight_round_trip_and_default_out() {
+        let spec = json!({"key": "a", "kind": "attack", "stance": "ground", "weight": 2.5});
+        let s = Skill::from_json("hit", &spec).unwrap();
+        assert_eq!((s.stance, s.weight), (Stance::Ground, 2.5));
+        assert_eq!(s.to_json(), spec);
+        let plain =
+            Skill::from_json("p", &json!({"key": "a", "stance": "any", "weight": 1})).unwrap();
+        assert_eq!(plain.to_json(), json!({"key": "a", "kind": "attack"}));
+        assert!(Skill::from_json("x", &json!({"key": "a", "stance": "sky"})).is_err());
     }
 
     #[test]

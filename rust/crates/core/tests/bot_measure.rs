@@ -380,3 +380,13 @@ fn the_status_carries_profiles() {
     assert!(last["profiles"].get("up_flash").is_some());
     assert!(!last["profile"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn a_class_without_double_flash_does_not_measure_it() {
+    use picobot_core::bot::measure::plan_for;
+    let mut cfg = picobot_core::config::BotConfig::default();
+    assert!(plan_for(&cfg).contains(&"double_flash"));
+    cfg.double_flash = false;
+    assert!(!plan_for(&cfg).contains(&"double_flash"));
+    assert!(plan_for(&cfg).contains(&"flash"));
+}

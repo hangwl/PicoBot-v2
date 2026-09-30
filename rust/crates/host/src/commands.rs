@@ -83,6 +83,7 @@ impl Host {
             "skills|list" => self.send_skills(),
             "layout|reset" => self.layout_reset(),
             _ if msg.starts_with("class|use|") => self.class_use(arg(2).trim()),
+            _ if msg.starts_with("class|caps|") => self.class_caps(&arg(2)),
             _ if msg.starts_with("class|add|") => {
                 let mut p = msg.splitn(4, '|').skip(2);
                 let (name, spec) = (p.next().unwrap_or(""), p.next().unwrap_or(""));
@@ -162,6 +163,7 @@ impl Host {
                 let row = json!({
                     "travel": p.get("travel").cloned().unwrap_or_else(|| "flash".into()),
                     "air_attacks": p.get("air_attacks").is_none_or(picobot_core::json::truthy),
+                    "double_flash": p.get("double_flash").is_none_or(picobot_core::json::truthy),
                     "teleport_key": p.get("teleport_key").cloned().unwrap_or(Value::Null),
                 });
                 (name.clone(), row)
@@ -210,6 +212,7 @@ impl Host {
         let keep = [
             "travel",
             "air_attacks",
+            "double_flash",
             "teleport_key",
             "teleport_cooldown",
             "skills",
@@ -234,6 +237,43 @@ impl Host {
         self.bus
             .emit("bot", &format!("class profile {name} created"));
         self.class_use(name);
+    }
+
+    /// `class|caps|{json}`: the active profile's capabilities
+    /// (`double_flash`, `air_attacks`).
+    fn class_caps(self: &Arc<Self>, spec: &str) {
+        let Ok(Value::Object(want)) = serde_json::from_str::<Value>(spec) else {
+            self.bus
+                .emit("error", "class capabilities must be a JSON object");
+            return;
+        };
+        let mut edits: Vec<(String, bool)> = Vec::new();
+        for (k, v) in &want {
+            match (k.as_str(), v) {
+                ("double_flash" | "air_attacks", Value::Bool(b)) => edits.push((k.clone(), *b)),
+                _ => {
+                    self.bus
+                        .emit("error", &format!("invalid class capability: {k}"));
+                    return;
+                }
+            }
+        }
+        let active = self.bot_config().class_active;
+        if let Err(e) = self.commit_bot(|bot| {
+            let profiles = obj(class_block(bot)
+                .entry("profiles")
+                .or_insert_with(|| json!({})));
+            let profile = obj(profiles.entry(active).or_insert_with(|| json!({})));
+            for (k, b) in edits {
+                profile.insert(k, b.into());
+            }
+        }) {
+            self.bus.emit("error", &e);
+            return;
+        }
+        self.bus.emit("bot", "class capabilities saved");
+        self.send_class();
+        self.send_config();
     }
 
     /// Apply a class profile live: the kit decides which moves exist, so

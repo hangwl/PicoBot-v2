@@ -278,6 +278,7 @@ pub trait Body {
         GraphOptions {
             rope_penalty: cfg.rope_penalty,
             allow_flash: cfg.class_travel == ClassTravel::Flash && cfg.flash_jump_enabled,
+            allow_double_flash: cfg.double_flash,
             allow_teleport: cfg.class_travel == ClassTravel::Teleport && cfg.teleport_key.is_some(),
             ..Default::default()
         }

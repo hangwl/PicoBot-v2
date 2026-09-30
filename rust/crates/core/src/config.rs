@@ -267,6 +267,8 @@ pub struct BotConfig {
     pub class_active: String,
     pub class_travel: ClassTravel,
     pub air_attacks: bool,
+    /// Can chain two flashes in one jump (flash-jump classes).
+    pub double_flash: bool,
     pub teleport_key: Option<String>,
     pub teleport_cooldown: f64,
     pub nav_teleport_dx: f64,
@@ -329,6 +331,7 @@ impl Default for BotConfig {
             class_active: "default".into(),
             class_travel: ClassTravel::Flash,
             air_attacks: true,
+            double_flash: true,
             teleport_key: None,
             teleport_cooldown: 1.0,
             nav_teleport_dx: 25.0,
@@ -516,6 +519,9 @@ impl BotConfig {
         if let Some(v) = get("air_attacks") {
             cfg.air_attacks = truthy(v);
         }
+        if let Some(v) = get("double_flash") {
+            cfg.double_flash = truthy(v);
+        }
         if data.contains_key("teleport_key") {
             cfg.teleport_key = opt_string(get("teleport_key"));
         }
@@ -563,6 +569,9 @@ impl BotConfig {
             }
             if let Some(v) = p.get("air_attacks") {
                 self.air_attacks = truthy(v);
+            }
+            if let Some(v) = p.get("double_flash") {
+                self.double_flash = truthy(v);
             }
             if p.contains_key("teleport_key") {
                 self.teleport_key = opt_string(p.get("teleport_key"));
@@ -653,6 +662,7 @@ impl BotConfig {
             "class_active": self.class_active,
             "class_travel": self.class_travel.as_str(),
             "air_attacks": self.air_attacks,
+            "double_flash": self.double_flash,
             "teleport_key": self.teleport_key,
             "teleport_cooldown": self.teleport_cooldown,
             "nav_teleport_dx": self.nav_teleport_dx,

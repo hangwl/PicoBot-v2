@@ -147,6 +147,17 @@ fn up_side_flash_goes_up_and_over() {
 }
 
 #[test]
+fn a_class_without_double_flash_gets_no_double_flash_edges() {
+    let wide = [150.0, 84.0, 190.0, 84.0];
+    let opts = GraphOptions {
+        allow_double_flash: false,
+        ..GraphOptions::default()
+    };
+    let g = with_ropes(&[MID, wide], &[], opts);
+    assert!(g.route((60.0, 84.0), (170.0, 84.0), &[]).is_none());
+}
+
+#[test]
 fn gap_moves_pick_the_smallest_that_fits() {
     let wide = [150.0, 84.0, 190.0, 84.0];
     assert_eq!(

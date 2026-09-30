@@ -19,11 +19,14 @@ export interface SkillSpec {
   charges?: number;
   duration?: number;
   hold?: number | null;
+  stance?: "ground" | "air" | "any";
+  weight?: number;
 }
 
 export interface ProfileKit {
   travel?: string;
   air_attacks?: boolean;
+  double_flash?: boolean;
   teleport_key?: string | null;
 }
 

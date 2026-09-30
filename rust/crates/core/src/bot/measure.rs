@@ -17,6 +17,7 @@ use crate::reach::Move;
 use crate::vision::platform_span_at;
 
 const FLASH_PLAN: &[&str] = &["flash", "double_flash", "jump", "rope_lift", "up_flash"];
+const SINGLE_FLASH_PLAN: &[&str] = &["flash", "jump", "rope_lift", "up_flash"];
 const TELEPORT_PLAN: &[&str] = &["jump", "teleport", "rope_lift", "teleport_up"];
 const WALK_PLAN: &[&str] = &["jump", "rope_lift"];
 const VERTICAL: &[&str] = &["up_flash", "rope_lift", "teleport_up"];
@@ -38,7 +39,8 @@ fn room(m: &str) -> f64 {
 pub fn plan_for(cfg: &BotConfig) -> &'static [&'static str] {
     match cfg.class_travel {
         ClassTravel::Teleport if cfg.teleport_key.is_some() => TELEPORT_PLAN,
-        ClassTravel::Flash if cfg.flash_jump_enabled => FLASH_PLAN,
+        ClassTravel::Flash if cfg.flash_jump_enabled && cfg.double_flash => FLASH_PLAN,
+        ClassTravel::Flash if cfg.flash_jump_enabled => SINGLE_FLASH_PLAN,
         _ => WALK_PLAN,
     }
 }
