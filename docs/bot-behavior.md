@@ -14,7 +14,7 @@
 
 Both ban unreachable anchors for 30s, execute the plan strictly
 (splice-on-fail, 3 misses → ban), and pipeline the next loop before the
-current one ends. (`patrol.py`)
+current one ends. (`core/src/bot/patrol.rs`, `core/src/planner.rs`)
 
 With ≥2 anchors and drawn platforms the bot strictly follows a planned
 loop:
@@ -68,7 +68,7 @@ Placement snaps the height to the platform under the click and raises it;
 the runtime checks arrival by platform membership, so older on-row
 anchors keep working.
 
-## Moves & learned reach (`navgraph.py`, `reach.py`, `navigator.py`)
+## Moves & learned reach (`navgraph.rs`, `reach.rs`, `bot/navigator.rs`)
 
 The movement graph links drawn platforms (plus **learned** ropes — see
 below) with every move whose **reach** covers the gap:
@@ -230,7 +230,7 @@ Bot-controlled movement looks like a player farming, not a macro:
 - All gaps are log-normal (`timing.human_between`: clamped to the game's
   input windows, e.g. re-press 0.11–0.26s around 0.17s).
 
-## Human input timing (`timing.py`, `inputs.py`)
+## Human input timing (`timing.rs`, `io/src/hid.rs`)
 
 - **Session tempo**: each bot start draws a pace (±~7%) that also drifts
   slowly within the session (mean-reverting, minutes-scale). It scales
@@ -251,7 +251,7 @@ Bot-controlled movement looks like a player farming, not a macro:
 - The Pico firmware polls every 1ms, so it doesn't round every key event
   to 10ms.
 
-## Skills (`skills.py`, dashboard Skills panel)
+## Skills (`skills.rs`, dashboard Skills panel)
 
 Registered skills have `key`, `kind`, `cooldown`:
 
@@ -260,7 +260,7 @@ Registered skills have `key`, `kind`, `cooldown`:
 - `summon` — placed at anchors (below). Allowed at an anchor that lists
   it in `on_arrive`, or at any anchor that lists none.
 
-## Summons (`summons.py`)
+## Summons (`summons.rs`)
 
 - **Charges**: a skill stores up to `charges` uses (default 1); while
   below the maximum, one returns every `cooldown` seconds (the timer

@@ -2,34 +2,46 @@
 
 PicoBot has three layers: a hardware HID relay, a perception/vision stack
 that watches the game window, and a decision layer (the smart bot) plus a
-web dashboard that exposes all of it.
+web dashboard that exposes all of it. The host is a Rust workspace; the
+original Python host lives on the `legacy/python` branch.
 
 ```
-┌────────────┐   serial   ┌──────────────────────────────────────┐
-│ Pico /     │ ◄────────► │  picobot host (`python -m picobot`)   │
-│ CircuitPy  │  HID bytes │                                      │
-│ HID relay  │            │  transport/ ──► SerialManager        │
-└─────┬──────┘            │  bot/       ──► SmartBot + FSM       │
-      │ USB HID           │  vision/    ──► screen/minimap/OCR   │
-      ▼                   │  remote/    ──► WS relay + streamer  │
-   game PC                │  serve.py   ──► BotHost (the app)    │
-                          └──────┬───────────────────┬───────────┘
+┌────────────┐   serial   ┌──────────────────────────────────────────┐
+│ Pico /     │ ◄────────► │  picobot host (rust/, picobot.exe)        │
+│ CircuitPy  │  HID bytes │                                          │
+│ HID relay  │            │  io::serial ──► SerialLink (v2 protocol) │
+└─────┬──────┘            │  core::bot  ──► Machine, Patrol, …       │
+      │ USB HID           │  io + core  ──► capture, minimap, OCR    │
+      ▼                   │  host       ──► Host (the app), streamer │
+   game PC                └──────┬───────────────────┬───────────────┘
                                  │ WS :8765          │ HTTP :8000
                                  ▼                   ▼
-                          remote/control.py      web/ (Preact dashboard)
+                          host/src/server.rs     web/ (Preact dashboard)
                           (hid|… relay)          (the UI)
 ```
 
-## HID relay (`CIRCUITPY/`, `transport/`, `bot/inputs.py`)
+Three crates under `rust/crates/`:
+
+- **`core`** — pure logic, no OS calls: config and data formats, the
+  navigation graph and planner, learned reach, skills, the vision
+  algorithms, map identity, title matching, and the bot itself. All of it
+  is tested without a game, a screen or a Pico.
+- **`io`** — Windows-facing I/O: the serial link and HID controller,
+  window lookup, GDI screen capture, and the OCR recogniser.
+- **`host`** — the `picobot` binary: the dashboard server, the threads,
+  and the glue that gives the bot a real body.
+
+## HID relay (`CIRCUITPY/`, `io/src/serial.rs`, `io/src/hid.rs`)
 
 A Raspberry Pi Pico running CircuitPython presents itself to the game PC
 as a real USB keyboard/mouse. The host sends compact payloads over serial
-(`serial_manager.py` handles framing, PICO_READY handshake, port
-autodetect); `bot/inputs.py`'s `HidController` wraps them as press/release/
-move with ACKs and held-key tracking. Key timing is humanized host-side —
-the firmware relays raw down/up events verbatim, so inputs are
-indistinguishable from a physical keyboard. That is the point: the
-project exists because recorded macro playback is too easily detected.
+(`SerialLink`: framing, the `PICO_READY` handshake, port discovery);
+`HidController` wraps them as press/release/move with ACKs, human key
+spacing and held-key tracking, and releases everything when dropped. Key
+timing is humanized host-side — the firmware relays raw down/up events
+verbatim, so inputs are indistinguishable from a physical keyboard. That
+is the point: the project exists because recorded macro playback is too
+easily detected.
 
 Wire protocol (one line each way):
 
@@ -40,116 +52,123 @@ Wire protocol (one line each way):
   Replies are matched by number, so one that arrives after its sender
   timed out can't be credited to a later command.
 - Versions: current firmware announces `PICO_READY v2`; only then does
-  the host number commands and send `ka`. Before that (or with older
-  firmware, which says plain `PICO_READY`) commands go out unnumbered and
-  bare `ACK`s are matched first-in-first-out. Update the host first — it
-  speaks both — then copy `CIRCUITPY/code.py` to the Pico.
+  the host number commands and send `ka`. With older firmware (plain
+  `PICO_READY`) commands go out unnumbered and bare `ACK`s are matched
+  first-in-first-out.
 - Failsafe: the firmware releases every key and button when the DATA
   port disconnects, and — once the host has shown it speaks v2 (a
   numbered command or `ka`) — when nothing has arrived for 2s while
   anything is held: a crashed or hung host never leaves a key down.
-- The command writer drops a key-*down* whose sender already timed out
-  (it would land with nobody to release it); key-ups always go out, and
-  `HidController` counts a key as held from the moment it tries to press it.
-- A serial port that fails underneath the reader is closed and reported
+- `HidController` counts a key as held from the moment it tries to press
+  it, and an unconfirmed press still sends its key-up.
+- The reader only reads bytes already waiting: reader and writer share
+  one synchronous Windows handle, and a read left blocking would hold
+  every write behind it. Round trips are ~4 ms.
+- A port that fails underneath the reader is closed and reported
   (`Remote: Serial lost`); waiting senders fail at once.
 
-## Vision (`vision/`)
+## Vision (`io/src/window.rs`, `io/src/capture.rs`, `core/src/{vision,minimap,title,fuzzy,identity}.rs`, `io/src/ocr.rs`)
 
-- `game_window.py` — locates the game window, exposes the **client-area**
-  rect. Every pixel coordinate in the codebase below this layer is
-  client-relative: captures never include the OS title bar or borders.
-- `screen.py` — `mss`-backed BGR captures of arbitrary client rects.
-- `minimap.py` — `MinimapAnalyzer` finds the panel by its white frame
-  (`find_frame`), tracks player/rune/other-player blobs (feet-anchored),
-  feeds the blackout detector, and relocates when the panel moves.
-- `transition.py` — loading-blackout detector (the map-change trigger).
-- `mapname.py` — title band, segmentation, RapidOCR, `title_score`.
-- `framelog.py` — debug frame capture to `debug/frames/`.
+- `GameWindow` locates the game window and exposes the **client-area**
+  rect. Every pixel coordinate below this layer is client-relative:
+  captures never include the OS title bar or borders.
+- `ScreenGrabber` — GDI `BitBlt` captures (BGRA) into a reused DIB
+  section; not `Send`, so each thread keeps its own (`host/src/feed.rs`
+  `Eyes`).
+- `vision.rs` — colour masks, the percentile darkness test, frame
+  finding (`find_frame`), marker blobs, platform lookups.
+- `minimap.rs` — `TransitionDetector` (the loading-blackout trigger),
+  `MinimapAnalyzer` (panel region + provenance, blackout, relocation,
+  markers; shared behind a mutex) and a per-reader `PlayerTracker`.
+- `title.rs` — the title band, its segmentation (`title_scan`) and the
+  crop OCR reads; `fuzzy.rs` — `title_score` and the sibling rules;
+  `identity.rs` — `MapIdentity` (pin + voted title reads).
+- `ocr.rs` — PaddleOCR's recogniser (ONNX, via `ort`) on each title line.
 
 See [map-detection.md](map-detection.md).
 
-## Bot (`bot/`)
+## Bot (`core/src/bot/`)
 
-`smart_bot.py` is a perception → decide → act loop. `monitor.py`'s
-`MapMonitor` thread samples the minimap at 20 Hz for blackouts, panel
-moves and title reads into the shared `MapIdentity` (`identity.py`); the
-bot's `minimap_frame()` captures and applies identity changes;
-a small FSM (`machine.py`, `states/`) owns behavior:
+The bot is written against a `Body` trait (`body.rs`): the world it needs
+(keys, minimap frames, the player dot, hazards, focus, a clock, the map)
+plus the movement primitives as default methods. The host's `HostBody`
+(`host/src/botbody.rs`) is the real one; the tests use a physics sim.
 
-- **Grind** — the farming state. ≥2 anchors → continuous patrol
-  (`patrol.py`: full traversal plan, one move per tick); 1 anchor →
-  weave on its platform; none → weave around the start point.
-- **Travel** — hand-authored legs (e.g. ropes) via the older patrol path.
-- **Pause** — safety stop (rune, other players, focus loss, map change
-  mid-leg).
+- `machine.rs` — the GRIND / TRAVEL / PAUSE state machine (PAUSE
+  interrupts and resumes).
+- `grind.rs` — arrival skills, summons, buffs, the single-anchor weave,
+  recorded legs.
+- `patrol.rs` — the continuous patrol: a planned anchor loop executed leg
+  by leg, splices after a miss, bans, rope learning.
+- `navigator.rs` — runs a graph route move by move (landing rule, rope
+  fallback); `flight.rs` and `measure.rs` record flights and measure
+  moves.
 
-`rotation.py` models the map's anchor/leg graph; `maps.py` is the JSON
-store plus identity matching; `skills.py` is the per-skill cooldown
-scheduler (attack/buff/summon kinds). Movement geometry (platforms, walls) is **hand-drawn in
-the dashboard** — auto-detection of translucent minimap lines proved too
+Around it in `core/src/`: `navgraph.rs` (the movement graph and Dijkstra),
+`planner.rs` (loop order), `reach.rs` (learned move envelopes),
+`rotation.rs` (anchors and legs), `maps.rs` (the map store), `skills.rs`
+(the per-skill cooldown book), `summons.rs`, `timing.rs` (humanized
+delays), `layout.rs` and `platform_fit.rs` (drawn-geometry edits and the
+fit diagnostic). Movement geometry (platforms) is **hand-drawn in the
+dashboard** — auto-detection of translucent minimap lines proved too
 fragile and was deliberately abandoned.
 
-## Host & remote (`serve.py`, `remote/`)
+## Host (`host/src/`)
 
-`serve.py`'s `BotHost` is the app: it owns the serial transport, the
-`_VisionFeed` (idle-mode perception), the bot lifecycle, map store,
-move measurer, and the dashboard command surface (`map|set`,
-`layout|*`, `skills|*`, `dash|view|*`, …).
+- `main.rs` — arguments (`--root`, `--port`, `--window`, `--ws`, `--http`,
+  `--notify-test`), the async runtime, the two listeners.
+- `host.rs` — `Host`, the app: config, the serial link, the map store and
+  identity, the vision feed, bot and measurement runs, the `maps` /
+  `config` / `measure` events. `commands.rs` holds the dashboard's edit
+  commands (class, skills, keys, patrol, layout, nav preview).
+- `server.rs` — HTTP (the built dashboard with the live WS port filled
+  in, `/health`) and the WebSocket (hello, ping/pong, routing);
+  `clients.rs` — connected clients, held keys, one-frame slots.
+- `feed.rs` — the shared analyzer and the `MapMonitor` thread (20 Hz:
+  blackouts, panel moves, title bands for the `TitleOCR` worker).
+- `streamer.rs` + `frames.rs` — the `FrameStreamer` thread: Panel /
+  Window / Title view, overlays (`annotate`, `assemble_panel`), JPEG,
+  `PBF1` frames.
+- `botbody.rs` — `HostBody` and the bot and measurement threads.
+- `bus.rs` — the levelled event bus (debug < info < warn < error;
+  `hid`/serial chatter is debug); `telegram.rs` — safety alerts.
 
-`remote/control.py` relays `hid|…` payloads (the dashboard input pad) to
-serial. `remote/streamer.py` captures frames at
-`view_fps`, annotates overlays (`annotate`, `assemble_panel`,
-`annotate_title`), JPEG-encodes, and sends binary frames to clients that
-subscribed (`dash|subscribe|frames`); a client still receiving the
-previous frame skips the next one. Dashboard commands run in order on a
-`DashboardCommands` worker thread, never on the WS event loop, so slow
-commands can't stall `hid|…` relay. `ScreenGrabber` keeps one mss
-instance per thread.
-`remote/http.py` serves the built dashboard app (`web/dist`).
-
-Threads: the WS server, the HTTP server, the frame streamer, and the bot
-task all run concurrently — all mutation of shared state funnels through
-`BotHost` methods or the `EventBus` (`events.py`, leveled: debug < info <
-warn < error; `hid`/serial chatter is debug).
+Threads: a small async runtime serves HTTP and WS; the serial reader, the
+serial writer (remote keys), `DashboardCommands` (commands run in order,
+never on the async runtime), `MapMonitor`, `FrameStreamer`, `TitleOCR`,
+the bot or measurer, the flight sampler during a flight, and one thread
+per Telegram alert. The bot owns its state; the dashboard reaches it
+through the host (config versions, pending skill books, the published
+`Viz`), and nothing calls out while holding a lock.
 
 ## Data flow (dashboard frame)
 
 ```
 MapMonitor (20 Hz) → note_frame() (blackout → arrival, panel moves)
-                  └► identity.pump(name band) ──► TitleOCR worker
-feed/bot capture → minimap_img() ──► overlays, player position
-snap = viz/map meta + overlays ──► assemble_panel (title+map composite,
-                                   ox/oy offset) ──► annotate ──► JPEG
-                                                          └─► binary WS frame
+                  └► name band ──► TitleOCR worker ──► MapIdentity
+FrameStreamer → capture region ──► player dot (or the bot's Viz)
+map meta + overlays ──► assemble_panel (title+map composite, ox/oy)
+                    ──► annotate ──► JPEG ──► PBF1 binary WS frame
 ```
 
 ## Directory map
 
 ```
-picobot/
-├── bot/                # smart bot
-│   ├── states/         # FSM states: Grind, Travel, Pause
-│   ├── __main__.py     # headless bot entry
-│   ├── base.py         # lifecycle + event sink
-│   ├── config.py       # BotConfig (config.json["bot"])
-│   ├── inputs.py       # HidController (ACK'd payloads, held-key tracking)
-│   ├── machine.py      # FSM runtime
-│   ├── maps.py         # maps/ store + identity matching
-│   ├── rotation.py     # anchor/leg graph model
-│   ├── skills.py       # per-skill cooldown scheduler
-│   ├── smart_bot.py    # perception → decide → act task
-│   └── timing.py       # humanized delays
-├── remote/
-│   ├── control.py      # WS server + hid|… relay + dashboard commands
-│   ├── http.py         # embedded HTTP server (serves web/dist)
-│   └── streamer.py     # annotated frame feed (assemble_panel, annotate)
-├── transport/
-│   └── serial_manager.py
-├── vision/             # mss capture, window handle, minimap + title OCR
-├── events.py           # structured leveled event bus
-├── serve.py            # headless host (the app)
-└── config.py, settings.py, messaging.py
+rust/
+├── crates/core/src/
+│   ├── bot/            # body, machine, grind, navigator, patrol, flight, measure
+│   ├── config.rs       # AppConfig + BotConfig (config.json)
+│   ├── maps.rs         # maps/ store
+│   ├── identity.rs     # map identity (pin + title reads)
+│   ├── title.rs, fuzzy.rs, vision.rs, minimap.rs
+│   ├── navgraph.rs, planner.rs, reach.rs, rotation.rs
+│   ├── skills.rs, summons.rs, timing.rs, anchor_stats.rs
+│   └── layout.rs, platform_fit.rs, json.rs, fileio.rs
+├── crates/core/tests/  # sim-based bot suites, parity fixtures, key map check
+├── crates/io/src/      # serial, hid, window, capture, ocr, perf
+├── crates/io/examples/ # pico_ping, serial_latency, dot_rate, ocr_check, vision_bench
+└── crates/host/src/    # the picobot binary
 CIRCUITPY/              # Pico firmware (code.py)
-tests/                  # pytest suite, mirrors picobot/
+web/                    # the dashboard (Preact)
+scripts/                # cpu-sample.ps1
 ```

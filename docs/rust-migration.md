@@ -1,5 +1,9 @@
 # Rust host — migration plan
 
+> Done: the Rust host is the host. The Python host, the fixture
+> generator and the comparison scripts (`rust/tools/*.py`) live on the
+> `legacy/python` branch; commands below that run Python need it.
+
 Goal: a Rust host that replaces `picobot/` (Python) with **lower CPU use
 and latency**, built alongside it on `feat/rust` until it reaches parity.
 It is also a learning project, so each milestone notes the Rust ideas it

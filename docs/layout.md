@@ -60,7 +60,7 @@ Farming keeps refining the numbers (successes grow an envelope; two
 consecutive misses shrink it).
 
 The **up flash** is measured by its arc, not its landing: a flight
-recorder (`bot/flight.py`) samples the player dot at ~60 Hz on its own
+recorder (`core/src/bot/flight.rs`) samples the player dot at ~60 Hz on its own
 thread while the move runs, and the rise is the recorded peak — so it
 needs no platform above and isn't capped by whatever ledge happens to be
 there. The patrol's re-press timing varies, so it runs a couple of times

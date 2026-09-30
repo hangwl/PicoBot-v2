@@ -3,8 +3,8 @@
 Learning-oriented MapleStory private-server bot: a Raspberry Pi Pico /
 CircuitPython device relays real HID input; a Rust host (`rust/`) watches
 the minimap and works a perception-driven farming rotation. The original
-Python host (`picobot/`) is kept as a legacy fallback. Docs live in
-`docs/`; `README.md` is the landing page.
+Python host is kept on the `legacy/python` branch (not maintained). Docs
+live in `docs/`; `README.md` is the landing page.
 
 ## Commands
 
@@ -16,30 +16,21 @@ cd rust; cargo test; cargo clippy --all-targets; cargo fmt   # Rust tests (~220)
 cd rust; cargo run --release -p picobot-io --example serial_latency -- COM6   # Pico round trips (no HID)
 rust\target\release\picobot.exe --root . --notify-test     # one Telegram test alert
 cd web; npm install; npm run build                         # build the dashboard (web/dist)
-
-# Legacy Python host (fallback; also the source of the Rust parity fixtures)
-.venv\Scripts\python.exe -m pytest tests/ -x -q            # Python suite (~400 tests)
-.venv\Scripts\python.exe -m picobot                        # run the Python host
-.venv\Scripts\python.exe -m picobot --debug-frames         # + debug captures to debug/frames/
-.venv\Scripts\python.exe rust\tools\gen_fixtures.py        # regenerate Rust parity fixtures
 ```
 
 - Cargo lives in `%USERPROFILE%\.cargo\bin` (in Git Bash:
   `export PATH="$USERPROFILE/.cargo/bin:$PATH"`).
-- Use the venv interpreter, not bare `python`/`pytest`.
 - Line endings: files are CRLF on disk, LF in git (`core.autocrlf=true`);
   the parity fixtures are `-text`.
 - The host `chdir`s to `--root` (the project folder), so `config.json`,
   `maps/`, `nav_reach*.json`, `models/` and `web/dist` resolve there.
 - Title OCR: `PP-OCRv6_rec_small.onnx` from `models/`, else the RapidOCR
-  copy in `.venv`.
-- Both hosts share `config.json`, `maps/`, the reach files, the ports and
-  the COM port — only one runs at a time.
-- Python deps are installed in `.venv` (numpy, Pillow, RapidOCR, mss,
-  pyserial, pygetwindow, keyboard, websockets).
-- Behaviour changes go into the Rust host; port a Python test first when
-  one covers it. The Python host only gets fixes needed to keep it usable.
-- Git: work on feature branches off `feat/smart-bot`; only push when asked.
+  copy in a local `.venv`.
+- The parity fixtures (`core/tests/fixtures/`) were written by the Python
+  host; their generator lives on `legacy/python`. New behaviour gets a
+  sim test (`core/tests/sim`) instead.
+- Git: `master` is the development branch — work on feature branches
+  off it and merge back; only push when asked.
 
 ## Comments
 
@@ -49,16 +40,13 @@ what was tried and what was learned in `docs/learnings.md` instead.
 
 ## Invariants — don't break these
 
-They hold for both hosts. Paths below name the Python modules; the Map
-lists the Rust equivalents.
-
 - **Map identity**: `MapEntry.name` = user alias; `MapEntry.map_name` =
   OCR'd in-game title only — it's what identity matches. One
   `MapIdentity` is shared by host and bot; don't add parallel resolvers.
-- **Map change = loading blackout** (`vision/transition.py`), sampled
-  only by the `MapMonitor` thread (20 Hz, own grabber). Never feed
-  `note_frame` from the bot/feed, and never use pixel-content change as
-  a trigger — translucent UI defeats it.
+- **Map change = loading blackout** (`TransitionDetector`,
+  `core/src/minimap.rs`), sampled only by the `MapMonitor` thread (20 Hz,
+  own grabber). Never call `note_frame` from the bot or the streamer, and
+  never use pixel-content change as a trigger — translucent UI defeats it.
 - **OCR is request-driven** (startup, arrival, pin, title band) and runs
   on the `TitleOCR` worker — never per-frame, never on the frame thread.
 - **Manual geometry is authoritative**: drawn platforms/walls drive
@@ -77,7 +65,7 @@ lists the Rust equivalents.
   is flash hops — jump, then the mid-air re-press — with **1–2 attacks
   woven after the flash triggers** (never before: it eats the re-press
   window). Walk only for short final approaches. Delays are log-normal
-  (`timing.human_between`/`human_delay`), never flat `uniform`, and
+  (`timing::human_between`/`human_delay`), never flat `uniform`, and
   scaled by the session `TEMPO` (means only — clamps still hold).
   `HidController` spaces consecutive key events; don't bypass it with
   raw sends.
@@ -122,9 +110,10 @@ lists the Rust equivalents.
   WS event loop. View frames are binary and opt-in
   (`dash|subscribe|frames`).
 - **Never call out while holding a lock** — no logging, bus emits,
-  broadcasts or callbacks inside `with …lock:`. Logging reaches the
-  event bus, which broadcasts under `clients_lock`: a call-out under that
-  lock deadlocks the streamer, then the bot and the WS loop.
+  broadcasts or callbacks while a guard is alive. Logging reaches the
+  event bus, whose subscribers broadcast to the clients: a call-out under
+  a lock can deadlock the streamer, then the bot and the WS runtime.
+  Compute under the lock, emit after.
 - **Profile skills**: a profile with a `skills` entry (even `{}`) owns its
   kit; without one it inherits the global book. Anything that changes the
   kit re-broadcasts `skills`/`config`; reads never seed a profile.
@@ -132,13 +121,15 @@ lists the Rust equivalents.
   numbered (`<seq>:hid|…` → `ACK <seq>`) and the firmware releases
   everything on disconnect or after 2s of host silence (the serial reader
   sends `ka` when idle); older firmware gets plain commands. Never send HID without
-  going through `SerialManager`, and never drop a key-*up*.
-- **Landing = takeoff + steady on a platform** (`Navigator._land`); an
+  going through `SerialLink`, and never drop a key-*up*. The serial reader
+  only reads bytes already waiting — a blocking read holds every write.
+- **Landing = takeoff + steady on a platform** (`Navigator::land`); an
   up flash is planned only onto the highest platform its peak clears; a
   miss counts against reach only when it fell short.
 - **Cross-thread state**: the dashboard never mutates bot-owned
-  containers in place — skill books go through `SmartBot.request_skills`,
-  anchor lists are replaced (the patrol replans on change).
+  state in place — skill books go through the host's pending book (the
+  bot swaps it in on its own thread), settings through the config
+  version, maps through saves (the patrol replans on changed anchors).
 - **Remote keys mirror the finger**: `key|down` on touch, `key|up` on
   lift — never synthesized taps. `web/src/keys.ts` `PICO_KEYS` must match
   the firmware `KEY_MAP` (a test checks it).
@@ -159,28 +150,15 @@ Rust host (`rust/crates/`):
 | Frame pipeline | `host/src/streamer.rs` (`FrameStreamer` thread), `frames.rs` (`assemble_panel`, `annotate`, `PBF1`) |
 | Serial / HID / screen | `io/src/serial.rs` (`SerialLink`, v2 protocol), `hid.rs` (`HidController`), `capture.rs`, `window.rs` |
 | Layout geometry | `core/src/layout.rs` (tidy, anchors follow lines), `platform_fit.rs` |
-| Tests | `core/tests/` (physics sim `tests/sim`, bot suites ported from Python, parity against Python-written fixtures from `rust/tools/gen_fixtures.py`) |
+| Tests | `core/tests/` (physics sim `tests/sim`, bot suites ported from Python, parity against fixtures the Python host wrote, generator on `legacy/python`) |
 | Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup list + readiness), `pages/*.tsx` (one file per Setup page), `ui.tsx` (shared bits: `Field`, `Section`, `useReply`/`Reply` for the host's answer under a button), `keys.ts` (held keys); protocol in `docs/protocol.md` |
 
-Behaviour both hosts share:
+Behaviour notes:
 
 | Area | Notes |
 |---|---|
 | Ropes/ladders | **learned from stable off-graph hangs confirmed by a Down probe** (`MapEntry.ropes`, merged per column), never drawn → `climb_up` (jump-grab: direction + up held through the jump) / `climb_down` edges; no direct rope release — failed climbs exit via direction + jump (`rope_exit`) |
 | Rope avoidance | climb edges cost `rope_penalty` (default 5s) — ropes are a **last resort**; platforms are normally reachable via jumps/rope lift/teleport. Rope mapping exists for accidental-grab recovery and future precise moves (rune solving) |
-
-Legacy Python host (`picobot/`):
-
-| Area | Files |
-|---|---|
-| Bot loop / FSM | `bot/smart_bot.py`, `bot/states/` |
-| Pathfinding | `bot/navgraph.py`, `bot/navigator.py`, `bot/reach.py`, `bot/patrol.py` |
-| Map-change monitor + identity | `bot/monitor.py`, `bot/identity.py`, `vision/transition.py` |
-| Map store + titles | `bot/maps.py`, `vision/minimap.py`, `vision/mapname.py` |
-| Move measurement | `bot/measure.py`, `bot/flight.py` |
-| Host + dashboard cmds | `serve.py`, `remote/control.py` |
-| Frame pipeline | `remote/streamer.py` |
-| Debug frame capture | `vision/framelog.py` → `debug/frames/` (Python host only) |
 
 See `docs/` for the full picture: `architecture.md`, `map-detection.md`,
 `layout.md`, `bot-behavior.md`, `dashboard.md`, `configuration.md`,

@@ -4,12 +4,14 @@ Map identity decides which saved layout (anchors, platforms, walls,
 floor, region) is live. Three pieces, each built on a signal translucent
 UI can't fake:
 
-1. **Map change** — the loading blackout (`vision/transition.py`),
-   sampled by the `MapMonitor` thread (`bot/monitor.py`).
+1. **Map change** — the loading blackout (`TransitionDetector` in
+   `core/src/minimap.rs`), sampled by the `MapMonitor` thread
+   (`host/src/feed.rs`).
 2. **Where the minimap is** — the panel's opaque white frame
-   (`find_frame` in `vision/minimap.py`).
+   (`find_frame` in `core/src/vision.rs`).
 3. **Which map** — the OCR'd title, voted and fuzzy-matched
-   (`bot/identity.py`, `vision/mapname.py`, `MapStore.match_title`).
+   (`core/src/identity.rs`, `core/src/title.rs`, `core/src/fuzzy.rs`,
+   `io/src/ocr.rs`).
 
 Why not pixel fingerprints: see [learnings.md](learnings.md).
 

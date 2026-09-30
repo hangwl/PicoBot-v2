@@ -20,7 +20,7 @@ with the top bar showing *Reconnecting*.
 2. Every page request is logged as an `http` event (Log → All): the
    phone's address, the request and the status. No line for the phone's
    attempt means it never reached the host — check Tailscale is on for
-   both devices, and that Windows Firewall allows `python.exe` inbound
+   both devices, and that Windows Firewall allows `picobot.exe` inbound
    on ports 8000 and 8765 for the network type Tailscale uses.
 3. Try the `100.x.y.z` address the host printed instead of the MagicDNS
    name.

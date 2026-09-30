@@ -19,20 +19,17 @@ please use the program at your own risk.
 
 ## Installation
 
-The host is written in Rust (`rust/`). The original Python host
-(`picobot/`) is kept as a legacy fallback.
+The host is written in Rust (`rust/`). The original Python host is kept
+on the `legacy/python` branch.
 
 1. Install Rust (<https://rustup.rs>) and Node.js.
 2. Build the dashboard: `cd web; npm install; npm run build`.
 3. Build the host: `cd rust; cargo build --release` (the first build
    downloads the ONNX runtime used for title OCR).
-4. Title OCR needs PaddleOCR's recogniser, `PP-OCRv6_rec_small.onnx`.
-   Put it in `models/` in the project folder, or install the Python
-   dependencies (below) — the host also finds the copy RapidOCR installs
-   in `.venv`. Without it, map identity falls back to the pin.
-
-The legacy Python host needs Python 3.14 or later: create a virtual
-environment and run `pip install -e .` from the project root.
+4. Title OCR needs PaddleOCR's recogniser, `PP-OCRv6_rec_small.onnx`:
+   put it in `models/` in the project folder (the file ships in the
+   `rapidocr` Python package's `models/` folder). Without it, map
+   identity falls back to the pin.
 
 ## Running
 
@@ -57,15 +54,9 @@ override the remembered values and are persisted the same way.
 Telegram alerts use `bot_token` and `chat_id` in `config.json`;
 `picobot --root . --notify-test` sends one test alert and exits.
 
-### Legacy Python host
-
-```bash
-python -m picobot                 # same flags: --port, --window, --ws, --http
-python -m picobot --debug-frames  # also saves detection captures to debug/frames/
-```
-
-Both hosts read and write the same `config.json`, `maps/` and reach files,
-and use the same ports and COM port — run one at a time.
+The Python host on `legacy/python` reads the same `config.json`, `maps/`
+and reach files and uses the same ports and COM port — run one host at a
+time.
 
 ## The dashboard at a glance
 

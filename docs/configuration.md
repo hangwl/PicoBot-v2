@@ -1,7 +1,7 @@
 # Configuration
 
 `config.json` in the project root. Top level: window/serial/ports/Telegram/
-fps. The `"bot"` block is `BotConfig` (`picobot/bot/config.py`):
+fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
 
 ```json
 {
