@@ -371,15 +371,34 @@ struct PortReader {
     buf: Vec<u8>,
 }
 
+/// How long one `read_line` waits for input before returning (the reader
+/// loop then checks for a stop and sends keepalives).
+const READ_WAIT: Duration = Duration::from_millis(200);
+/// Poll interval while no input is waiting.
+const POLL: Duration = Duration::from_millis(1);
+
 impl LineReader for PortReader {
+    /// Reads only bytes already waiting. The writer shares this handle,
+    /// and Windows serialises synchronous I/O on it: a read left blocking
+    /// for input would hold every write until it timed out.
     fn read_line(&mut self) -> io::Result<Option<String>> {
+        let since = Instant::now();
         loop {
             if let Some(i) = self.buf.iter().position(|b| *b == b'\n') {
                 let line: Vec<u8> = self.buf.drain(..=i).collect();
                 return Ok(Some(String::from_utf8_lossy(&line).trim_end().to_owned()));
             }
+            let waiting = self.port.bytes_to_read().map_err(io::Error::other)?;
+            if waiting == 0 {
+                if since.elapsed() >= READ_WAIT {
+                    return Ok(None);
+                }
+                std::thread::sleep(POLL);
+                continue;
+            }
             let mut chunk = [0u8; 256];
-            match self.port.read(&mut chunk) {
+            let want = (waiting as usize).min(chunk.len());
+            match self.port.read(&mut chunk[..want]) {
                 Ok(0) => return Ok(None),
                 Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
                 Err(e) if e.kind() == io::ErrorKind::TimedOut => return Ok(None),

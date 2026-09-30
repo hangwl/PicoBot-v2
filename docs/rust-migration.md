@@ -60,6 +60,7 @@ cd rust
 cargo test                                   # all crates
 $env:PICOBOT_DATA = "..\..\PicoBot-v2"; cargo test -p picobot-core --test parity   # + real data
 ..\..\PicoBot-v2\.venv\Scripts\python.exe tools\vision_trace.py ..\..\PicoBot-v2 trace.json; $env:PICOBOT_VISION_TRACE = "trace.json"; cargo test -p picobot-core --test vision_parity
+cargo run --release -p picobot-io --example serial_latency -- COM6   # Pico round trips (NACKed no-ops, no HID)
 cargo run --release -p picobot-io --example ocr_check -- ..\..\PicoBot-v2   # OCR vs the recorded Python reads
 cargo clippy --all-targets; cargo fmt
 ..\..\PicoBot-v2\.venv\Scripts\python.exe tools\gen_fixtures.py   # regenerate parity fixtures (Python writers)

@@ -425,6 +425,7 @@ pub fn spawn_measure(host: &Arc<Host>, mode: Mode, only: Option<String>) -> Resu
             m.run(&mut body, mode, only.as_deref());
             body.hid.release_all();
             h.put_reach(body.state.reach.clone());
+            h.set_bot_viz(None);
         })
         .map_err(|e| e.to_string())?;
     Ok(BotRun { stop, thread })
