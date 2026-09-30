@@ -150,6 +150,11 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   `other_player_min_px` (default 6) — the smallest marker that counts.
   Markers within 2px merge into one, so players standing on top of each
   other count once. Every change in the count is logged as a warning.
+- A map file may carry `"other_players": {"mode": "ignore"}` or
+  `{"mode": "allow", "allowed": N}` — that map ignores other-player
+  markers (monsters drawn as players) or tolerates N, instead of the
+  global setting; absent follows it. Set on the Map page
+  (`map|players`). On an ignoring map the count is logged at debug level.
 - `heartbeat_minutes` — Telegram status message every N minutes while
   the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.

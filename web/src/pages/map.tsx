@@ -1,7 +1,7 @@
 // Setup → Map: which map this is (detection, titles, saving).
 import { useState } from "preact/hooks";
 import { type AppState, send } from "../protocol";
-import { Field, Reply, useReply, val } from "../ui";
+import { Field, NumberField, Reply, Section, useReply, val } from "../ui";
 
 export function MapPage({ s }: { s: AppState }) {
   const [creating, setCreating] = useState(false);
@@ -93,11 +93,50 @@ export function MapPage({ s }: { s: AppState }) {
         </div>
       )}
       <Reply reply={reply} />
+      <PlayersRule s={s} target={target} disabled={creating || bad} />
       <p class="hint">
         The map is detected by matching the title on screen to its
         recorded title. If they belong to different maps, pin the right map
         and record the title while standing in it.
       </p>
     </div>
+  );
+}
+
+/** How this map treats other-player markers (monsters drawn as players). */
+function PlayersRule({ s, target, disabled }: {
+  s: AppState;
+  target: string;
+  disabled: boolean;
+}) {
+  const [kind, n] = s.playersRule.split(":");
+  const allowed = Number(n) || 0;
+  const set = (rule: string) => send(`map|players|${rule}|${target}`);
+  return (
+    <Section title="Other players on this map"
+             hint="Some maps draw monsters as other-player markers. Ignore them here, or allow a few, without changing the global setting.">
+      <Field label="Handling">
+        <select value={kind} disabled={disabled}
+                onChange={(e) => {
+                  const v = val(e);
+                  set(v === "allow" ? `allow:${allowed || 1}` : v);
+                }}>
+          <option value="follow">Follow the global setting</option>
+          <option value="ignore">Ignore markers on this map</option>
+          <option value="allow">Allow up to…</option>
+        </select>
+      </Field>
+      {kind === "allow" && (
+        <Field label="Allowed other players">
+          <NumberField value={allowed} min={0} step={1}
+                       onCommit={(v) => set(`allow:${Math.round(v)}`)} />
+        </Field>
+      )}
+      {kind === "ignore" && (
+        <p class="hint warn">
+          The bot won't pause for other players here, real ones included.
+        </p>
+      )}
+    </Section>
   );
 }

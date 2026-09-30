@@ -45,3 +45,13 @@ fn a_larger_minimum_drops_small_markers() {
     let img = panel(&load("two_others.png"), &colors);
     assert_eq!(mm.count_other_players(&img, 10_000), 0);
 }
+
+/// A lossy in-game screenshot of a crowded map: the red monster markers
+/// are not the other-player colour, so none of them count.
+#[test]
+fn monster_markers_are_not_counted_as_players() {
+    let colors = MinimapColors::default();
+    let mm = MinimapAnalyzer::new(colors, None, 4);
+    let img = load("monsters.png").crop(8, 69, 170, 62);
+    assert_eq!(mm.count_other_players(&img, MARKER_MIN_PX), 0);
+}

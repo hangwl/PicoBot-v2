@@ -179,6 +179,8 @@ export interface AppState {
   via: string;
   title: string;
   recordedTitle: string;
+  /** This map's other-player rule: follow | ignore | allow:N. */
+  playersRule: string;
   score: number | null;
   reading: boolean;
   platformsN: number;
@@ -242,6 +244,7 @@ const initial: AppState = {
   via: "",
   title: "",
   recordedTitle: "",
+  playersRule: "follow",
   score: null,
   reading: false,
   platformsN: 0,
@@ -579,6 +582,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         via: (p.via as string) ?? "",
         title: (p.title as string) ?? "",
         recordedTitle: (p.recorded_title as string) ?? "",
+        playersRule: (p.players_rule as string) ?? "follow",
         score: (p.score as number | null) ?? null,
         reading: Boolean(p.reading),
         platformsN: (p.platforms_n as number) ?? 0,

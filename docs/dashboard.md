@@ -72,6 +72,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     identity), or `New map…` (*Create map* saves and pins it); detected
     map, how it was resolved, the title on screen and the recorded one;
     Save map / Re-detect / Forget (confirmed); Record / Clear title.
+    **Other players on this map** follows the global setting, ignores
+    the markers (maps that draw monsters as players) or allows up to N.
   - **Layout** — the map's platforms, anchors and ropes: counts, Tidy
     platforms / Undo platform / Align platform to feet, the **platform
     fit** list (per platform, whether the feet settle on its line or it

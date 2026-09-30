@@ -25,6 +25,7 @@ and follows the same view.
 | `map|list` | re-send the maps payload |
 | `map|set|<name>` | pin a map ("" = auto-detect) |
 | `map|stats|reset[|<name>]` | clear the map's anchor stats |
+| `map|players|<follow\|ignore\|allow:N>[\|<name>]` | this map's other-player rule (see configuration); the `maps` event carries it as `players_rule` |
 | `map|title|record\|clear[|<name>]` | set a map's recorded title to the title on screen now (refused if another map has it), or clear it; blank name = the resolved map |
 | `dash|view|<minimap\|window\|title>` | switch the streamed view |
 | `dash|fps|<n>` | stream rate (1–30) |

@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use picobot_core::bot::{Body, BotState, FlightRecorder, Keys, Machine, Mode, MoveMeasurer};
 use picobot_core::config::BotConfig;
-use picobot_core::maps::MapEntry;
+use picobot_core::maps::{MapEntry, PlayerRule};
 use picobot_core::minimap::{MinimapAnalyzer, PlayerTracker};
 use picobot_core::timing::{monotonic, new_session};
 use picobot_core::vision::Image;
@@ -78,6 +78,8 @@ pub struct HostBody {
     viz_at: f64,
     minimap_warned: bool,
     cfg_version: u64,
+    /// Other players tolerated on the current map (global or its rule).
+    players_allowed: i64,
 }
 
 impl HostBody {
@@ -106,6 +108,7 @@ impl HostBody {
             viz_at: f64::NEG_INFINITY,
             minimap_warned: false,
             cfg_version: host_version,
+            players_allowed: 0,
         }
     }
 
@@ -141,20 +144,21 @@ impl HostBody {
     }
 
     /// Log the other-player count when it changes.
-    fn note_others(&mut self, n: usize) {
+    fn note_others(&mut self, n: usize, ignored: bool) {
         if n == self.state.viz.others {
             return;
         }
         self.state.viz.others = n;
-        let allowed = self.cfg.allowed_other_players;
+        let allowed = self.players_allowed;
+        let s = if n == 1 { "" } else { "s" };
         let (msg, level) = match n {
             0 => ("minimap clear of other players".to_owned(), "info"),
-            1 => (
-                format!("1 other player on the minimap ({allowed} allowed)"),
-                "warn",
+            _ if ignored => (
+                format!("{n} other player marker{s} on the minimap (ignored on this map)"),
+                "debug",
             ),
             _ => (
-                format!("{n} other players on the minimap ({allowed} allowed)"),
+                format!("{n} other player{s} on the minimap ({allowed} allowed)"),
                 "warn",
             ),
         };
@@ -216,17 +220,23 @@ impl Body for HostBody {
         (self.state.viz.hazard.as_deref() == Some("other players")).then(|| {
             format!(
                 " ({} on the minimap, {} allowed)",
-                self.state.viz.others, self.cfg.allowed_other_players
+                self.state.viz.others, self.players_allowed
             )
         })
     }
 
     fn hazard_in(&mut self, img: &Image) -> Option<String> {
         let loading = self.analyzer.loading();
+        let rule = self.refresh_map().and_then(|e| e.other_players);
+        self.players_allowed = match rule {
+            Some(PlayerRule::Ignore) => i64::MAX,
+            Some(PlayerRule::Allow(n)) => n,
+            None => self.cfg.allowed_other_players,
+        };
         if !loading {
             let min_px = self.cfg.other_player_min_px.max(1) as usize;
             let n = self.analyzer.count_other_players(img, min_px);
-            self.note_others(n);
+            self.note_others(n, rule == Some(PlayerRule::Ignore));
         }
         let others = self.state.viz.others as i64;
         let reason = if loading {
@@ -235,7 +245,7 @@ impl Body for HostBody {
             Some("unrecognized map")
         } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
             Some("rune")
-        } else if self.cfg.stop_when_players_appear && others > self.cfg.allowed_other_players {
+        } else if self.cfg.stop_when_players_appear && others > self.players_allowed {
             Some("other players")
         } else {
             None

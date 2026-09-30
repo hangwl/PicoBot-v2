@@ -18,7 +18,7 @@ use picobot_core::layout::{
     erase_target, line_under_feet, next_anchor_name, r4, resnap_anchors, restore_anchors,
     same_lines, shift_line, tidy, Erase, Moved,
 };
-use picobot_core::maps::MapEntry;
+use picobot_core::maps::{MapEntry, PlayerRule};
 use picobot_core::minimap::PlayerTracker;
 use picobot_core::platform_fit::{Seg, SegKey};
 use picobot_core::rotation::Anchor;
@@ -98,6 +98,7 @@ impl Host {
             "map|stats|reset" => self.map_stats_reset(""),
             _ if msg.starts_with("map|stats|reset|") => self.map_stats_reset(&arg(3)),
             _ if msg.starts_with("map|title|") => self.map_title(msg),
+            _ if msg.starts_with("map|players|") => self.map_players(msg),
             _ if msg.starts_with("skills|set|") => self.skills_set(&arg(2)),
             _ if msg.starts_with("skills|del|") => self.skills_del(&arg(2)),
             _ if msg.starts_with("movekeys|set|") => self.movekeys_set(&arg(2)),
@@ -404,6 +405,31 @@ impl Host {
         }
         self.bus.emit("bot", "safety settings saved");
         self.send_config();
+    }
+
+    /// `map|players|<follow|ignore|allow:N>[|<name>]`: how this map treats
+    /// other-player markers.
+    fn map_players(&self, msg: &str) {
+        let mut p = msg.splitn(4, '|').skip(2);
+        let rule = match PlayerRule::parse(p.next().unwrap_or("")) {
+            Ok(r) => r,
+            Err(e) => {
+                self.bus.emit("error", &e.to_string());
+                return;
+            }
+        };
+        let Some(mut entry) = self.target_or_report(p.next().unwrap_or("").trim()) else {
+            return;
+        };
+        entry.other_players = rule;
+        let name = entry.name.clone();
+        self.save_entry(entry);
+        let what = match rule {
+            None => "follows the global setting".to_owned(),
+            Some(PlayerRule::Ignore) => "ignores other-player markers".to_owned(),
+            Some(PlayerRule::Allow(n)) => format!("allows up to {n} other players"),
+        };
+        self.bus.emit("map", &format!("{name} {what}"));
     }
 
     /// `attacks|set|{json}`: how often moves and landings carry attacks,

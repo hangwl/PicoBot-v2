@@ -15,7 +15,7 @@ use picobot_core::bot::measure::plan_for;
 use picobot_core::bot::{LegViz, MeasureStatus, Mode, Viz};
 use picobot_core::config::{AppConfig, BotConfig, ClassTravel};
 use picobot_core::identity::MapIdentity;
-use picobot_core::maps::{MapEntry, MapStore};
+use picobot_core::maps::{MapEntry, MapStore, PlayerRule};
 use picobot_core::navgraph::{GraphCache, GraphOptions, NavGraph};
 use picobot_core::platform_fit::{PlatformFit, SegKey};
 use picobot_core::reach::{base_reach, ReachModel};
@@ -1017,6 +1017,7 @@ impl Host {
             "platform_fit": fit,
             "ropes": self.rope_rows(entry.as_ref(), region),
             "recorded_title": entry.as_ref().and_then(|e| e.map_name.clone()),
+            "players_rule": PlayerRule::label(entry.as_ref().and_then(|e| e.other_players)),
             "anchor_stats": stats,
         });
         self.clients.broadcast(&dash(payload));
