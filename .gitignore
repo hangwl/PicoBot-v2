@@ -1,5 +1,6 @@
 /archive
 config.json
+!rust/crates/core/tests/fixtures/config.json
 *.bat
 
 # Python artifacts

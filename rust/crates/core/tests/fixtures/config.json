@@ -1,0 +1,57 @@
+{
+    "default_target_window": "Eluna (x64)",
+    "bot_token": "",
+    "chat_id": "",
+    "serial_port": "COM6",
+    "ws_port": 8765,
+    "http_port": 8000,
+    "view_fps": 3.0,
+    "ws_tls": false,
+    "ws_certfile": "",
+    "ws_keyfile": "",
+    "bot": {
+        "patrol_policy": "greedy",
+        "patrol_weight_temp": 1.5,
+        "nav_threshold_px": 6,
+        "minimap_colors": {
+            "player": [
+                10,
+                240,
+                240
+            ]
+        },
+        "skills": {
+            "g": {
+                "key": "g",
+                "kind": "attack"
+            }
+        },
+        "class": {
+            "active": "erel",
+            "profiles": {
+                "mage": {
+                    "travel": "teleport",
+                    "air_attacks": false,
+                    "teleport_key": "w",
+                    "skills": {}
+                },
+                "erel": {
+                    "travel": "flash",
+                    "jump_key": "space",
+                    "flash_jump": {
+                        "key": "c"
+                    },
+                    "skills": {
+                        "h": {
+                            "key": "h",
+                            "kind": "summon",
+                            "cooldown": 5.0,
+                            "charges": 2,
+                            "duration": 90.0
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
