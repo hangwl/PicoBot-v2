@@ -8,6 +8,7 @@ pub mod machine;
 pub mod measure;
 pub mod navigator;
 pub mod patrol;
+pub mod watchdog;
 
 pub use body::{Body, BotState, Dir, Keys, LegViz, PatrolStatus, Travel, Viz};
 pub use flight::{Flight, FlightRecorder};

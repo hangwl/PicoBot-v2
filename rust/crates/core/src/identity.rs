@@ -145,6 +145,12 @@ impl MapIdentity {
         s.want || s.busy
     }
 
+    /// The reads are done and named no stored map (and none is pinned).
+    pub fn unrecognized(&self) -> bool {
+        let s = self.inner.lock().unwrap();
+        self.ocr_enabled && !s.want && !s.busy && s.current.name.is_none()
+    }
+
     /// The resolved map's stored entry (fresh after saves).
     pub fn entry(&self) -> Option<MapEntry> {
         let name = self.inner.lock().unwrap().current.name.clone()?;
@@ -405,6 +411,25 @@ mod tests {
         // The alias names it.
         assert_eq!(match_title(&mut s, "West").0.as_deref(), Some("West"));
         drop(s);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_finished_read_naming_no_map_is_unrecognized() {
+        let (st, dir) = store();
+        let (id, _) = MapIdentity::new(st, None, true);
+        id.request(true);
+        assert!(!id.unrecognized()); // still reading
+        for t in [1.0, 1.5] {
+            let g = id.begin_read().unwrap();
+            id.finish_read(g, Some("Somewhere".into()), t);
+        }
+        assert!(id.unrecognized());
+        id.request(true); // arrival: reading again
+        assert!(!id.unrecognized());
+        let g = id.begin_read().unwrap();
+        id.finish_read(g, Some("Limina : 1-5 East".into()), 3.0);
+        assert!(!id.unrecognized());
         std::fs::remove_dir_all(dir).ok();
     }
 

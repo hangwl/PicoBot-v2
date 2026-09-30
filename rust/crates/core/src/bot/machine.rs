@@ -10,6 +10,7 @@ use super::grind::{
     publish_summons, run_travel, sync_map, weave_attack,
 };
 use super::patrol::Patrol;
+use super::watchdog::Watchdog;
 use crate::skills::SkillKind;
 use crate::timing::human_reaction;
 
@@ -42,6 +43,7 @@ pub struct Machine {
     stack: Vec<State>,
     travel_done: bool,
     pub patrol: Patrol,
+    watchdog: Watchdog,
 }
 
 impl Default for Machine {
@@ -51,6 +53,7 @@ impl Default for Machine {
             stack: Vec::new(),
             travel_done: false,
             patrol: Patrol::default(),
+            watchdog: Watchdog::default(),
         }
     }
 }
@@ -81,12 +84,20 @@ impl Machine {
         self.state = State::Grind;
         self.enter(body);
         while body.should_continue() {
+            self.watch(body);
             if !self.switch(body) && body.should_continue() {
                 self.execute(body);
             }
         }
         self.exit(body);
         body.state().viz.state = "STOPPED".into();
+    }
+
+    fn watch<B: Body + ?Sized>(&mut self, body: &mut B) {
+        let (now, player) = (body.now(), body.state_ref().viz.player);
+        if let Some(msg) = self.watchdog.tick(now, self.state, player) {
+            body.notify(&msg);
+        }
     }
 
     fn check<B: Body + ?Sized>(&mut self, body: &mut B) -> Next {
