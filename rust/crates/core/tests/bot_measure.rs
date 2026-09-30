@@ -489,3 +489,35 @@ fn the_skill_sweep_measures_ground_skills_from_standing() {
     assert_eq!((fx[0].skill.as_str(), fx[0].on_ground), ("rush", true));
     assert!((fx[0].dx - 18.0).abs() < 0.6, "{:?}", fx[0]);
 }
+
+#[test]
+fn one_skill_can_be_measured_alone_and_keeps_the_others() {
+    use picobot_core::skills::{Skill, SkillBook};
+    let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
+    b.state.skills = SkillBook::new(vec![Skill::new("rush", "x"), Skill::new("dash", "y")]);
+    b.ground_fx.insert("x".into(), 18.0);
+    b.ground_fx.insert("y".into(), 9.0);
+    let mut m = MoveMeasurer::new(None, Box::new(|_, _| {}), Box::new(|_| {}));
+    m.run(&mut b, Mode::SkillEffects, None);
+    let dx = |b: &Sim, n: &str| {
+        b.state
+            .reach
+            .skill_effects()
+            .iter()
+            .find(|e| e.skill == n && e.on_ground)
+            .map(|e| e.dx)
+    };
+    assert!((dx(&b, "rush").unwrap() - 18.0).abs() < 0.6);
+    // The game changed: re-measure only "rush".
+    b.ground_fx.insert("x".into(), 25.0);
+    b.ground_fx.insert("y".into(), 99.0);
+    m.run(&mut b, Mode::SkillEffects, Some("rush"));
+    assert!((dx(&b, "rush").unwrap() - 25.0).abs() < 0.6);
+    assert!(
+        (dx(&b, "dash").unwrap() - 9.0).abs() < 0.6,
+        "dash keeps its row"
+    );
+    // A name that isn't in the kit changes nothing.
+    m.run(&mut b, Mode::SkillEffects, Some("nope"));
+    assert!((dx(&b, "rush").unwrap() - 25.0).abs() < 0.6);
+}

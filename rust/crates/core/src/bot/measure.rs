@@ -14,6 +14,7 @@ use super::body::{Body, Dir};
 use super::flight::{Flight, FlightRecorder};
 use crate::config::{BotConfig, ClassTravel};
 use crate::effects::{effect_of, Glide};
+use crate::navgraph::Platform;
 use crate::reach::Move;
 use crate::skills::{Skill, SkillKind, Stance};
 use crate::vision::platform_span_at;
@@ -472,45 +473,117 @@ impl MoveMeasurer {
     }
 
     // -- Skill effects -------------------------------------------------------------------
-    /// What each attack does to the character: in the air after a flash
-    /// (flash-jump classes) and from standing still on the ground.
+    /// Measure the kit's attack and movement skills — or just `only` — in
+    /// the air after a flash (flash-jump classes, with flight recording)
+    /// and standing on the ground. Each skill's rows are saved as soon as
+    /// it is done, so a stopped run keeps what it finished.
     fn skill_effects<B: Body + ?Sized>(&mut self, body: &mut B) {
-        let mut rows = self.air_effects(body);
-        if body.should_continue() {
-            rows.extend(self.ground_effects(body));
-        }
-        if rows.is_empty() {
-            (self.emit)("measure", "no skill effects recorded");
-            return;
-        }
-        body.state().reach.set_profile("skill_effects", rows);
-        (self.emit)("measure", "skill effects saved");
-    }
-
-    /// Each skill castable on the ground, cast from standing still facing
-    /// a direction with nothing held — how an attack window on a landing
-    /// casts it — and how far it moves the character.
-    fn ground_effects<B: Body + ?Sized>(&mut self, body: &mut B) -> Vec<Value> {
+        let only = self.only.clone();
         let skills: Vec<Skill> = body
             .state_ref()
             .skills
             .skills()
             .iter()
             .filter(|s| matches!(s.kind, SkillKind::Attack | SkillKind::Movement))
-            .filter(|s| s.stance != Stance::Air)
+            .filter(|s| only.as_ref().is_none_or(|o| &s.name == o))
             .cloned()
             .collect();
         if skills.is_empty() {
-            return Vec::new();
+            let msg = match &only {
+                Some(n) => format!("{n} isn't an attack or movement skill in this kit"),
+                None => "no attack or movement skills to measure".to_owned(),
+            };
+            (self.emit)("measure", &msg);
+            return;
         }
+        let Some(plat) = self.effect_platform(body) else {
+            return;
+        };
+        let cfg = body.config();
+        let air_ok = self.recorder.is_some()
+            && cfg.class_travel == ClassTravel::Flash
+            && cfg.flash_jump_enabled;
+        if !air_ok {
+            (self.emit)(
+                "measure",
+                "air effects need a flash-jump class with flight recording — measuring on the ground only",
+            );
+        }
+        (self.emit)(
+            "measure",
+            &format!(
+                "measuring {} skill(s) — keep the game focused",
+                skills.len()
+            ),
+        );
+        let mut base: Vec<Glide> = Vec::new();
+        for s in &skills {
+            if !body.should_continue() || !body.focused() {
+                (self.emit)("measure", "measurement stopped");
+                return;
+            }
+            self.current = Some(s.name.clone());
+            self.publish(body);
+            let mut rows: Vec<Value> = Vec::new();
+            if air_ok && s.stance != Stance::Ground {
+                rows.extend(self.air_one(body, s, plat, &mut base));
+            }
+            if body.should_continue() && s.stance != Stance::Air {
+                rows.extend(self.ground_one(body, s, plat));
+            }
+            if rows.is_empty() {
+                (self.emit)("measure", &format!("{}: nothing recorded", s.name));
+                continue;
+            }
+            for r in &rows {
+                (self.emit)(
+                    "measure",
+                    &format!(
+                        "{}: {} — {} px{}",
+                        s.name,
+                        r["where"].as_str().unwrap_or("air"),
+                        r["dx"],
+                        match r["hang"].as_f64() {
+                            Some(h) if h >= 0.1 => format!(", holds {h}s"),
+                            _ => String::new(),
+                        }
+                    ),
+                );
+            }
+            self.store_effects(body, &s.name, rows);
+        }
+        (self.emit)("measure", "skill effects saved");
+    }
+
+    /// Replace `skill`'s saved effect rows with `rows`, keeping the others.
+    fn store_effects<B: Body + ?Sized>(&mut self, body: &mut B, skill: &str, rows: Vec<Value>) {
+        let mut all: Vec<Value> = body
+            .state_ref()
+            .reach
+            .profiles
+            .get("skill_effects")
+            .and_then(|p| p.get("rows"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        all.retain(|r| r["skill"].as_str() != Some(skill));
+        all.extend(rows);
+        self.profile_rows = all.clone();
+        body.state().reach.set_profile("skill_effects", all);
+        self.publish(body);
+    }
+
+    /// The drawn platform the measuring character stands on, if it is long
+    /// enough to measure on.
+    fn effect_platform<B: Body + ?Sized>(&mut self, body: &mut B) -> Option<Platform> {
         let Some(start) = settle(body, 0.9) else {
             (self.emit)("measure", "player dot not visible");
-            return Vec::new();
+            return None;
         };
         let graph = body.graph().expect("checked before the run");
         let Some(pi) = graph.locate(start.0, start.1) else {
             (self.emit)("measure", "stand on a drawn platform first");
-            return Vec::new();
+            return None;
         };
         let plat = graph.platforms[pi];
         if plat.x1 - plat.x0 < 2.0 * EFFECT_ROOM_PX {
@@ -521,76 +594,132 @@ impl MoveMeasurer {
                     2.0 * EFFECT_ROOM_PX
                 ),
             );
-            return Vec::new();
+            return None;
         }
-        (self.emit)(
-            "measure",
-            &format!("measuring {} skill(s) on the ground", skills.len()),
-        );
-        let mut rows: Vec<Value> = Vec::new();
-        for s in &skills {
-            let reps = if s.cooldown <= 12.0 { EFFECT_REPS } else { 1 };
-            let mut dxs: Vec<f64> = Vec::new();
-            for _ in 0..reps {
-                if !body.should_continue() || !body.focused() {
-                    (self.emit)("measure", "measurement stopped");
-                    return rows;
-                }
-                self.current = Some(format!("{} (ground)", s.name));
-                self.publish(body);
-                let now = body.now();
-                let wait = body.state().skills.remaining(&s.name, now);
-                if wait > 40.0 {
-                    (self.emit)(
-                        "measure",
-                        &format!("{}: on cooldown for {wait:.0}s — skipped", s.name),
-                    );
-                    break;
-                }
-                body.sleep(wait + 0.3);
-                let Some(pos) = settle(body, 0.9) else {
-                    (self.emit)("measure", "player dot lost");
-                    return rows;
-                };
-                let room = |d: Dir| match d {
-                    Dir::Right => plat.x1 - pos.0,
-                    Dir::Left => pos.0 - plat.x0,
-                };
-                let dir = [Dir::Right, Dir::Left]
-                    .into_iter()
-                    .max_by(|a, b| room(*a).total_cmp(&room(*b)))
-                    .expect("two directions");
-                if room(dir) < EFFECT_ROOM_PX {
-                    (self.emit)(
-                        "measure",
-                        "ran out of platform — stand near the middle of a longer one",
-                    );
-                    return rows;
-                }
-                match self.ground_cast(body, dir, s) {
-                    Skip(why) => (self.emit)("measure", &format!("a cast was discarded — {why}")),
-                    Got(dx) => dxs.push(dx),
-                }
-                body.sleep_between(0.4, 0.28, 0.7);
-            }
-            if dxs.is_empty() {
-                continue;
-            }
-            let m = mean(&dxs);
-            let sd = (dxs.iter().map(|d| (d - m).powi(2)).sum::<f64>() / dxs.len() as f64).sqrt();
-            rows.push(json!({
-                "skill": s.name,
-                "where": "ground",
-                "n": dxs.len(),
-                "dx": round_to(m, 1),
-                "hang": 0.0,
-                "rise": 0.0,
-                "sd": round_to(sd, 1),
-            }));
-            self.profile_rows = rows.clone();
-            self.publish(body);
+        Some(plat)
+    }
+
+    /// The way with more platform ahead of the character, or None (said)
+    /// when there isn't room either way.
+    fn effect_dir<B: Body + ?Sized>(&mut self, body: &mut B, plat: Platform) -> Option<Dir> {
+        let Some(pos) = settle(body, 0.9) else {
+            (self.emit)("measure", "player dot lost");
+            return None;
+        };
+        let room = |d: Dir| match d {
+            Dir::Right => plat.x1 - pos.0,
+            Dir::Left => pos.0 - plat.x0,
+        };
+        let dir = [Dir::Right, Dir::Left]
+            .into_iter()
+            .max_by(|a, b| room(*a).total_cmp(&room(*b)))
+            .expect("two directions");
+        if room(dir) < EFFECT_ROOM_PX {
+            (self.emit)(
+                "measure",
+                "ran out of platform — stand near the middle of a longer one",
+            );
+            return None;
         }
-        rows
+        Some(dir)
+    }
+
+    /// Sleep until `skill` is ready; false (said) when that is over 40 s.
+    fn wait_ready<B: Body + ?Sized>(&mut self, body: &mut B, skill: &Skill) -> bool {
+        let now = body.now();
+        let wait = body.state().skills.remaining(&skill.name, now);
+        if wait > 40.0 {
+            (self.emit)(
+                "measure",
+                &format!("{}: on cooldown for {wait:.0}s — skipped", skill.name),
+            );
+            return false;
+        }
+        body.sleep(wait + 0.3);
+        true
+    }
+
+    fn reps_for(skill: &Skill) -> usize {
+        if skill.cooldown <= 12.0 {
+            EFFECT_REPS
+        } else {
+            1
+        }
+    }
+
+    /// One skill cast just after a flash's re-press, against plain flashes
+    /// (measured once per run and shared): the air row, if any.
+    fn air_one<B: Body + ?Sized>(
+        &mut self,
+        body: &mut B,
+        skill: &Skill,
+        plat: Platform,
+        base: &mut Vec<Glide>,
+    ) -> Option<Value> {
+        let mut with: Vec<Glide> = Vec::new();
+        let steps = EFFECT_REPS.saturating_sub(base.len()) + Self::reps_for(skill);
+        for _ in 0..steps {
+            if !body.should_continue() || !body.focused() {
+                break;
+            }
+            let plain = base.len() < EFFECT_REPS;
+            if !plain && !self.wait_ready(body, skill) {
+                break;
+            }
+            let dir = self.effect_dir(body, plat)?;
+            match self.glide(body, dir, (!plain).then_some(skill)) {
+                Skip(why) => (self.emit)("measure", &format!("a flash was discarded — {why}")),
+                Got(g) if plain => base.push(g),
+                Got(g) => with.push(g),
+            }
+            body.sleep_between(0.4, 0.28, 0.7);
+        }
+        let (e, sd) = effect_of(&skill.name, base, &with)?;
+        Some(json!({
+            "skill": e.skill,
+            "where": "air",
+            "n": e.n,
+            "dx": round_to(e.dx, 1),
+            "hang": round_to(e.hang, 2),
+            "rise": round_to(e.rise, 1),
+            "sd": round_to(sd, 1),
+        }))
+    }
+
+    /// One skill cast standing still facing a direction with nothing held —
+    /// how a landing window casts it: the ground row, if any.
+    fn ground_one<B: Body + ?Sized>(
+        &mut self,
+        body: &mut B,
+        skill: &Skill,
+        plat: Platform,
+    ) -> Option<Value> {
+        let mut dxs: Vec<f64> = Vec::new();
+        for _ in 0..Self::reps_for(skill) {
+            if !body.should_continue() || !body.focused() || !self.wait_ready(body, skill) {
+                break;
+            }
+            let dir = self.effect_dir(body, plat)?;
+            match self.ground_cast(body, dir, skill) {
+                Skip(why) => (self.emit)("measure", &format!("a cast was discarded — {why}")),
+                Got(dx) => dxs.push(dx),
+            }
+            body.sleep_between(0.4, 0.28, 0.7);
+        }
+        if dxs.is_empty() {
+            return None;
+        }
+        let m = mean(&dxs);
+        let sd = (dxs.iter().map(|d| (d - m).powi(2)).sum::<f64>() / dxs.len() as f64).sqrt();
+        Some(json!({
+            "skill": skill.name,
+            "where": "ground",
+            "n": dxs.len(),
+            "dx": round_to(m, 1),
+            "hang": 0.0,
+            "rise": 0.0,
+            "sd": round_to(sd, 1),
+        }))
     }
 
     /// Face `dir` (two short taps), cast `skill` with nothing held and see
@@ -619,139 +748,6 @@ impl MoveMeasurer {
         }
         let sign = if dir == Dir::Right { 1.0 } else { -1.0 };
         Got((end.0 - start.0) * sign)
-    }
-
-    /// What each air-capable attack does to a flash jump: plain flashes
-    /// for a baseline, then flashes with the skill cast a moment after the
-    /// re-press — the same moment an attack window casts it.
-    fn air_effects<B: Body + ?Sized>(&mut self, body: &mut B) -> Vec<Value> {
-        if self.recorder.is_none() {
-            (self.emit)("measure", "skill effects need flight recording");
-            return Vec::new();
-        }
-        let cfg = body.config();
-        if cfg.class_travel != ClassTravel::Flash || !cfg.flash_jump_enabled {
-            (self.emit)(
-                "measure",
-                "skill effects are measured for flash-jump classes",
-            );
-            return Vec::new();
-        }
-        let skills: Vec<Skill> = body
-            .state_ref()
-            .skills
-            .skills()
-            .iter()
-            .filter(|s| matches!(s.kind, SkillKind::Attack | SkillKind::Movement))
-            .filter(|s| s.stance != Stance::Ground)
-            .cloned()
-            .collect();
-        if skills.is_empty() {
-            (self.emit)("measure", "no attack skills that can be cast in the air");
-            return Vec::new();
-        }
-        let Some(start) = settle(body, 0.9) else {
-            (self.emit)("measure", "player dot not visible");
-            return Vec::new();
-        };
-        let graph = body.graph().expect("checked before the run");
-        let Some(pi) = graph.locate(start.0, start.1) else {
-            (self.emit)("measure", "stand on a drawn platform first");
-            return Vec::new();
-        };
-        let plat = graph.platforms[pi];
-        if plat.x1 - plat.x0 < 2.0 * EFFECT_ROOM_PX {
-            (self.emit)(
-                "measure",
-                &format!(
-                    "this platform is too short — stand on one at least {:.0}px long",
-                    2.0 * EFFECT_ROOM_PX
-                ),
-            );
-            return Vec::new();
-        }
-        (self.emit)(
-            "measure",
-            &format!(
-                "measuring {} skill(s) in the air — keep the game focused",
-                skills.len()
-            ),
-        );
-        let mut base: Vec<Glide> = Vec::new();
-        let mut with: Vec<Glide> = Vec::new();
-        let mut rows: Vec<Value> = Vec::new();
-        let mut plan: Vec<Option<&Skill>> = vec![None; EFFECT_REPS];
-        for s in &skills {
-            let reps = if s.cooldown <= 12.0 { EFFECT_REPS } else { 1 };
-            plan.extend(std::iter::repeat_n(Some(s), reps));
-        }
-        for (i, cast) in plan.iter().enumerate() {
-            if !body.should_continue() || !body.focused() {
-                (self.emit)("measure", "measurement stopped");
-                break;
-            }
-            self.current = Some(cast.map_or("plain flash".into(), |s| s.name.clone()));
-            self.publish(body);
-            if let Some(s) = cast {
-                let now = body.now();
-                let wait = body.state().skills.remaining(&s.name, now);
-                if wait > 40.0 {
-                    (self.emit)(
-                        "measure",
-                        &format!("{}: on cooldown for {wait:.0}s — skipped", s.name),
-                    );
-                    continue;
-                }
-                body.sleep(wait + 0.3);
-            }
-            let Some(pos) = settle(body, 0.9) else {
-                (self.emit)("measure", "player dot lost");
-                break;
-            };
-            let room = |d: Dir| match d {
-                Dir::Right => plat.x1 - pos.0,
-                Dir::Left => pos.0 - plat.x0,
-            };
-            let dir = [Dir::Right, Dir::Left]
-                .into_iter()
-                .max_by(|a, b| room(*a).total_cmp(&room(*b)))
-                .expect("two directions");
-            if room(dir) < EFFECT_ROOM_PX {
-                (self.emit)(
-                    "measure",
-                    "ran out of platform — stand near the middle of a longer one",
-                );
-                break;
-            }
-            match self.glide(body, dir, *cast) {
-                Skip(why) => (self.emit)("measure", &format!("a flash was discarded — {why}")),
-                Got(g) => match cast {
-                    None => base.push(g),
-                    Some(_) => with.push(g),
-                },
-            }
-            body.sleep_between(0.4, 0.28, 0.7);
-            let last_of_skill = plan
-                .get(i + 1)
-                .is_none_or(|n| n.map(|s| &s.name) != cast.map(|s| &s.name));
-            if let (Some(s), true) = (cast, last_of_skill) {
-                if let Some((e, sd)) = effect_of(&s.name, &base, &with) {
-                    rows.push(json!({
-                        "skill": e.skill,
-                        "where": "air",
-                        "n": e.n,
-                        "dx": round_to(e.dx, 1),
-                        "hang": round_to(e.hang, 2),
-                        "rise": round_to(e.rise, 1),
-                        "sd": round_to(sd, 1),
-                    }));
-                    self.profile_rows = rows.clone();
-                    self.publish(body);
-                }
-                with.clear();
-            }
-        }
-        rows
     }
 
     /// One flash jump toward `dir`, with `skill` cast after the re-press.

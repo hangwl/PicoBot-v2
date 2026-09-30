@@ -48,6 +48,12 @@ export function SkillsPage({ s }: { s: AppState }) {
               {sk.kind === "summon" && !!sk.duration && (
                 <span class="pill">lasts {sk.duration}s</span>
               )}
+              {(sk.kind === "attack" || sk.kind === "movement") && (
+                <button class="small" disabled={s.botRunning || s.measure.running || s.ws !== "on"}
+                        onClick={() => send(`measure|effect|${n}`)}>
+                  Measure
+                </button>
+              )}
               <button class="icon" aria-label={`Remove ${n}`}
                       onClick={() => {
                         if (confirm(`Remove skill ${n}?`)) send(`skills|del|${n}`);

@@ -693,6 +693,9 @@ impl Host {
             "measure|profile|up_flash" => self.measure_start(Mode::UpFlashProfile, None),
             "measure|profile|walk" => self.measure_start(Mode::WalkTaps, None),
             "measure|profile|effects" => self.measure_start(Mode::SkillEffects, None),
+            _ if msg.starts_with("measure|effect|") => {
+                self.measure_start(Mode::SkillEffects, Some(arg(2).trim().to_owned()))
+            }
             "measure|stop" => Host::stop_slot(&self.measurer),
             "measure|status" => self.send_measure(None),
             _ => return self.handle_edit(msg),

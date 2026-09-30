@@ -292,7 +292,11 @@ it lands — and some move the character on the ground.
   character the way it faces (`dx`).
 
 A skill with a long cooldown is measured once; one on cooldown over 40 s
-is skipped.
+is skipped. `measure|effect|<skill>` (a **Measure** button per skill on the
+Skills page and the Measure page) measures one skill and keeps the other
+skills' rows; a whole run saves each skill as it finishes, so a stopped
+run keeps what it finished. The plain-flash baseline is measured once per
+run and shared by its skills.
 
 While a flash is planned onto a platform, an air window only picks
 skills whose measured air shift fits the room left: the navigator sets
