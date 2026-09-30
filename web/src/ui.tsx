@@ -59,7 +59,7 @@ export function useReply(s: AppState): [EvtItem | undefined, (cmd: string) => vo
     send(cmd);
   };
   const reply = askedAfter === null ? undefined : s.logs.find(
-    (it) => (it.id ?? 0) > askedAfter && (it.kind === "map" || it.kind === "error"),
+    (it) => (it.id ?? 0) > askedAfter && (it.kind === "map" || it.kind === "error" || it.kind === "notify"),
   );
   return [reply, act];
 }

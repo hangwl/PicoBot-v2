@@ -44,7 +44,17 @@ export interface Frame {
   bitmap: ImageBitmap;
 }
 
-export type CanvasMode = "none" | "plats" | "anchors" | "route";
+export type CanvasMode = "none" | "plats" | "anchors" | "route" | "erase";
+
+/** The running bot's counters (frame meta): seconds and counts. */
+export interface SessionStats {
+  up: number;
+  visits: number;
+  misses: number;
+  skips: number;
+  pauses: number;
+  paused: number;
+}
 export type ViewMode = "minimap" | "window" | "title";
 export type LogFilter = "info" | "warn" | "error" | "all";
 
@@ -178,6 +188,11 @@ export interface AppState {
   hazard: string;
   summons: SummonState | null;
   patrol: PatrolStatus | null;
+  session: SessionStats | null;
+  stopPlayers: boolean;
+  stopRune: boolean;
+  stopMap: boolean;
+  heartbeat: number;
   logs: EvtItem[];
   logFilter: LogFilter;
   viewMode: ViewMode;
@@ -232,6 +247,11 @@ const initial: AppState = {
   hazard: "none",
   summons: null,
   patrol: null,
+  session: null,
+  stopPlayers: true,
+  stopRune: true,
+  stopMap: true,
+  heartbeat: 30,
   logs: [],
   logFilter: "info",
   viewMode: "minimap",
@@ -451,13 +471,14 @@ function onFrame(buf: ArrayBuffer) {
   const hazard = meta.hazard ? String(meta.hazard) : "none";
   if (hazard !== "none" && state.hazard === "none") {
     // A new hazard needs a human: bring up the pad and buzz the phone.
-    go("control");
+    go(hazard === "unrecognized map" ? "setup/map" : "control");
     navigator.vibrate?.([200, 100, 200]);
   }
   set({
     hazard,
     summons: (meta.summons as SummonState | undefined) ?? state.summons,
     patrol: (meta.patrol as PatrolStatus | undefined) ?? null,
+    session: (meta.session as SessionStats | undefined) ?? null,
     botState: meta.state ? String(meta.state) : "–",
     viewMode: (meta.mode as ViewMode) ?? state.viewMode,
   });
@@ -554,6 +575,10 @@ function onEvent(p: Record<string, any> & { event: string }) {
         flashOn: c.flash_jump_enabled !== false,
         navR: (c.nav_threshold_px as number) ?? 5,
         fps: (c.view_fps as number) ?? state.fps,
+        stopPlayers: c.stop_when_players_appear !== false,
+        stopRune: c.stop_when_rune_appears !== false,
+        stopMap: c.stop_when_map_unrecognized !== false,
+        heartbeat: (c.heartbeat_minutes as number) ?? 30,
       });
       return;
     }

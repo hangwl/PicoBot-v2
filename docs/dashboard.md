@@ -93,9 +93,14 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     per-delay peaks (live while sweeping, then the saved sweep).
   - **Patrol** — loop order + temperature, and per-anchor **stats**
     (visits, misses, skips by reason; Reset).
+  - **Safety** — the pause toggles (rune, other players, unrecognized
+    map), the Telegram status interval (0 = off) and a **Send test
+    alert** button. Home's status list shows the running **Session**
+    (uptime, visits, misses, skips, pauses); an unrecognized map sends
+    you to the Map page, whose banner offers to name and save it.
   - **Connection** (Pico serial port, *Find the Pico* auto-probe that
     skips the open port, game window — locked while the bot runs).
-- **Log** — the event log with severity filters; while scrolled up it
+- **Log** — the event log with severity filters (`notify` alerts stand out); while scrolled up it
   stops following and shows an "N new" chip that jumps back down.
 
 Actions that change something show the host's reply right under their
@@ -135,7 +140,8 @@ is the default — relay noise hidden, nav/fsm story visible; `All` is for
 Pico link debugging. The client keeps the last 300 events; the log
 follows new lines only while scrolled to the bottom.
 
-Not yet in the app: rope/anchor delete by click.
+- **Erase anchor/rope** — click an anchor (within 12px) or a learned rope
+  to delete it; a stray click does nothing.
 
 ## Protocol sketch
 
