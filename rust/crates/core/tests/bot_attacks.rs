@@ -3,7 +3,7 @@
 mod sim;
 
 use picobot_core::bot::{Body, Window};
-use picobot_core::skills::{Skill, SkillBook, Stance};
+use picobot_core::skills::{Skill, SkillBook, SkillKind, Stance};
 use sim::*;
 
 fn sim_with(skills: Vec<Skill>) -> Sim {
@@ -232,4 +232,23 @@ fn a_leg_landing_slack_also_limits_ground_skills() {
     b.state.air_slack = Some((5.0, 5.0)); // a tight landing on this move
     let n = ground_names(&mut b);
     assert!(!n.contains("rush"), "{n:?}");
+}
+
+#[test]
+fn a_movement_skill_is_an_attack_in_every_window() {
+    let rush = Skill {
+        kind: SkillKind::Movement,
+        ..Skill::new("rush", "x")
+    };
+    let mut b = sim_with(vec![rush]);
+    assert_eq!(b.pick_attack(Window::Air).unwrap().name, "rush");
+    assert_eq!(b.pick_attack(Window::Ground).unwrap().name, "rush");
+    for _ in 0..10 {
+        b.after_flash(0.3);
+    }
+    assert!(casts(&b, "x") >= 10);
+    assert!(
+        b.attack_rate() >= 10.0,
+        "casts count toward the attack rate"
+    );
 }

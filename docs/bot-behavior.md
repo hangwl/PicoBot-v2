@@ -266,6 +266,12 @@ Bot-controlled movement looks like a player farming, not a macro:
 Registered skills have `key`, `kind`, `cooldown`:
 
 - `attack` — attack loop / travel weaving.
+- `movement` — an attack that also moves the character (a rush, a
+  hold-and-dash). It is cast exactly like an `attack` (same windows, odds,
+  stance, weight, rate count); the difference is that its effect is
+  **measured** (Skill effects) so it can be kept off platform ends. Plain
+  attacks aren't measured. Traversal keys (jump, flash, rope lift,
+  teleport) are config keys, not skills.
 - `buff` — fires when ready, anywhere.
 - `summon` — placed at anchors (below). Allowed at an anchor that lists
   it in `on_arrive`, or at any anchor that lists none.
@@ -278,7 +284,7 @@ scheduler (windows, above) uses them.
 
 Some attacks change a flash — they hold the character up or shift where
 it lands — and some move the character on the ground.
-`measure|profile|effects` measures both and saves `profiles.skill_effects`
+`measure|profile|effects` measures both for the kit's `movement` skills and saves `profiles.skill_effects`
 (rows carry `where`: `air`, or `ground`):
 
 - **In the air** (flash-jump classes, with flight recording): plain

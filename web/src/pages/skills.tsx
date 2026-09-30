@@ -48,7 +48,7 @@ export function SkillsPage({ s }: { s: AppState }) {
               {sk.kind === "summon" && !!sk.duration && (
                 <span class="pill">lasts {sk.duration}s</span>
               )}
-              {(sk.kind === "attack" || sk.kind === "movement") && (
+              {sk.kind === "movement" && (
                 <button class="small" disabled={s.botRunning || s.measure.running || s.ws !== "on"}
                         onClick={() => send(`measure|effect|${n}`)}>
                   Measure
@@ -158,6 +158,13 @@ function SkillAdd() {
           </Field>
         )}
       </div>
+      {kind === "movement" && (
+        <p class="hint">
+          An attack that also moves you — a rush, a dash. It is cast like any
+          attack, and Measure (in the list) records how far it moves you so it
+          is kept off platform ends.
+        </p>
+      )}
       {summon && (
         <p class="hint">
           Placed at anchors while standing on a platform — one summon per

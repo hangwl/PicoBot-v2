@@ -446,8 +446,12 @@ impl Recorder for ArcRecorder {
 fn the_skill_sweep_measures_how_far_a_skill_moves_the_landing() {
     let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
     b.state.skills = picobot_core::skills::SkillBook::new(vec![
-        picobot_core::skills::Skill::new("pull", "x"),
         picobot_core::skills::Skill {
+            kind: picobot_core::skills::SkillKind::Movement,
+            ..picobot_core::skills::Skill::new("pull", "x")
+        },
+        picobot_core::skills::Skill {
+            kind: picobot_core::skills::SkillKind::Movement,
             stance: picobot_core::skills::Stance::Ground,
             ..picobot_core::skills::Skill::new("slam", "y")
         },
@@ -468,14 +472,16 @@ fn the_skill_sweep_measures_how_far_a_skill_moves_the_landing() {
 
 #[test]
 fn the_skill_sweep_measures_ground_skills_from_standing() {
-    use picobot_core::skills::{Skill, SkillBook, Stance};
+    use picobot_core::skills::{Skill, SkillBook, SkillKind, Stance};
     let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
     b.state.skills = SkillBook::new(vec![
         Skill {
+            kind: SkillKind::Movement,
             stance: Stance::Ground,
             ..Skill::new("rush", "x")
         },
         Skill {
+            kind: SkillKind::Movement,
             stance: Stance::Air,
             ..Skill::new("hover", "y")
         },
@@ -492,9 +498,18 @@ fn the_skill_sweep_measures_ground_skills_from_standing() {
 
 #[test]
 fn one_skill_can_be_measured_alone_and_keeps_the_others() {
-    use picobot_core::skills::{Skill, SkillBook};
+    use picobot_core::skills::{Skill, SkillBook, SkillKind};
     let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
-    b.state.skills = SkillBook::new(vec![Skill::new("rush", "x"), Skill::new("dash", "y")]);
+    b.state.skills = SkillBook::new(vec![
+        Skill {
+            kind: SkillKind::Movement,
+            ..Skill::new("rush", "x")
+        },
+        Skill {
+            kind: SkillKind::Movement,
+            ..Skill::new("dash", "y")
+        },
+    ]);
     b.ground_fx.insert("x".into(), 18.0);
     b.ground_fx.insert("y".into(), 9.0);
     let mut m = MoveMeasurer::new(None, Box::new(|_, _| {}), Box::new(|_| {}));
@@ -520,4 +535,15 @@ fn one_skill_can_be_measured_alone_and_keeps_the_others() {
     // A name that isn't in the kit changes nothing.
     m.run(&mut b, Mode::SkillEffects, Some("nope"));
     assert!((dx(&b, "rush").unwrap() - 25.0).abs() < 0.6);
+}
+
+#[test]
+fn plain_attacks_are_not_measured() {
+    use picobot_core::skills::{Skill, SkillBook};
+    let mut b = mbot(&[[0.0, 100.0, 200.0, 100.0]], (100.0, 100.0));
+    b.state.skills = SkillBook::new(vec![Skill::new("hit", "x")]);
+    b.ground_fx.insert("x".into(), 18.0);
+    let mut m = MoveMeasurer::new(None, Box::new(|_, _| {}), Box::new(|_| {}));
+    m.run(&mut b, Mode::SkillEffects, None);
+    assert!(b.state.reach.skill_effects().is_empty());
 }

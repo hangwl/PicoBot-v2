@@ -21,7 +21,7 @@ use crate::maps::MapEntry;
 use crate::navgraph::{GraphCache, GraphOptions, NavGraph};
 use crate::reach::{base_reach, ReachModel};
 use crate::rotation::{resolve_coord, Rotation};
-use crate::skills::{Skill, SkillBook, SkillKind, Stance};
+use crate::skills::{Skill, SkillBook, Stance};
 use crate::summons::SummonTracker;
 use crate::timing::{human_between, human_hold, key_gap, release_lag};
 use crate::vision::{platform_row_at, platform_span_at, Image};
@@ -370,7 +370,7 @@ pub trait Body {
         if self.keys().press(&skill.key, skill.hold) {
             let now = self.now();
             self.state().skills.mark_used(&skill.name, now);
-            if skill.kind == SkillKind::Attack {
+            if skill.kind.is_attack() {
                 self.state().attack_log.push_back(now);
             }
             self.log(&format!("Skill: {}", skill.name));
@@ -1169,9 +1169,4 @@ fn vert_stuck<B: Body + ?Sized>(body: &mut B, dx: f64, start_band: f64, verb: &s
     }
     body.log(&format!("Vertically blocked ({verb}) — aborting leg"));
     false
-}
-
-/// Whether a skill kind fires on its own (not a traversal keybind).
-pub fn auto_fires(kind: SkillKind) -> bool {
-    kind != SkillKind::Movement
 }

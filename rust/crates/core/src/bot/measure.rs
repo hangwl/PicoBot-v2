@@ -473,7 +473,8 @@ impl MoveMeasurer {
     }
 
     // -- Skill effects -------------------------------------------------------------------
-    /// Measure the kit's attack and movement skills — or just `only` — in
+    /// Measure the kit's movement skills (attacks that move the
+    /// character) — or just `only` — in
     /// the air after a flash (flash-jump classes, with flight recording)
     /// and standing on the ground. Each skill's rows are saved as soon as
     /// it is done, so a stopped run keeps what it finished.
@@ -484,14 +485,14 @@ impl MoveMeasurer {
             .skills
             .skills()
             .iter()
-            .filter(|s| matches!(s.kind, SkillKind::Attack | SkillKind::Movement))
+            .filter(|s| s.kind == SkillKind::Movement)
             .filter(|s| only.as_ref().is_none_or(|o| &s.name == o))
             .cloned()
             .collect();
         if skills.is_empty() {
             let msg = match &only {
-                Some(n) => format!("{n} isn't an attack or movement skill in this kit"),
-                None => "no attack or movement skills to measure".to_owned(),
+                Some(n) => format!("{n} isn't a movement skill in this kit"),
+                None => "no movement skills to measure — give an attack that moves you the kind movement".to_owned(),
             };
             (self.emit)("measure", &msg);
             return;

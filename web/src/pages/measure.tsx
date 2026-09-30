@@ -119,15 +119,15 @@ function SkillEffects({ s }: { s: AppState }) {
   const saved = m.profiles.skill_effects;
   const rows = (live ? m.profile : saved?.rows ?? []) as SkillEffectRow[];
   const names = Object.entries(s.skills)
-    .filter(([, k]) => k.kind === "attack" || k.kind === "movement")
+    .filter(([, k]) => k.kind === "movement")
     .map(([n]) => n)
     .sort();
   const idle = !m.running;
   const can = idle && !s.botRunning && s.ws === "on";
   return (
     <Section title="Skill effects" hint={<>
-        Stand in the middle of a drawn platform at least 140px long and
-        measure a skill on its own. For flash-jump classes the character
+        Movement skills are attacks that also move you. Stand in the middle
+        of a drawn platform at least 140px long and measure one on its own. For flash-jump classes the character
         flashes plainly a few times, then with the skill cast just after the
         flash triggers, to see how far it moves the landing and how long it
         holds the character up. Skills that can be cast on the ground are
@@ -135,7 +135,12 @@ function SkillEffects({ s }: { s: AppState }) {
         the character. Attacks that would carry the character off its
         platform are kept out of that hop or landing.
     </>}>
-      {!names.length && <p class="hint">No attack or movement skills yet.</p>}
+      {!names.length && (
+        <p class="hint">
+          No movement skills. Add an attack that moves you with the kind
+          “movement” on the Skills page.
+        </p>
+      )}
       {names.length > 0 && (
         <ul class="rows">
           {names.map((n) => {

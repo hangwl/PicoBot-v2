@@ -21,7 +21,7 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
                  "teleport_key": "shift", "teleport_cooldown": 0.8,
                  "jump_key": "space", "up_jump_skill_key": "alt",
                  "flash_jump": {"key": null, "enabled": false},
-                 "skills": {"blink": {"key": "shift", "kind": "movement"},
+                 "skills": {"rush": {"key": "shift", "kind": "movement"},
                             "main": {"key": "a", "kind": "attack"}}}
       }
     },
