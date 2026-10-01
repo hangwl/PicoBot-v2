@@ -85,6 +85,23 @@ Region provenance: `config` (pinned in config.json, survives
 everything), `manual` (drawn on the dashboard), `stored` (map file),
 `auto` (detected).
 
+**Whole-frame check.** The edge test above only sees the top edge, so a
+region with the right corner but the wrong size would pass it. The map
+monitor therefore also runs `find_frame` on the live window once a second
+(every 0.4 s for 6 s after an arrival or a change) while not loading, and
+`verify_region` compares all four edges. A different frame seen on two
+checks in a row (one-pixel differences ignored) replaces an `auto` or
+`stored` region; `config` and `manual` regions are never touched, and a
+check that finds no frame changes nothing. A change is logged as
+`minimap panel resized/moved: [old] → [new]`, and every region change as
+`minimap region: [x, y, w, h] (source)`.
+
+**A located frame beats a stored layout.** On a title-verified arrival the
+map's stored region is installed only when no frame has been located (or
+the current region is itself a stored one); otherwise the live frame stands
+— drawn geometry is stored as 0–1 fractions, so it fits a live region of a
+different size.
+
 ## 3. Identity — title OCR
 
 **Band**: `name_strip_region` spans the panel's width (±4px), from the

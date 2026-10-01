@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use picobot_core::config::BotConfig;
 use picobot_core::identity::MapIdentity;
-use picobot_core::minimap::MinimapAnalyzer;
+use picobot_core::minimap::{MinimapAnalyzer, RegionSource};
 use picobot_core::timing::monotonic;
 use picobot_core::title::name_strip_region;
 use picobot_core::vision::{Image, Region};
@@ -98,6 +98,9 @@ impl Feed {
             was_loading: false,
             last_verify: monotonic(),
             last_arrival: f64::NEG_INFINITY,
+            last_frame_check: monotonic(),
+            fast_checks_until: f64::NEG_INFINITY,
+            last_region: None,
             last_title: None,
         };
         let monitor = std::thread::Builder::new()
@@ -139,6 +142,9 @@ struct Monitor {
     was_loading: bool,
     last_verify: f64,
     last_arrival: f64,
+    last_frame_check: f64,
+    fast_checks_until: f64,
+    last_region: Option<(Region, Option<RegionSource>)>,
     last_title: Option<String>,
 }
 
@@ -147,6 +153,11 @@ const LOCATE_EVERY: f64 = 0.25;
 /// The title is re-read this often: a map change with no blackout (or one
 /// too short to see) still shows up in it.
 const VERIFY_EVERY: f64 = 5.0;
+/// The panel frame is checked against the live window this often, and
+/// faster for a while after an arrival or a change.
+const FRAME_CHECK_EVERY: f64 = 1.0;
+const FRAME_CHECK_FAST: f64 = 0.4;
+const FRAME_CHECK_FAST_FOR: f64 = 6.0;
 
 impl Monitor {
     fn run(&mut self) {
@@ -196,6 +207,7 @@ impl Monitor {
         self.was_loading = loading;
         if arrived {
             self.last_arrival = now;
+            self.fast_checks_until = now + FRAME_CHECK_FAST_FOR;
             self.bus
                 .emit("vision", "arrived on a new map — re-detecting minimap");
             self.emit(self.identity.request(true));
@@ -211,6 +223,39 @@ impl Monitor {
                     self.emit(self.identity.request(false));
                 }
             }
+        }
+        let period = if now < self.fast_checks_until {
+            FRAME_CHECK_FAST
+        } else {
+            FRAME_CHECK_EVERY
+        };
+        if !loading && now - self.last_frame_check >= period {
+            self.last_frame_check = now;
+            if let Some((from, to)) = eyes.window_img().and_then(|w| mm.verify_region(&w)) {
+                self.fast_checks_until = now + FRAME_CHECK_FAST_FOR;
+                self.bus.emit(
+                    "vision",
+                    &format!(
+                        "minimap panel resized/moved: [{}, {}, {}, {}] → [{}, {}, {}, {}]",
+                        from.0, from.1, from.2, from.3, to.0, to.1, to.2, to.3
+                    ),
+                );
+                self.last_region = Some((to, mm.region_source()));
+            }
+        }
+        let now_region = mm.region().map(|r| (r, mm.region_source()));
+        if now_region != self.last_region {
+            if let Some((r, src)) = now_region {
+                let src = src.map_or("unknown", |s| s.as_str());
+                self.bus.emit(
+                    "vision",
+                    &format!(
+                        "minimap region: [{}, {}, {}, {}] ({src})",
+                        r.0, r.1, r.2, r.3
+                    ),
+                );
+            }
+            self.last_region = now_region;
         }
         if !loading && now - self.last_verify >= VERIFY_EVERY && !self.identity.pending() {
             self.last_verify = now;
