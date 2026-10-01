@@ -3,9 +3,11 @@
 //! Bots give themselves away by *how regularly* they act. Every delay here
 //! is log-normal (a long right tail, like human timing) and scaled by a
 //! session **tempo**: each session plays a little faster or slower than the
-//! last, and the pace drifts slowly within it. The tempo moves means only —
-//! `human_between` still clamps to its bounds, so game input windows (the
-//! flash-jump re-press) always hold.
+//! last, and the pace drifts slowly within it. The tempo moves medians only —
+//! `human_between` still stays within its bounds, so game input windows
+//! (the flash-jump re-press) always hold. Bounded draws are redrawn, not
+//! clamped: a clamp piles samples onto the exact bound, a repeated value
+//! that is itself a tell.
 //!
 //! The `*_with` functions take the random source and pace explicitly (for
 //! tests and simulations); the plain ones use the thread's RNG and the
@@ -118,7 +120,7 @@ fn lognormal<R: Rng + ?Sized>(rng: &mut R, sigma: f64) -> f64 {
     LogNormal::new(0.0, sigma).unwrap().sample(rng)
 }
 
-/// Log-normal delay centred on `mean` seconds at `pace`, never below `minimum`.
+/// Log-normal delay with median `mean` seconds at `pace`, never below `minimum`.
 pub fn human_delay_with<R: Rng + ?Sized>(
     rng: &mut R,
     pace: f64,
@@ -129,8 +131,10 @@ pub fn human_delay_with<R: Rng + ?Sized>(
     (lognormal(rng, sigma) * mean * pace).max(minimum)
 }
 
-/// Log-normal delay around `mean` at `pace`, clamped to `[lo, hi]` — for
-/// gaps that must stay inside a game input window.
+/// Log-normal delay with median `mean` at `pace`, truncated to `[lo, hi]`
+/// — for gaps that must stay inside a game input window. Out-of-range
+/// draws are redrawn; a window the distribution barely reaches falls back
+/// to a uniform draw inside it.
 pub fn human_between_with<R: Rng + ?Sized>(
     rng: &mut R,
     pace: f64,
@@ -139,7 +143,16 @@ pub fn human_between_with<R: Rng + ?Sized>(
     hi: f64,
     sigma: f64,
 ) -> f64 {
-    (lognormal(rng, sigma) * mean * pace).clamp(lo, hi)
+    if hi <= lo {
+        return lo;
+    }
+    for _ in 0..16 {
+        let v = lognormal(rng, sigma) * mean * pace;
+        if (lo..=hi).contains(&v) {
+            return v;
+        }
+    }
+    rng.random_range(lo..=hi)
 }
 
 pub fn human_delay(mean: f64, sigma: f64, minimum: f64) -> f64 {
@@ -159,13 +172,13 @@ fn long_hold(key: Option<&str>) -> bool {
 }
 
 /// How long a tapped key stays down: ~85ms (a bit longer for arrows and
-/// modifiers), clamped to [0.045, 0.22]s.
+/// modifiers), within [0.045, 0.22]s.
 pub fn human_hold(key: Option<&str>) -> f64 {
     let median = 0.085 * if long_hold(key) { 1.15 } else { 1.0 };
     human_between(median, 0.045, 0.22, 0.28)
 }
 
-/// Minimum spacing between two key events: ~25ms, clamped to [0.01, 0.07]s.
+/// Minimum spacing between two key events: ~25ms, within [0.01, 0.07]s.
 pub fn key_gap() -> f64 {
     human_between(0.025, 0.01, 0.07, 0.5)
 }
@@ -227,6 +240,20 @@ mod tests {
                 let v = human_between_with(&mut rng, pace, 0.17, 0.11, 0.26, 0.3);
                 assert!((0.11..=0.26).contains(&v));
             }
+        }
+    }
+
+    #[test]
+    fn tight_bounds_do_not_pile_samples_onto_the_bound() {
+        // A clamp would put ~25% of these on exactly 0.06 or 0.12.
+        let mut rng = StdRng::seed_from_u64(4);
+        for pace in [0.8, 1.0, 1.3] {
+            let s: Vec<f64> = (0..2000)
+                .map(|_| human_between_with(&mut rng, pace, 0.08, 0.06, 0.12, 0.3))
+                .collect();
+            assert!(s.iter().all(|v| (0.06..=0.12).contains(v)));
+            let on_bound = s.iter().filter(|v| **v == 0.06 || **v == 0.12).count();
+            assert_eq!(on_bound, 0);
         }
     }
 

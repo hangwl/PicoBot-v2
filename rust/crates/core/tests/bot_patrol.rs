@@ -437,6 +437,33 @@ fn a_recorded_leg_wins() {
 }
 
 #[test]
+fn a_miss_reroutes_from_where_the_player_ended_up() {
+    let mut b = weak_up_flash();
+    let mut p = Patrol::default();
+    p.plan = up_flash_plan();
+    p.tick(&mut b); // the up flash falls short
+    b.pos = (150.0, 100.0); // knocked along the floor meanwhile
+    b.up = 20.0;
+    p.tick(&mut b);
+    let legs = p.plan[p.seg].legs.clone().unwrap();
+    assert_eq!(legs[0].x0, 150.0);
+    ticks(&mut p, &mut b, 3);
+    assert_eq!(arrivals(&b).first().map(String::as_str), Some("a1"));
+}
+
+#[test]
+fn a_lost_focus_mid_patrol_is_not_a_miss() {
+    let mut b = weak_up_flash();
+    let mut p = Patrol::default();
+    p.plan = up_flash_plan();
+    b.focus = false;
+    ticks(&mut p, &mut b, 3);
+    assert_eq!(p.fails, 0);
+    assert!(!b.log_has("missed a landing"));
+    assert!(b.state.bans.is_empty());
+}
+
+#[test]
 fn a_new_patrol_starts_idle() {
     let b = Sim::patrol(&[FLOOR], (10.0, 100.0), &[(20.0, 100.0)]);
     assert!(b.state_ref().viz.patrol.is_none());

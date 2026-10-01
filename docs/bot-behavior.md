@@ -28,9 +28,12 @@ loop:
   ever yields nothing, the bot **halts and takes a break** — no movement,
   no attacks — and retries every few seconds.
 - **One leg per tick**; safety checks run between legs. A failed leg
-  splices a re-route from the player's actual position into the plan
-  (rope lift excluded while cooling, without counting a failure); 2
+  splices a re-route into the plan on the next tick, from where the
+  player ended up (after any time off the platforms); rope lift and
+  teleport are excluded while cooling, without counting a failure. 2
   missed landings in a row ban the anchor for 30s and re-route to the next one.
+- A leg **interrupted** by focus loss, a hazard or a stop is aborted, not
+  missed: no miss counted, nothing learned, and it's re-routed on resume.
 - **Anchors are pure pass-through waypoints**: arriving fires the
   anchor's non-summon `on_arrive` skills and places at most one summon
   (see Summons) in passing, then the bot moves on — no linger, no dwell
@@ -53,8 +56,12 @@ loop:
   routes from an off-graph start and ban every anchor); one anchor →
   weave on its platform indefinitely (standing on another platform or
   level hands the anchor to TRAVEL, or takes a break while a failed
-  leg has it banned); no anchors → weave around where
+  leg has it banned — a leg interrupted by a pause keeps its target and
+  is retried, unbanned); no anchors → weave around where
   grinding started.
+- A walk (`move_to_point`) gives up after 8s plus three times the
+  straight walk to its target — blind, or bouncing around the target —
+  so a tick can't run on long enough to starve the watchdog.
 - Platform matching is asymmetric: the player glyph floats above the
   drawn row, so a point matches its platform when it sits up to
   `snap_px` above the row (and up to 2px below) — stacked tiers stay
@@ -215,7 +222,9 @@ Bot-controlled movement looks like a player farming, not a macro:
   learned rise) clears, so the graph only plans it onto that one — never
   onto a lower tier it would fly past.
 - A miss only counts against a move's reach when it fell short of the
-  plan; one that overshot or came down elsewhere says nothing about reach.
+  plan; one that overshot or came down elsewhere says nothing about reach,
+  and neither does one never seen leaving its takeoff spot (an eaten key,
+  a stun).
 - Re-press gaps are tunable: `flash_repress_seconds` (jump → flash) and
   `combo_repress_seconds` (between chained flashes).
 - The **up flash** is timed from the first jump's key-down: the re-press
@@ -241,14 +250,16 @@ Bot-controlled movement looks like a player farming, not a macro:
   don't.
 - Single-anchor and roam weaving use the same primitive, bouncing
   between the drawn platform's ends.
-- All gaps are log-normal (`timing.human_between`: clamped to the game's
+- All gaps are log-normal (`timing.human_between`: truncated to the game's
   input windows, e.g. re-press 0.11–0.26s around 0.17s).
 
 ## Human input timing (`timing.rs`, `io/src/hid.rs`)
 
 - **Session tempo**: each bot start draws a pace (±~7%) that also drifts
   slowly within the session (mean-reverting, minutes-scale). It scales
-  every mean; clamps are applied after it, so input windows hold.
+  every median; bounds are applied after it, so input windows hold. A
+  draw outside its bounds is redrawn rather than clamped — clamping
+  piled up to a quarter of the samples on the exact bound.
 - **Key spacing**: `HidController` spaces consecutive key events (downs,
   ups, and `release_all`) by a drawn gap (~25ms, 10–70ms) — fingers never
   land at once. Time already spent (a deliberate sleep, the serial

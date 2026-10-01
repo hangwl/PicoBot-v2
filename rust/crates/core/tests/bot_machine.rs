@@ -105,3 +105,41 @@ fn grind_with_anchors_runs_the_patrol() {
     assert!(b.log_has("Checkpoint:"));
     assert!(b.state.viz.patrol.is_some());
 }
+
+#[test]
+fn indices_of_removed_anchors_are_dropped_not_followed() {
+    let mut b = anchored();
+    b.state.arrive_pending = vec![5];
+    let mut m = Machine::default();
+    m.grind_tick(&mut b);
+    b.state.travel_target = Some(9);
+    assert!(m.switch(&mut b));
+    assert_eq!(m.state, State::Travel);
+    assert!(b.log_has("TRAVEL: →"));
+    b.state.travel_target = Some(9);
+    assert!(!picobot_core::bot::grind::run_travel(&mut b));
+    assert!(b.state.travel_target.is_none());
+}
+
+#[test]
+fn an_interrupted_travel_keeps_its_target_unbanned() {
+    let mut b = anchored();
+    b.state.travel_target = Some(1);
+    b.hazard = Some("rune".into());
+    assert!(!picobot_core::bot::grind::run_travel(&mut b));
+    assert_eq!(b.state.travel_target, Some(1));
+    assert!(b.state.bans.is_empty());
+}
+
+#[test]
+fn a_map_change_forgets_the_old_maps_bans_and_origin() {
+    let mut b = anchored();
+    b.state.bans.insert(1, 9e9);
+    b.state.arrive_pending = vec![1];
+    b.state.roam_origin = Some((5.0, 5.0));
+    b.state.map_version = 7;
+    assert!(picobot_core::bot::grind::sync_map(&mut b));
+    assert!(b.state.bans.is_empty());
+    assert!(b.state.arrive_pending.is_empty());
+    assert!(b.state.roam_origin.is_none());
+}

@@ -22,6 +22,9 @@ pub enum LegStatus {
     /// Rope lift or teleport started cooling during the approach: re-route,
     /// don't count a failure.
     Cooldown,
+    /// Interrupted (focus lost, hazard, stop): not a miss, and nothing to
+    /// learn from.
+    Aborted,
 }
 
 /// How one navigation step ended.
@@ -34,6 +37,7 @@ pub enum StepStatus {
     /// No player position.
     Lost,
     Cooldown,
+    Aborted,
 }
 
 pub struct Navigator {
@@ -75,11 +79,6 @@ impl Navigator {
     /// Perform one planned leg (the patrol's fixed plan calls this).
     pub fn execute_leg<B: Body + ?Sized>(&self, body: &mut B, leg: &Leg) -> LegStatus {
         self.leg(body, leg)
-    }
-
-    /// Walk to `x` on the current platform (a planned walk leg).
-    pub fn execute_walk<B: Body + ?Sized>(&self, body: &mut B, x: f64) -> bool {
-        self.walk_to(body, x, false, None, false)
     }
 
     fn arrived<B: Body + ?Sized>(
@@ -133,6 +132,7 @@ impl Navigator {
         match self.leg(body, leg) {
             LegStatus::Failed => return StepStatus::Failed,
             LegStatus::Cooldown => return StepStatus::Cooldown,
+            LegStatus::Aborted => return StepStatus::Aborted,
             LegStatus::Ok => {}
         }
         match body.pos() {
@@ -157,6 +157,7 @@ impl Navigator {
             }
             match self.step(body, goal) {
                 StepStatus::Arrived => return true,
+                StepStatus::Aborted => return false,
                 s @ (StepStatus::NoRoute | StepStatus::Lost) => {
                     let what = if s == StepStatus::NoRoute {
                         "noroute"
@@ -214,20 +215,20 @@ impl Navigator {
         match status {
             LegStatus::Ok => body.state().session.record_move(leg.kind.as_str(), true),
             LegStatus::Failed => body.state().session.record_move(leg.kind.as_str(), false),
-            LegStatus::Cooldown => {}
+            LegStatus::Cooldown | LegStatus::Aborted => {}
         }
         status
     }
 
     fn leg_inner<B: Body + ?Sized>(&self, body: &mut B, leg: &Leg) -> LegStatus {
-        if !body.should_continue() || !body.focused() {
-            return LegStatus::Failed;
+        if interrupted(body) {
+            return LegStatus::Aborted;
         }
         if leg.kind == MoveKind::Walk {
             return if self.walk_to(body, leg.x1, false, None, false) {
                 LegStatus::Ok
             } else {
-                LegStatus::Failed
+                failure(body)
             };
         }
         // Rope lift fires from about wherever the character stands (mid-air
@@ -237,10 +238,20 @@ impl Navigator {
         let band = body.config().walk_band_px;
         // Only a rope grab needs the takeoff to the pixel.
         let precise = matches!(leg.kind, MoveKind::ClimbUp | MoveKind::ClimbDown);
-        if !self.walk_to(body, leg.x0, !rope, rope.then_some(band), precise) {
-            return LegStatus::Failed;
+        // Checked before the walk to the takeoff (no wasted approach) and
+        // after it (a teleport weave on the way may have used it).
+        let cooling = |body: &mut B| match leg.kind {
+            MoveKind::RopeLift => body.rope_lift_remaining() > 0.0,
+            MoveKind::Teleport => body.teleport_remaining() > 0.0,
+            _ => false,
+        };
+        if cooling(body) {
+            return LegStatus::Cooldown;
         }
-        if rope && body.rope_lift_remaining() > 0.0 {
+        if !self.walk_to(body, leg.x0, !rope, rope.then_some(band), precise) {
+            return failure(body);
+        }
+        if cooling(body) {
             return LegStatus::Cooldown;
         }
         let want = self.graph.locate(leg.x1, leg.y1);
@@ -249,7 +260,7 @@ impl Navigator {
         match leg.kind {
             MoveKind::RopeLift => {
                 if !body.rope_lift() {
-                    return LegStatus::Failed;
+                    return failure(body);
                 }
             }
             MoveKind::UpFlash => body.up_flash(((leg.x1 - leg.x0).abs() > 2.0).then_some(dir)),
@@ -262,20 +273,19 @@ impl Navigator {
                 let d = (gap > 2.0).then_some(dir);
                 if !body.rope_up(leg.y1, d, gap > DRIFT_REACH) {
                     self.rope_fallback(body, leg);
-                    return LegStatus::Failed;
+                    return failure(body);
                 }
             }
             MoveKind::ClimbDown => {
                 if !body.climb(false, leg.y1, Some(leg.x0)) {
                     self.rope_fallback(body, leg);
-                    return LegStatus::Failed;
+                    return failure(body);
                 }
             }
             MoveKind::Teleport => {
-                if body.teleport_remaining() > 0.0 {
-                    return LegStatus::Cooldown;
+                if !body.teleport(Some(dir)) {
+                    return failure(body);
                 }
-                body.teleport(Some(dir));
             }
             MoveKind::Drop => {
                 let (y0, snap) = (leg.y0, self.graph.snap_px);
@@ -286,9 +296,14 @@ impl Navigator {
             }
             MoveKind::Walk => unreachable!(),
         }
-        let pos = self.land(body, start, takeoff_s(leg.kind), 2.5);
+        let (pos, took_off) = self.land(body, start, takeoff_s(leg.kind), 2.5);
         let ok = pos.is_some_and(|p| self.on_platform(p, want));
-        if let (Some(m), Some(s), Some(p)) = (leg.kind.reach_move(), start, pos) {
+        if !ok && interrupted(body) {
+            return LegStatus::Aborted;
+        }
+        // A move that never left the ground (an eaten key, a stun) says
+        // nothing about its reach.
+        if let (Some(m), Some(s), Some(p), true) = (leg.kind.reach_move(), start, pos, took_off) {
             body.state().reach.observe(
                 m,
                 ((leg.x1 - leg.x0).abs(), leg.y0 - leg.y1),
@@ -308,11 +323,7 @@ impl Navigator {
     /// platform it can land on.
     fn rope_fallback<B: Body + ?Sized>(&self, body: &mut B, leg: &Leg) {
         let pos = body.pos().unwrap_or((leg.x1, (leg.y0 + leg.y1) / 2.0));
-        let d = match self.graph.exit_direction(pos.0, pos.1) {
-            crate::navgraph::Direction::Left => Dir::Left,
-            crate::navgraph::Direction::Right => Dir::Right,
-        };
-        body.rope_exit(d);
+        body.rope_exit(self.graph.exit_direction(pos.0, pos.1).into());
     }
 
     /// Tolerant landing check: the drawn row may sit a few px off the real
@@ -425,31 +436,32 @@ impl Navigator {
     /// `start` (a wind-up stands still and must not read as a landing),
     /// then for two steady reads *on a drawn platform* — a pause at the top
     /// of a jump is steady too, but in the air. Polls are counted rather
-    /// than timed, so a slow capture can't shorten the wait.
+    /// than timed, so a slow capture can't shorten the wait. The flag says
+    /// whether the character was ever seen away from `start`.
     pub fn land<B: Body + ?Sized>(
         &self,
         body: &mut B,
         start: Option<(f64, f64)>,
         takeoff: f64,
         timeout: f64,
-    ) -> Option<(f64, f64)> {
+    ) -> (Option<(f64, f64)>, bool) {
         let polls = (timeout / POLL_S) as usize;
         let wait_takeoff = (takeoff / POLL_S) as usize;
-        let away =
-            |p: (f64, f64), s: (f64, f64)| (p.0 - s.0).abs() > 2.0 || (p.1 - s.1).abs() > 2.0;
-        let mut last = body.pos();
-        let mut moved = match (start, last) {
-            (Some(s), Some(l)) => away(l, s),
-            _ => true,
+        let away = |p: (f64, f64)| {
+            start.is_none_or(|s| (p.0 - s.0).abs() > 2.0 || (p.1 - s.1).abs() > 2.0)
         };
+        let mut last = body.pos();
+        let mut left = last.is_some_and(away);
+        let mut moved = left || last.is_none();
         let mut stable = 0;
         for i in 0..polls {
             if body.sleep(POLL_S) {
-                return last;
+                return (last, left);
             }
             let Some(p) = body.pos() else { continue };
+            left = left || away(p);
             if !moved {
-                moved = start.is_some_and(|s| away(p, s)) || i >= wait_takeoff;
+                moved = left || i >= wait_takeoff;
                 last = Some(p);
                 continue;
             }
@@ -457,13 +469,27 @@ impl Navigator {
             if steady && self.graph.locate(p.0, p.1).is_some() {
                 stable += 1;
                 if stable >= 2 {
-                    return Some(p);
+                    return (Some(p), left);
                 }
             } else {
                 stable = 0;
             }
             last = Some(p);
         }
-        last
+        (last, left)
+    }
+}
+
+/// The run was interrupted, rather than the move going wrong.
+pub(crate) fn interrupted<B: Body + ?Sized>(body: &mut B) -> bool {
+    !body.should_continue() || !body.focused() || body.hazard().is_some()
+}
+
+/// A leg that didn't complete: aborted when interrupted, else failed.
+fn failure<B: Body + ?Sized>(body: &mut B) -> LegStatus {
+    if interrupted(body) {
+        LegStatus::Aborted
+    } else {
+        LegStatus::Failed
     }
 }
