@@ -136,6 +136,13 @@ pub struct PlayerTracker {
     misses: u32,
 }
 
+impl PlayerTracker {
+    /// The last position read, if the dot hasn't been lost since.
+    pub fn last(&self) -> Option<(i32, i32)> {
+        self.last
+    }
+}
+
 /// An inclusive pixel box: `(x0, y0, x1, y1)`.
 pub type BoxPx = (i32, i32, i32, i32);
 

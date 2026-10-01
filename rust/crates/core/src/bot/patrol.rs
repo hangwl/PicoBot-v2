@@ -3,7 +3,7 @@
 //! The loop is a sequence of anchor-to-anchor segments over the movement
 //! graph (see [`crate::planner`]). The bot follows the planned legs in
 //! order, one per tick; only a failed leg splices a re-route from the
-//! player's actual position, and three misses ban the anchor. The next loop
+//! player's actual position, and two misses ban the anchor. The next loop
 //! is planned before the current one finishes; with no plan, the bot halts
 //! and takes a break. Anchors are pure pass-through waypoints.
 
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use super::body::{Body, Dir, PatrolStatus};
 use super::grind::{blind_wait, legacy_patrol_tick, run_leg};
 use super::navigator::{legs_viz, LegStatus, Navigator};
-use crate::navgraph::{MoveKind, NavGraph, ROPE_BOTTOM_GAP};
+use crate::navgraph::{MoveKind, NavGraph, ROPE_BOTTOM_GAP, ROPE_TOP_OVERSHOOT};
 use crate::planner::{plan_loop, LoopRequest, PlanSegment};
 use crate::timing::human_reaction;
 
@@ -220,7 +220,7 @@ impl Patrol {
                     self.fails
                 ));
                 body.sleep(human_reaction()); // noticing takes a moment
-                if self.fails >= 3 {
+                if self.fails >= 2 {
                     self.ban(body, &graph, pos, idx, "unreachable after retries");
                 } else {
                     self.splice(body, &graph, pos, idx);
@@ -275,10 +275,11 @@ impl Patrol {
             return;
         };
         let p = graph.platforms[above];
-        let top = p.y_at(pos.0.clamp(p.x0, p.x1));
+        let row = p.y_at(pos.0.clamp(p.x0, p.x1));
+        let top = (row - ROPE_TOP_OVERSHOOT).max(0.0);
         // Keep the bottom end off the platform below (stacked tiers).
         let limit = graph
-            .below(pos.0, top, Some(above))
+            .below(pos.0, row, Some(above))
             .map_or(f64::INFINITY, |u| {
                 graph.platforms[u].y_at(pos.0) - ROPE_BOTTOM_GAP
             });

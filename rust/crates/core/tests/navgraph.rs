@@ -496,3 +496,36 @@ fn the_graph_cache_rebuilds_when_kit_or_walking_pace_change() {
         cache.get(Some(&e), Some(wh), &r, base).unwrap();
     }
 }
+
+#[test]
+fn a_rope_top_a_few_px_under_its_platform_is_lifted_onto_it() {
+    use picobot_core::navgraph::lift_rope_top;
+    let plats = [[80.0, 40.0, 120.0, 40.0]];
+    assert_eq!(
+        lift_rope_top(&plats, [100.0, 80.0, 100.0, 45.0]),
+        [100.0, 80.0, 100.0, 40.0]
+    );
+    // Reversed ends, and a top already above the row, are left alone.
+    assert_eq!(
+        lift_rope_top(&plats, [100.0, 45.0, 100.0, 80.0]),
+        [100.0, 40.0, 100.0, 80.0]
+    );
+    assert_eq!(
+        lift_rope_top(&plats, [100.0, 80.0, 100.0, 37.0]),
+        [100.0, 80.0, 100.0, 37.0]
+    );
+    // Too far under: another rope's top, not this platform's.
+    assert_eq!(
+        lift_rope_top(&plats, [100.0, 80.0, 100.0, 52.0]),
+        [100.0, 80.0, 100.0, 52.0]
+    );
+}
+
+#[test]
+fn a_saved_rope_ending_under_its_platform_still_links() {
+    let mut entry = MapEntry::new("m");
+    entry.platforms = Some(vec![[0.0, 1.0, 1.0, 1.0], [0.4, 0.4, 0.6, 0.4]]);
+    entry.ropes = Some(vec![[0.5, 0.8, 0.5, 0.45]]); // top 5px under the row
+    let g = graph_for(&entry, (200.0, 100.0), &reach(), GraphOptions::default()).unwrap();
+    assert!(!transfers(&g, MoveKind::ClimbUp).is_empty());
+}

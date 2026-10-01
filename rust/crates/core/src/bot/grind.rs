@@ -70,16 +70,64 @@ fn anchor_skills<B: Body + ?Sized>(body: &mut B, rot: &Rotation, idx: usize) -> 
         .collect()
 }
 
+/// How long an arrival summon waits for the character to settle (a landing
+/// slide, a movement skill's carry) before giving up on this visit.
+const SUMMON_SETTLE_S: f64 = 1.0;
+/// Feet this far under a drawn row still count as standing on it (a line
+/// drawn a little high).
+const SUMMON_ROW_SLACK: f64 = 6.0;
+
+/// Where the character is, as a summon cares.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Footing {
+    Standing,
+    /// Never held still within the wait.
+    Moving,
+    /// Held still, but not on a drawn platform.
+    OffLine((f64, f64)),
+    /// The dot couldn't be read.
+    Blind,
+}
+
 /// Summons need the character standing on a platform: two reads a moment
-/// apart, both within 1px and on a drawn line — not mid-air, not a rope.
-pub fn standing_on_platform<B: Body + ?Sized>(body: &mut B) -> bool {
-    let Some(a) = body.pos() else { return false };
-    body.sleep_between(0.08, 0.06, 0.12);
-    let Some(b) = body.pos() else { return false };
-    if (a.0 - b.0).abs() > 1.0 || (a.1 - b.1).abs() > 1.0 {
-        return false;
+/// apart, both within 1px, on a drawn line. A moving character is given up
+/// to `timeout` to settle; the route itself is never touched.
+pub fn settle_on_platform<B: Body + ?Sized>(body: &mut B, timeout: f64) -> Footing {
+    let end = body.now() + timeout;
+    let mut seen = false;
+    loop {
+        let a = body.pos();
+        if body.sleep_between(0.08, 0.06, 0.12) || !body.should_continue() {
+            return Footing::Moving;
+        }
+        let b = body.pos();
+        if let (Some(a), Some(b)) = (a, b) {
+            seen = true;
+            if (a.0 - b.0).abs() <= 1.0 && (a.1 - b.1).abs() <= 1.0 {
+                return if on_drawn_line(body, b) {
+                    Footing::Standing
+                } else {
+                    Footing::OffLine(b)
+                };
+            }
+        }
+        if body.now() >= end {
+            return if seen {
+                Footing::Moving
+            } else {
+                Footing::Blind
+            };
+        }
     }
-    body.graph().is_none_or(|g| g.locate(b.0, b.1).is_some())
+}
+
+fn on_drawn_line<B: Body + ?Sized>(body: &mut B, pos: (f64, f64)) -> bool {
+    let Some(g) = body.graph() else { return true };
+    g.locate(pos.0, pos.1).is_some()
+        || g.platforms.iter().any(|p| {
+            p.spans(pos.0, 2.0)
+                && (-SUMMON_ROW_SLACK..=g.snap_px).contains(&(p.y_at(pos.0) - pos.1))
+        })
 }
 
 /// At a checkpoint: listed non-summon skills fire when ready; then one
@@ -104,11 +152,24 @@ pub fn cast_at_anchor<B: Body + ?Sized>(body: &mut B, rot: &Rotation, idx: usize
     if summons.is_empty() || !body.state().summons.anchor_free(&name, now) {
         return;
     }
-    if !standing_on_platform(body) {
-        body.log(&format!(
-            "Summon skipped at {name}: not standing on a platform"
-        ));
-        return;
+    match settle_on_platform(body, SUMMON_SETTLE_S) {
+        Footing::Standing => {}
+        Footing::Moving => {
+            body.log(&format!(
+                "Summon skipped at {name}: still moving after {SUMMON_SETTLE_S:.0}s — retried next visit"
+            ));
+            return;
+        }
+        Footing::OffLine((x, y)) => {
+            body.log(&format!(
+                "Summon skipped at {name}: not on a drawn platform at ({x:.0}, {y:.0}) — check Platform fit"
+            ));
+            return;
+        }
+        Footing::Blind => {
+            body.log(&format!("Summon skipped at {name}: player dot not visible"));
+            return;
+        }
     }
     let st = body.state();
     let fullness = |s: &Skill, st: &mut super::body::BotState| {

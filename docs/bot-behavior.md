@@ -13,7 +13,7 @@
   variety.
 
 Both ban unreachable anchors for 30s, execute the plan strictly
-(splice-on-fail, 3 misses → ban), and pipeline the next loop before the
+(splice-on-fail, 2 misses → ban), and pipeline the next loop before the
 current one ends. (`core/src/bot/patrol.rs`, `core/src/planner.rs`)
 
 With ≥2 anchors and drawn platforms the bot strictly follows a planned
@@ -29,8 +29,8 @@ loop:
   no attacks — and retries every few seconds.
 - **One leg per tick**; safety checks run between legs. A failed leg
   splices a re-route from the player's actual position into the plan
-  (rope lift excluded while cooling, without counting a failure); 3
-  missed landings ban the anchor for 30s and re-route to the next one.
+  (rope lift excluded while cooling, without counting a failure); 2
+  missed landings in a row ban the anchor for 30s and re-route to the next one.
 - **Anchors are pure pass-through waypoints**: arriving fires the
   anchor's non-summon `on_arrive` skills and places at most one summon
   (see Summons) in passing, then the bot moves on — no linger, no dwell
@@ -40,11 +40,11 @@ loop:
   Higher temperature → nearer-first sweeps → shorter loops, so *every*
   anchor (far ones too) comes around sooner; lower → more random,
   longer loops. An anchor that falls behind is being skipped or missed —
-  Setup → Patrol → **Anchors** lists visits, last visit, missed landings
+  Setup → Tuning → Patrol → **Anchors** lists visits, last visit, missed landings
   and skips by reason per anchor (this host session; **Reset anchor
   stats** after fixing geometry).
 - **Bans**: no route, unreachable-at-plan-time (including anchors not
-  on any drawn platform — "re-place it"), or 3 missed landings → skipped
+  on any drawn platform — "re-place it"), or 2 missed landings → skipped
   for 30s, so one bad anchor can't shrink or stall the patrol.
 - Hand-authored `legs` for a pair still win (ropes aren't in the graph).
 - Fallbacks: no drawn platforms → the older straight-line patrol;
@@ -104,7 +104,9 @@ lines up with its anchor.
 Detection tracks the dot per thread: when several yellow markers
 qualify, the one nearest the last position wins, and one missed frame
 repeats the last position before the dot counts as lost. With the dot
-lost the bot only waits — it never learns ropes or jumps blind.
+lost the bot only waits — it never learns ropes or jumps blind. Each loss
+saves the minimap crop for later study (see `development.md`, Debug frame
+captures).
 
 Rope climbs cost `rope_penalty` (default 5s) on top of climb time —
 **ropes are a last resort**: platforms are normally reachable via jumps,
@@ -119,7 +121,9 @@ the character slides down, on ground it only crouches (Down, not Up —
 Up on a portal changes maps). A confirmed hang records a rope segment
 from that spot up to the platform above (persisted in the map file,
 drawn brown on the overlay); later hangs on the same column extend that
-segment instead of adding another. Then it leaps off and replans. Ground
+segment instead of adding another. A learned rope's top stands 3px above
+its platform's row so the climb ends on the platform; older ropes ending
+up to 6px under the row are lifted onto it when the graph is built. Then it leaps off and replans. Ground
 that isn't drawn is logged ("not a rope; draw the platform there") and
 the bot hops back toward drawn ground. Learned climbs carry the same
 `rope_penalty`, so they're used only when nothing else connects.
@@ -286,7 +290,7 @@ Ropes are a last resort: a climb edge costs `rope_penalty` extra seconds
 (default 5), so it is planned only when no hop path is within that much
 cheaper — 30 or more all but bans ropes. `walk_cost_factor` (default 1)
 multiplies every walking leg's cost, so routes and loop orders that walk
-less win. Both are on Setup → Patrol (`patrol|rope_penalty`,
+less win. Both are on Setup → Tuning → Patrol (`patrol|rope_penalty`,
 `patrol|walk_factor`). The Home status list and the stop/heartbeat
 summaries count the legs run by kind (`flash 41 · walk 12 · climb up 3 (1
 missed)`), so you can see what the bot is really doing.
@@ -310,7 +314,7 @@ it lands — and some move the character on the ground.
 
 A skill with a long cooldown is measured once; one on cooldown over 40 s
 is skipped. `measure|effect|<skill>` (a **Measure** button per skill on the
-Skills page and the Measure page) measures one skill and keeps the other
+Skills fold on Setup → Class and the Measure page) measures one skill and keeps the other
 skills' rows; a whole run saves each skill as it finishes, so a stopped
 run keeps what it finished. The plain-flash baseline is measured once per
 run and shared by its skills.
@@ -349,9 +353,14 @@ cost uses the measured pace. Without a sweep, nothing changes.
 - **One summon per anchor**, of any kind: an anchor with a live summon
   gets none. Otherwise, on arrival, the summon allowed there with the
   most charges banked (by fraction) is cast.
-- **Standing only**: two position reads a moment apart must both be on a
-  drawn platform and within 1px — never mid-air or on a rope. Otherwise
-  the cast is skipped (logged), not waited for.
+- **Standing only**: two position reads a moment apart must agree within
+  1px and be on a drawn platform (feet up to 6px under a line drawn a
+  little high still count) — never mid-air or on a rope. A character
+  still moving (a landing slide, a movement skill's carry) gets up to 1s
+  to settle; the route is untouched. If it doesn't, the visit is skipped
+  and logged ("still moving", "not on a drawn platform at (x, y)",
+  "player dot not visible"); the anchor stays free, so the next loop's
+  visit tries again.
 - The bot can't see summons: placements are timed from casts, cleared
   on a map change and when the bot starts. Home shows them ("fountain at
   a2 · 38s left · 1/2"). `wait_on_arrival` is ignored.

@@ -241,3 +241,24 @@ fn classes_that_cannot_attack_airborne_attack_after_landing() {
     assert_eq!(b.presses(), ["space", "space", "a"]);
     assert!(b.clock > 0.3); // rode out the airtime before attacking
 }
+
+#[test]
+fn a_climb_that_stalls_just_under_the_top_has_reached_it() {
+    let mut b = KeyBody::new();
+    // Latches, climbs, then hangs 4px under the platform row (64).
+    b.ys = [100.0, 94.0, 86.0, 78.0, 70.0, 68.0, 68.0, 68.0, 68.0, 68.0].into();
+    assert!(b.rope_up(64.0, Some(Dir::Right), false));
+    assert!(b.clock < 6.0);
+}
+
+#[test]
+fn a_stall_far_below_the_top_still_fails() {
+    let mut b = KeyBody::new();
+    b.ys = [
+        100.0, 94.0, 86.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0,
+        80.0,
+    ]
+    .into();
+    b.ys.extend(std::iter::repeat_n(80.0, 40));
+    assert!(!b.rope_up(64.0, Some(Dir::Right), false));
+}

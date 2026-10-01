@@ -128,6 +128,10 @@ impl Window {
 
 /// A ready skill tagged only for its window is cast at least this often.
 const EXCLUSIVE_READY_CHANCE: f64 = 0.85;
+/// Unreadable dot reads (0.15s apart) a rope climb rides out before aborting.
+const ROPE_LOST_READS: u32 = 20;
+/// A climb that stalls this close under its target has reached the rope's top.
+const ROPE_TOP_NEAR: f64 = 6.0;
 /// The attack rate is counted over this many seconds.
 const RATE_WINDOW_S: f64 = 60.0;
 
@@ -757,7 +761,8 @@ pub trait Body {
     /// Watch the character on a rope until y crosses `target` (px). A grab
     /// (`grab`) latches when it rises and fails if it falls well past the
     /// target; a plain climb latches on any movement and only stalls once
-    /// latched.
+    /// latched. Climbing up, a stall just under the target is the top of the
+    /// rope: the caller's held Up finishes the mount.
     fn follow_rope(&mut self, up: bool, target: f64, timeout: f64, grab: bool) -> bool {
         let what = if grab { "Rope grab" } else { "Climb" };
         let start = self.now();
@@ -773,7 +778,7 @@ pub trait Body {
             }
             let Some((_, y)) = self.locate_player(&img) else {
                 lost += 1;
-                if lost >= 10 {
+                if lost >= ROPE_LOST_READS {
                     self.log(&format!("{what} aborted: position lost"));
                     return false;
                 }
@@ -815,6 +820,10 @@ pub trait Body {
                 self.log(&format!("{what} failed: never latched"));
                 return false;
             }
+            if up && grabbed && still >= 3 && y <= target + ROPE_TOP_NEAR {
+                self.sleep_between(0.5, 0.35, 0.7); // Up held: step onto the platform
+                return true;
+            }
             if still >= 10 && (grab || grabbed) {
                 self.log(&format!("{what} failed: stalled"));
                 return false;
@@ -853,7 +862,7 @@ pub trait Body {
         self.sleep_between(0.12, 0.08, 0.18);
         let ok = self.follow_rope(true, until_y, 12.0, true);
         if ok {
-            self.sleep_between(0.3, 0.2, 0.45); // the mount happens at the top
+            self.sleep_between(0.45, 0.3, 0.65); // the mount happens at the top
         }
         self.keys().key_up("up");
         if let Some(d) = dir {

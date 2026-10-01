@@ -36,6 +36,12 @@ pub const GRAB_HOP_PX: f64 = 6.0;
 pub const FLASH_GRAB_REACH: f64 = 20.0;
 /// A rope between stacked platforms stops this far above the lower one.
 pub const ROPE_BOTTOM_GAP: f64 = 5.0;
+/// A learned rope's top stands this far above its platform, so the climb
+/// ends on the platform rather than a hair under it.
+pub const ROPE_TOP_OVERSHOOT: f64 = 3.0;
+/// A stored rope top this far below its platform (older maps) still
+/// belongs to it: it is lifted onto the row when the graph is built.
+pub const ROPE_TOP_SLACK: f64 = 6.0;
 pub const EXPLORE_PENALTY: f64 = 1.6;
 /// Max rise for a "horizontal" gap move.
 pub const LEVEL_PX: f64 = 4.0;
@@ -852,8 +858,32 @@ pub fn graph_for(
     let (w, h) = region_wh;
     let scale = |s: &[f64; 4]| [s[0] * w, s[1] * h, s[2] * w, s[3] * h];
     let segs: Vec<[f64; 4]> = platforms.iter().map(scale).collect();
-    let ropes: Vec<[f64; 4]> = entry.ropes.iter().flatten().map(scale).collect();
+    let ropes: Vec<[f64; 4]> = entry
+        .ropes
+        .iter()
+        .flatten()
+        .map(|r| lift_rope_top(&segs, scale(r)))
+        .collect();
     Some(NavGraph::new(&segs, &ropes, reach, opts))
+}
+
+/// A rope whose top ends a few px under its platform (older learned ropes
+/// stopped at the last hang) is lifted onto that platform's row.
+pub fn lift_rope_top(platforms: &[[f64; 4]], mut rope: [f64; 4]) -> [f64; 4] {
+    let rx = (rope[0] + rope[2]) / 2.0;
+    let top = rope[1].min(rope[3]);
+    let row = platforms
+        .iter()
+        .map(|s| Platform::from_segment(*s))
+        .filter(|p| p.spans(rx, 3.0))
+        .map(|p| p.y_at(rx.clamp(p.x0, p.x1)))
+        .filter(|row| (0.0..=ROPE_TOP_SLACK).contains(&(top - row)))
+        .max_by(|a, b| a.total_cmp(b));
+    if let Some(row) = row {
+        let i = if rope[1] <= rope[3] { 1 } else { 3 };
+        rope[i] = row;
+    }
+    rope
 }
 
 /// What a cached graph was built from.
