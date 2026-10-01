@@ -74,17 +74,43 @@ export function Reply({ reply, idle }: { reply?: EvtItem; idle?: string }) {
   );
 }
 
-/** A titled block within a page: heading, explanation, content. */
+/** A titled block within a page. The explanation sits behind a "?" so
+ *  the page stays short; tap it to read. */
 export function Section({ title, hint, children }: {
   title: string;
   hint?: ComponentChildren;
   children?: ComponentChildren;
 }) {
+  const [help, setHelp] = useState(false);
   return (
-    <div class="fit">
-      <h3>{title}</h3>
-      {hint && <p class="hint">{hint}</p>}
+    <div class="section">
+      <h3>
+        {title}
+        {hint && (
+          <button type="button" class="help" aria-label={`About ${title}`}
+                  aria-expanded={help} onClick={() => setHelp(!help)}>?</button>
+        )}
+      </h3>
+      {hint && help && <p class="hint">{hint}</p>}
       {children}
     </div>
+  );
+}
+
+/** A collapsible block for a page that holds several topics. */
+export function Fold({ title, sub, open, children }: {
+  title: string;
+  sub?: string;
+  open?: boolean;
+  children: ComponentChildren;
+}) {
+  return (
+    <details class="card fold" open={open}>
+      <summary>
+        <span>{title}</span>
+        {sub && <span class="sub">{sub}</span>}
+      </summary>
+      <div class="body">{children}</div>
+    </details>
   );
 }

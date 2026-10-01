@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import {
+  ClassPicker,
   HazardBanner,
   LogView,
   NavBar,
@@ -9,10 +10,12 @@ import {
   TABS,
   TopBar,
   Viewer,
+  botStatus,
   tabOf,
 } from "./live";
 import { type AppState, connect, useApp } from "./protocol";
 import { Setup } from "./setup";
+import { Fold } from "./ui";
 
 const WIDE = "(min-width: 900px)";
 
@@ -32,7 +35,7 @@ function Home({ s, wide }: { s: AppState; wide: boolean }) {
     <section class="page home">
       <HazardBanner s={s} />
       <Viewer s={s} tools={wide} />
-      <StatusList s={s} />
+      <ClassPicker s={s} />
       <RunButton s={s} />
     </section>
   );
@@ -44,6 +47,7 @@ function Control({ s, wide }: { s: AppState; wide: boolean }) {
       {!wide && <HazardBanner s={s} />}
       {!wide && <Viewer s={s} compact />}
       <Pad s={s} />
+      <Fold title="Status" sub={botStatus(s)[0]}><StatusList s={s} /></Fold>
       {!wide && <RunButton s={s} />}
     </section>
   );

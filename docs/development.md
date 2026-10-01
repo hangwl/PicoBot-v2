@@ -82,6 +82,14 @@ rust\target\release\picobot.exe --root . --notify-test               # one Teleg
 
 Saving detection evidence to `debug/frames/` (blackout episodes, every
 title read, frame-not-found windows) was a feature of the Python host
-(`--debug-frames`, on `legacy/python`); the Rust host doesn't have it
-yet. The recorded title bands in `debug/frames/*_ocr/` are what
+(`--debug-frames`, on `legacy/python`); the Rust host has only the lost-dot
+captures below. The recorded title bands in `debug/frames/*_ocr/` are what
 `ocr_check` reads.
+
+**Lost-dot captures**: whenever the player dot can't be read while the bot
+runs (not during a map load), the host saves the minimap crop to
+`debug/frames/<utc-stamp>_dotlost/` — `frame.png` (lossless) and
+`meta.json`: map, bot state, last position, patrol target and move, and
+pixel counts near the dot colour (tolerance 10/30/60) plus the closest
+pixel. They tell a covered dot from a recoloured one. At most one per 2s,
+newest 200 kept (`lostdot.rs`).

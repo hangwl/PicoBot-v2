@@ -206,6 +206,17 @@ A whole-codebase pass before the Rust port found, among others:
   within 2px and requiring 6px drops specks without that failure; 78/79
   real post-arrival frames still detect. The feet row is now the true
   bottom (1px lower than the eroded one).
+- **Rope tops under their platform** (2026-10-01): the graph found a
+  rope's upper platform with a point test that accepts only 2px *below*
+  the row. Saved ropes on EZFZ and Slurpy ended 2.5–5px under it, so
+  they got no climb edges, and a hang at their top read as off every
+  platform (2s wait, Down probe, leap). Ropes are now lifted onto the row
+  at graph build (up to 6px) and learned tops stand 3px above it. A climb
+  that stalls within 6px of the top (after rising) counts as arrival and
+  keeps Up held to mount, instead of failing "stalled" 1.5s later and
+  leaping; a climb now rides out 3s of unreadable dot, not 1.5s. Why the
+  dot goes unreadable on rope grabs is still open: lost-dot frames are now
+  saved to `debug/frames/*_dotlost/`.
 - **Guessing ropes** (2026-09-30): a rope was learned (and a jump
   pressed) whenever the dot sat still off the drawn platforms for 2s or
   went missing for 2.5s — undrawn ground, UI over the minimap or a

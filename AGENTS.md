@@ -88,14 +88,17 @@ what was tried and what was learned in `docs/learnings.md` instead.
   grab). Skills carry a `stance` (ground|air|any) and `weight`; a
   `target_attacks_per_min` steers the odds toward a rate.
 - **Summons**: one live summon per anchor (any kind), cast only while
-  standing on a platform (two stable reads, on a drawn line), never
-  waited for; up to `charges` instances per skill, the oldest replaced.
+  standing on a platform (two stable reads, on a drawn line), a moving
+  character gets up to 1s to settle and the route is never touched (a
+  skipped visit is retried on the next); up to `charges` instances per skill, the oldest replaced.
   Placements are timed bookkeeping in `SummonTracker`, reset on map
   change.
 - **Rope grabs are moving grabs**: Up down well before takeoff, then a
   hop (or flash) toward the rope from beside it — never a standing jump
   unless the platform is too narrow. A rope's bottom stays
-  `ROPE_BOTTOM_GAP` above the platform under it.
+  `ROPE_BOTTOM_GAP` above the platform under it; its top stands
+  `ROPE_TOP_OVERSHOOT` above its platform (older tops up to
+  `ROPE_TOP_SLACK` under are lifted when the graph is built).
 - **No wall zones**: drawn platform ends are the boundaries — travel
   room, weave bounds and graph edges all stop at the drawn span. Rope
   lift is preferred for rises when ready and grabs the **highest**
@@ -155,10 +158,11 @@ Rust host (`rust/crates/`):
 | Host + dashboard cmds | `host/src/host.rs` (state, bot/measure runs, maps), `commands.rs` (edits: class, skills, layout, nav), `server.rs` (HTTP + WS), `clients.rs`, `bus.rs`, `telegram.rs` |
 | The real body | `host/src/botbody.rs` (`HostBody`: Pico keys, captures, stop-aware sleeps) |
 | Frame pipeline | `host/src/streamer.rs` (`FrameStreamer` thread), `frames.rs` (`assemble_panel`, `annotate`, `PBF1`) |
+| Lost-dot captures | `host/src/lostdot.rs` — minimap crop + stats to `debug/frames/*_dotlost/` whenever the dot is unreadable while the bot runs |
 | Serial / HID / screen | `io/src/serial.rs` (`SerialLink`, v2 protocol), `hid.rs` (`HidController`), `capture.rs`, `window.rs` |
 | Layout geometry | `core/src/layout.rs` (tidy, anchors follow lines), `platform_fit.rs` |
 | Tests | `core/tests/` (physics sim `tests/sim`, bot suites ported from Python, parity against fixtures the Python host wrote, generator on `legacy/python`) |
-| Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup list + readiness), `pages/*.tsx` (one file per Setup page), `ui.tsx` (shared bits: `Field`, `Section`, `useReply`/`Reply` for the host's answer under a button), `keys.ts` (held keys); protocol in `docs/protocol.md` |
+| Dashboard UI | `web/` (Preact, mobile-first — build with `npm run build` in `web/`, served from `web/dist`): `src/protocol.ts` (store, WS, hash routes), `live.tsx` (top bar, view, pad, log), `setup.tsx` (Setup list + readiness; Skills/move keys live on Class, Attacks/Patrol/Safety on `pages/tuning.tsx`), `pages/*.tsx`, `ui.tsx` (shared bits: `Field`, `Section` with a "?" hint, `Fold`, `useReply`/`Reply` for the host's answer under a button), `keys.ts` (held keys); protocol in `docs/protocol.md` |
 
 Behaviour notes:
 

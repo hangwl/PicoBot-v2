@@ -520,8 +520,7 @@ function onFrame(buf: ArrayBuffer) {
   const { meta, jpeg } = decoded;
   const hazard = meta.hazard ? String(meta.hazard) : "none";
   if (hazard !== "none" && state.hazard === "none") {
-    // A new hazard needs a human: bring up the pad and buzz the phone.
-    go(hazard === "unrecognized map" ? "setup/map" : "control");
+    // A new hazard needs a human: buzz the phone.
     navigator.vibrate?.([200, 100, 200]);
   }
   set({

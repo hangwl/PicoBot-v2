@@ -1,15 +1,12 @@
 // Setup: a checklist of one-off tasks, each opening its own page.
 import { Icon, type IconName } from "./icons";
 import { kitLabel } from "./live";
-import { ClassPage } from "./pages/class";
-import { AttacksPage } from "./pages/attacks";
+import { ClassPage, skillSummary } from "./pages/class";
 import { ConnectionPage } from "./pages/connection";
 import { LayoutPage } from "./pages/layout";
 import { MapPage } from "./pages/map";
 import { MeasurePage, allMeasured } from "./pages/measure";
-import { PatrolPage } from "./pages/patrol";
-import { SafetyPage } from "./pages/safety";
-import { SkillsPage } from "./pages/skills";
+import { TuningPage, attackSub, safetySub } from "./pages/tuning";
 import { type AppState, go } from "./protocol";
 
 // -- Readiness -------------------------------------------------------------------
@@ -67,11 +64,7 @@ const ENTRIES: Entry[] = [
   {
     page: "class", title: "Class", icon: "user",
     sub: (s) => `${kitLabel(s.classActive, s.profiles[s.classActive])} · ` +
-      `jump ${s.jumpKey || "–"}`,
-  },
-  {
-    page: "skills", title: "Skills", icon: "bolt",
-    sub: (s) => skillSummary(s) || "No skills yet",
+      (skillSummary(s) || "no skills"),
   },
   {
     page: "measure", title: "Measure moves", icon: "ruler",
@@ -82,24 +75,8 @@ const ENTRIES: Entry[] = [
     flag: (s) => (allMeasured(s) ? "ok" : "todo"),
   },
   {
-    page: "attacks", title: "Attacks", icon: "bolt",
-    sub: (s) => `${Math.round(s.moveAttack * 100)}% of moves` +
-      (s.groundAttack ? ` · ${Math.round(s.groundAttack * 100)}% of landings` : "") +
-      (s.targetApm ? ` · aiming for ${s.targetApm}/min` : ""),
-  },
-  {
-    page: "patrol", title: "Patrol", icon: "route",
-    sub: (s) => `${s.policy} · temperature ${s.temp}` +
-      (s.anchorStats.length ? ` · ${s.anchorStats.length} anchors tracked` : ""),
-  },
-  {
-    page: "safety", title: "Safety", icon: "alert",
-    sub: (s) => {
-      const on = [s.stopRune && "rune", s.stopPlayers && "players", s.stopMap && "unknown map"]
-        .filter(Boolean);
-      return (on.length ? `pauses on ${on.join(", ")}` : "no automatic pauses") +
-        (s.heartbeat ? ` · status every ${s.heartbeat} min` : "");
-    },
+    page: "tuning", title: "Tuning", icon: "sliders",
+    sub: (s) => `${attackSub(s)} · ${safetySub(s)}`,
   },
   {
     page: "connection", title: "Connection", icon: "plug",
@@ -109,15 +86,11 @@ const ENTRIES: Entry[] = [
   },
 ];
 
-function skillSummary(s: AppState): string {
-  const n: Record<string, number> = {};
-  for (const sk of Object.values(s.skills)) n[sk.kind] = (n[sk.kind] ?? 0) + 1;
-  return Object.entries(n).map(([k, c]) => `${c} ${k}`).join(" · ");
-}
-
 export function Setup({ s, wide }: { s: AppState; wide: boolean }) {
   const sub = s.route.split("/")[1];
-  const page = sub === "keys" ? "class" : sub;     // Move keys live on Class
+  // Skills and move keys live on Class; attacks/patrol/safety on Tuning.
+  const page = sub === "keys" || sub === "skills" ? "class"
+    : sub === "attacks" || sub === "patrol" || sub === "safety" ? "tuning" : sub;
   const entry = ENTRIES.find((e) => e.page === page);
   if (entry) {
     return (
@@ -162,11 +135,8 @@ function SetupPage({ page, s, wide }: { page: string; s: AppState; wide: boolean
     case "map": return <MapPage s={s} />;
     case "layout": return <LayoutPage s={s} wide={wide} />;
     case "class": return <ClassPage s={s} />;
-    case "skills": return <SkillsPage s={s} />;
     case "measure": return <MeasurePage s={s} />;
-    case "attacks": return <AttacksPage s={s} />;
-    case "patrol": return <PatrolPage s={s} />;
-    case "safety": return <SafetyPage s={s} />;
+    case "tuning": return <TuningPage s={s} />;
     case "connection": return <ConnectionPage s={s} />;
     default: return null;
   }

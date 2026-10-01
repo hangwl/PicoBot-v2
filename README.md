@@ -63,12 +63,13 @@ time.
 Mobile-first: on a phone it's four screens behind a bottom nav; on a
 desktop, two columns. See [docs/dashboard.md](docs/dashboard.md).
 
-- **Home** — live view, bot status, one big Start/Stop.
-- **Control** — rune solving: hazard banner, view, arrow pad and keys.
-  A rune or another player jumps here and vibrates the phone.
+- **Home** — live view, a class picker, one big Start/Stop.
+- **Control** — rune solving: hazard banner, view, arrow pad and keys,
+  plus a collapsed bot status. A rune or another player vibrates the
+  phone and badges this tab.
 - **Setup** — readiness checklist plus pages for the map, its layout,
-  class (with move keys), skills, measuring moves, patrol (with anchor
-  stats) and connection.
+  class (with skills and move keys), measuring moves, tuning (attacks,
+  patrol with anchor stats, safety) and connection.
 - **Log** — levelled events (`debug < info < warn < error`) with
   severity filters; HID/serial chatter sits at debug.
 

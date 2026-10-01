@@ -19,7 +19,7 @@ export function SkillsPage({ s }: { s: AppState }) {
             ? `${s.skillSource} uses the global skills. Your first change gives it its own kit.`
             : `Editing ${s.skillSource}'s kit.`}
       </p>
-      <ul class="rows">
+      <ul class="rows skill-rows">
         {!names.length && (
           <li class="muted">
             No skills — the bot won't attack. Add your attack and buff keys below.
@@ -30,24 +30,26 @@ export function SkillsPage({ s }: { s: AppState }) {
           return (
             <li key={n}>
               <b>{n}</b>
-              <span class="pill">{sk.kind}</span>
-              <span class="pill">{sk.key}</span>
-              {!!sk.cooldown && <span class="pill">{sk.cooldown}s</span>}
-              {sk.stance && sk.stance !== "any" && (
-                <span class="pill">{sk.stance} only</span>
-              )}
-              {(effects.get(n) ?? []).map((e) => (
-                <span key={e.where ?? "air"} class="pill">{effectNote(e)}</span>
-              ))}
-              {sk.weight != null && sk.weight !== 1 && (
-                <span class="pill">weight {sk.weight}</span>
-              )}
-              {sk.kind === "summon" && (sk.charges ?? 1) > 1 && (
-                <span class="pill">{sk.charges} charges</span>
-              )}
-              {sk.kind === "summon" && !!sk.duration && (
-                <span class="pill">lasts {sk.duration}s</span>
-              )}
+              <span class="pills">
+                <span class="pill">{sk.kind}</span>
+                <span class="pill">{sk.key}</span>
+                {!!sk.cooldown && <span class="pill">{sk.cooldown}s</span>}
+                {sk.stance && sk.stance !== "any" && (
+                  <span class="pill">{sk.stance} only</span>
+                )}
+                {(effects.get(n) ?? []).map((e) => (
+                  <span key={e.where ?? "air"} class="pill">{effectNote(e)}</span>
+                ))}
+                {sk.weight != null && sk.weight !== 1 && (
+                  <span class="pill">weight {sk.weight}</span>
+                )}
+                {sk.kind === "summon" && (sk.charges ?? 1) > 1 && (
+                  <span class="pill">{sk.charges} charges</span>
+                )}
+                {sk.kind === "summon" && !!sk.duration && (
+                  <span class="pill">lasts {sk.duration}s</span>
+                )}
+              </span>
               {sk.kind === "movement" && (
                 <button class="small" disabled={s.botRunning || s.measure.running || s.ws !== "on"}
                         onClick={() => send(`measure|effect|${n}`)}>

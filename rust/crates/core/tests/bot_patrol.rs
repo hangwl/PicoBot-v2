@@ -238,12 +238,14 @@ fn an_anchor_removed_mid_run_replans_instead_of_crashing() {
 }
 
 #[test]
-fn a_failed_leg_splices_a_reroute_then_three_misses_ban() {
+fn a_failed_leg_splices_a_reroute_then_two_misses_ban() {
     let mut b = weak_up_flash();
     let mut p = Patrol::default();
     p.plan = up_flash_plan();
-    ticks(&mut p, &mut b, 3);
-    assert!(!b.state.bans.contains_key(&1)); // only 2 misses so far
+    ticks(&mut p, &mut b, 2);
+    assert!(!b.state.bans.contains_key(&1)); // only 1 miss so far
+    p.tick(&mut b);
+    assert!(b.state.bans.contains_key(&1)); // the 2nd miss bans
     assert_eq!(
         b.logs
             .iter()
@@ -251,8 +253,6 @@ fn a_failed_leg_splices_a_reroute_then_three_misses_ban() {
             .count(),
         2
     );
-    p.tick(&mut b);
-    assert!(b.state.bans.contains_key(&1)); // the 3rd miss bans
 }
 
 #[test]
@@ -322,7 +322,7 @@ fn a_confirmed_hang_learns_a_rope() {
     let r = ropes(&b);
     assert_eq!(r.len(), 1);
     assert_eq!(r[0][0], 0.3); // stuck x
-    assert_eq!(r[0][3], (40.0f64 / 150.0 * 1e4).round() / 1e4);
+    assert_eq!(r[0][3], (37.0f64 / 150.0 * 1e4).round() / 1e4);
     assert!(b.log_has("Learned a rope"));
 }
 
@@ -353,7 +353,7 @@ fn hangs_on_one_rope_extend_it() {
     let r = ropes(&b);
     assert_eq!(r.len(), 1);
     assert_eq!(r[0][1], 0.5); // bottom grew
-    assert_eq!(r[0][3], (40.0f64 / 150.0 * 1e4).round() / 1e4); // top kept
+    assert_eq!(r[0][3], (37.0f64 / 150.0 * 1e4).round() / 1e4); // top kept
 }
 
 #[test]

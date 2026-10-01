@@ -19,6 +19,7 @@ use picobot_io::hid::HidController;
 
 use crate::feed::Eyes;
 use crate::host::Host;
+use crate::lostdot::LostDotSaver;
 
 /// A stop that wakes sleepers at once.
 #[derive(Default)]
@@ -71,6 +72,7 @@ pub struct HostBody {
     pub analyzer: Arc<MinimapAnalyzer>,
     pub stop: Arc<Stop>,
     tracker: PlayerTracker,
+    lost_dot: LostDotSaver,
     map: Option<(MapKey, Option<Arc<MapEntry>>)>,
     /// Bumped only when the resolved map's name changes.
     map_version: u64,
@@ -102,6 +104,7 @@ impl HostBody {
             analyzer,
             stop,
             tracker: PlayerTracker::default(),
+            lost_dot: LostDotSaver::default(),
             map: None,
             map_version: 0,
             map_name: None,
@@ -219,7 +222,23 @@ impl Body for HostBody {
     }
 
     fn locate_player(&mut self, img: &Image) -> Option<(i32, i32)> {
-        self.analyzer.player_pos(img, &mut self.tracker)
+        let before = self.tracker.last();
+        let pos = self.analyzer.player_pos(img, &mut self.tracker);
+        if pos.is_none() && !self.analyzer.loading() {
+            let patrol = self.state.viz.patrol.as_ref();
+            self.lost_dot.save(
+                img,
+                self.analyzer.colors.player,
+                serde_json::json!({
+                    "map": self.map_name,
+                    "bot_state": self.state.viz.state,
+                    "last_pos": before,
+                    "patrol_target": patrol.and_then(|p| p.target.clone()),
+                    "patrol_move": patrol.and_then(|p| p.move_kind.clone()),
+                }),
+            );
+        }
+        pos
     }
 
     fn hazard_note(&self) -> Option<String> {

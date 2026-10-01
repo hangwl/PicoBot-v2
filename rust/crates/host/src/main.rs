@@ -17,6 +17,7 @@ mod commands;
 mod feed;
 mod frames;
 mod host;
+mod lostdot;
 mod server;
 mod streamer;
 mod telegram;
