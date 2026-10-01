@@ -80,8 +80,7 @@ export function MeasurePage({ s }: { s: AppState }) {
       <p class="hint">Switching away from the game also stops a measurement.</p>
       {plan.includes("up_flash") && <UpFlashSweep s={s} />}
       <WalkTaps s={s} />
-      {s.profiles[s.classActive]?.travel !== "teleport" &&
-        s.profiles[s.classActive]?.travel !== "walk" && <SkillEffects s={s} />}
+      <SkillEffects s={s} />
     </div>
   );
 }
@@ -103,11 +102,12 @@ function sweepNote(r: SweepRow): string {
 }
 
 export function effectNote(e: SkillEffectRow): string {
+  const ground = e.where === "ground";
   const parts: string[] = [];
   if (Math.abs(e.dx) >= 3) {
-    parts.push(`${e.dx < 0 ? "pulls back" : "carries"} ${Math.abs(e.dx)}px`);
+    parts.push(`${ground ? "on the ground " : ""}${e.dx < 0 ? "pulls back" : "carries"} ${Math.abs(e.dx)}px`);
   } else {
-    parts.push("doesn't move the landing");
+    parts.push(ground ? "doesn't move you on the ground" : "doesn't move the landing");
   }
   if (e.hang >= 0.1) parts.push(`holds ${e.hang}s`);
   return parts.join(" · ");
@@ -118,33 +118,59 @@ function SkillEffects({ s }: { s: AppState }) {
   const live = m.running && m.mode === "skill_effects";
   const saved = m.profiles.skill_effects;
   const rows = (live ? m.profile : saved?.rows ?? []) as SkillEffectRow[];
+  const names = Object.entries(s.skills)
+    .filter(([, k]) => k.kind === "movement")
+    .map(([n]) => n)
+    .sort();
+  const idle = !m.running;
+  const can = idle && !s.botRunning && s.ws === "on";
   return (
     <Section title="Skill effects" hint={<>
-        Stand in the middle of a drawn platform at least 140px long. The
-        character flashes a few times plainly, then with each attack skill
-        cast just after the flash triggers, and records how far the skill
-        moves the landing and how long it holds the character up. Attacks
-        that would carry a landing off its platform are then kept out of
-        that hop. Skills cast on the ground only are skipped.
+        Movement skills are attacks that also move you. Stand in the middle
+        of a drawn platform at least 140px long and measure one on its own. For flash-jump classes the character
+        flashes plainly a few times, then with the skill cast just after the
+        flash triggers, to see how far it moves the landing and how long it
+        holds the character up. Skills that can be cast on the ground are
+        then cast standing still, facing one way, to see how far they move
+        the character. Attacks that would carry the character off its
+        platform are kept out of that hop or landing.
     </>}>
-      {rows.length > 0 && (
+      {!names.length && (
+        <p class="hint">
+          No movement skills. Add an attack that moves you with the kind
+          “movement” on the Skills page.
+        </p>
+      )}
+      {names.length > 0 && (
         <ul class="rows">
-          {rows.map((r) => (
-            <li key={r.skill}>
-              <b>{r.skill}</b>
-              <span class="pill">{effectNote(r)}</span>
-            </li>
-          ))}
+          {names.map((n) => {
+            const mine = rows.filter((r) => r.skill === n);
+            return (
+              <li key={n}>
+                <b>{n}</b>
+                {mine.map((r) => (
+                  <span key={r.where ?? "air"} class="pill">{effectNote(r)}</span>
+                ))}
+                {!mine.length && <span class="pill">not measured</span>}
+                {m.running && m.move === n && <span class="pill">measuring…</span>}
+                {idle && (
+                  <button class="small" disabled={!can}
+                          onClick={() => send(`measure|effect|${n}`)}>
+                    Measure
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {!live && saved && (
         <p class="hint">Saved {new Date(saved.at * 1000).toLocaleString()}.</p>
       )}
-      {!m.running && (
+      {idle && names.length > 1 && (
         <div class="actions">
-          <button disabled={s.botRunning || s.ws !== "on"}
-                  onClick={() => send("measure|profile|effects")}>
-            {saved ? "Measure skill effects again" : "Measure skill effects"}
+          <button disabled={!can} onClick={() => send("measure|profile|effects")}>
+            Measure all skills
           </button>
         </div>
       )}

@@ -246,6 +246,8 @@ pub struct BotConfig {
     pub nav_gap_px: f64,
     pub nav_double_gap_px: f64,
     pub rope_penalty: f64,
+    /// Multiplier on walking cost in the planner (above 1 prefers hops).
+    pub walk_cost_factor: f64,
     pub patrol_policy: PatrolPolicy,
     pub patrol_weight_temp: f64,
     pub nav_reach_file: String,
@@ -323,6 +325,7 @@ impl Default for BotConfig {
             nav_gap_px: 30.0,
             nav_double_gap_px: 48.0,
             rope_penalty: 5.0,
+            walk_cost_factor: 1.0,
             patrol_policy: PatrolPolicy::Weighted,
             patrol_weight_temp: 1.0,
             nav_reach_file: "nav_reach.json".into(),
@@ -460,6 +463,7 @@ impl BotConfig {
             ("flash_repress_seconds", &mut cfg.flash_repress_seconds),
             ("combo_repress_seconds", &mut cfg.combo_repress_seconds),
             ("rope_penalty", &mut cfg.rope_penalty),
+            ("walk_cost_factor", &mut cfg.walk_cost_factor),
             ("patrol_weight_temp", &mut cfg.patrol_weight_temp),
         ] {
             if let Some(v) = f64_of(name)? {
@@ -664,6 +668,7 @@ impl BotConfig {
             "nav_gap_px": self.nav_gap_px,
             "nav_double_gap_px": self.nav_double_gap_px,
             "rope_penalty": self.rope_penalty,
+            "walk_cost_factor": self.walk_cost_factor,
             "patrol_policy": self.patrol_policy.as_str(),
             "patrol_weight_temp": self.patrol_weight_temp,
             "nav_reach_file": self.nav_reach_file,

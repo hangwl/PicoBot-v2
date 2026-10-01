@@ -116,6 +116,9 @@ export function StatusList({ s }: { s: AppState }) {
       ? [["Other players", `${s.others} on the minimap`] as [string, string]]
       : []),
     ...(s.botRunning && s.session ? [["Session", sessionLine(s.session)] as [string, string]] : []),
+    ...(s.botRunning && s.session?.moves && Object.keys(s.session.moves).length
+      ? [["Moves", movesLine(s.session.moves)] as [string, string]]
+      : []),
     ["Class", kitLabel(s.classActive, s.profiles[s.classActive])],
     ["Last skill", last ? `${last.msg}${last.t ? ` · ${ago(last.t)}` : ""}` : "–"],
     ...(s.summons && Object.keys(s.summons.charges).length
@@ -150,6 +153,13 @@ function patrolRows(p: PatrolStatus): [string, string][] {
   if (p.next.length) rows.push(["Then", p.next.join(" → ")]);
   rows.push(["Reached", `${p.arrived} anchor${p.arrived === 1 ? "" : "s"} this run`]);
   return rows;
+}
+
+function movesLine(m: NonNullable<SessionStats["moves"]>): string {
+  return Object.entries(m)
+    .sort((a, b) => b[1].ok + b[1].failed - (a[1].ok + a[1].failed))
+    .map(([k, v]) => `${k.replace(/_/g, " ")} ${v.ok}${v.failed ? ` (${v.failed} missed)` : ""}`)
+    .join(" · ");
 }
 
 function sessionLine(x: SessionStats): string {

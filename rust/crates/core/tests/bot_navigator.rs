@@ -239,3 +239,43 @@ fn a_move_that_never_leaves_is_a_miss_after_the_takeoff_wait() {
     );
     assert!(b.slept < 3.0); // bounded wait
 }
+
+fn tap_table(b: &mut Sim) {
+    let rows: Vec<serde_json::Value> = [(30, 1.5), (80, 4.0), (180, 9.0)]
+        .iter()
+        .map(|(ms, dx)| serde_json::json!({"ms": ms, "n": 4, "dx": dx, "sd": 0.3}))
+        .collect();
+    b.state.reach.set_profile("walk_taps", rows);
+}
+
+#[test]
+fn a_hop_takeoff_is_not_tapped_in_even_with_a_tap_table() {
+    let mut b = Sim::new(&[MID, SIDE], (50.0, 84.0));
+    tap_table(&mut b);
+    let leg = Leg {
+        kind: MoveKind::Flash,
+        x0: 60.0,
+        y0: 84.0,
+        x1: 140.0,
+        y1: 84.0,
+        cost: 0.8,
+    };
+    nav(b.graph()).execute_leg(&mut b, &leg);
+    assert!(
+        !b.presses.iter().any(|k| k == "left" || k == "right"),
+        "takeoff alignment tapped: {:?}",
+        b.presses
+    );
+}
+
+#[test]
+fn legs_are_counted_by_kind_in_the_session() {
+    let mut b = Sim::new(&[FLOOR, MID], (60.0, 100.0));
+    assert!(nav(b.graph()).go(&mut b, (80.0, 84.0), 3, 40));
+    assert_eq!(b.state.session.moves_line(), "rope_lift 1 · walk 1");
+    assert!(b
+        .state
+        .session
+        .summary(10.0)
+        .contains("moves: rope_lift 1 · walk 1"));
+}

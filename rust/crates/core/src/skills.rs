@@ -12,6 +12,8 @@ use serde_json::{Map, Value};
 use crate::error::{bad, Result};
 use crate::json::{as_f64, as_i64, as_string};
 
+/// `Movement` is an attack that also moves the character (a rush, a
+/// hold-and-dash): it is cast like any attack, and its effect is measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillKind {
     Attack,
@@ -21,6 +23,11 @@ pub enum SkillKind {
 }
 
 impl SkillKind {
+    /// Cast in attack windows.
+    pub fn is_attack(self) -> bool {
+        matches!(self, SkillKind::Attack | SkillKind::Movement)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             SkillKind::Attack => "attack",
@@ -365,11 +372,11 @@ impl SkillBook {
         );
     }
 
-    fn ready_of(&mut self, kind: SkillKind, now: f64) -> Vec<Skill> {
+    fn ready_of(&mut self, kinds: &[SkillKind], now: f64) -> Vec<Skill> {
         // Two passes: `remaining` needs `&mut self` (it recharges), so it
         // can't run inside an iterator that also borrows `self.skills`.
         let candidates: Vec<usize> = (0..self.skills.len())
-            .filter(|&i| self.skills[i].kind == kind)
+            .filter(|&i| kinds.contains(&self.skills[i].kind))
             .collect();
         let mut ready = Vec::new();
         for i in candidates {
@@ -382,11 +389,11 @@ impl SkillBook {
     }
 
     pub fn ready_attacks(&mut self, now: f64) -> Vec<Skill> {
-        self.ready_of(SkillKind::Attack, now)
+        self.ready_of(&[SkillKind::Attack, SkillKind::Movement], now)
     }
 
     pub fn due_buffs(&mut self, now: f64) -> Vec<Skill> {
-        self.ready_of(SkillKind::Buff, now)
+        self.ready_of(&[SkillKind::Buff], now)
     }
 }
 

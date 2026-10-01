@@ -266,6 +266,12 @@ Bot-controlled movement looks like a player farming, not a macro:
 Registered skills have `key`, `kind`, `cooldown`:
 
 - `attack` — attack loop / travel weaving.
+- `movement` — an attack that also moves the character (a rush, a
+  hold-and-dash). It is cast exactly like an `attack` (same windows, odds,
+  stance, weight, rate count); the difference is that its effect is
+  **measured** (Skill effects) so it can be kept off platform ends. Plain
+  attacks aren't measured. Traversal keys (jump, flash, rope lift,
+  teleport) are config keys, not skills.
 - `buff` — fires when ready, anywhere.
 - `summon` — placed at anchors (below). Allowed at an anchor that lists
   it in `on_arrive`, or at any anchor that lists none.
@@ -274,23 +280,50 @@ Skills also carry a `stance` (`ground`, `air`, or `any` — the default)
 and a `weight` (default 1), stored only when not default. The attack
 scheduler (windows, above) uses them.
 
+### Walking and ropes
+
+Ropes are a last resort: a climb edge costs `rope_penalty` extra seconds
+(default 5), so it is planned only when no hop path is within that much
+cheaper — 30 or more all but bans ropes. `walk_cost_factor` (default 1)
+multiplies every walking leg's cost, so routes and loop orders that walk
+less win. Both are on Setup → Patrol (`patrol|rope_penalty`,
+`patrol|walk_factor`). The Home status list and the stop/heartbeat
+summaries count the legs run by kind (`flash 41 · walk 12 · climb up 3 (1
+missed)`), so you can see what the bot is really doing.
+
 ### Skill effects
 
-Some attacks change a flash: they hold the character up, or shift where
-it lands. `measure|profile|effects` (flash-jump classes, with flight
-recording) flashes plainly a few times, then with each attack skill that
-isn't ground-only cast just after the re-press — where an attack window
-casts it — and saves per skill the landing shift toward the jump (`dx`,
-negative = pulled back), the airtime added (`hang`) and the peak change
-(`rise`) as `profiles.skill_effects`. A skill that needs a long cooldown
-is measured once, one that is on cooldown over 40 s is skipped.
+Some attacks change a flash — they hold the character up or shift where
+it lands — and some move the character on the ground.
+`measure|profile|effects` measures both for the kit's `movement` skills and saves `profiles.skill_effects`
+(rows carry `where`: `air`, or `ground`):
+
+- **In the air** (flash-jump classes, with flight recording): plain
+  flashes a few times, then with each skill that isn't ground-only cast
+  just after the re-press — where an attack window casts it. Per skill:
+  the landing shift toward the jump (`dx`, negative = pulled back), the
+  airtime added (`hang`) and the peak change (`rise`).
+- **On the ground** (every class): each skill that isn't air-only, cast
+  standing still after two short taps to face a direction, nothing held —
+  how a landing window casts it. Per skill: how far it moves the
+  character the way it faces (`dx`).
+
+A skill with a long cooldown is measured once; one on cooldown over 40 s
+is skipped. `measure|effect|<skill>` (a **Measure** button per skill on the
+Skills page and the Measure page) measures one skill and keeps the other
+skills' rows; a whole run saves each skill as it finishes, so a stopped
+run keeps what it finished. The plain-flash baseline is measured once per
+run and shared by its skills.
 
 While a flash is planned onto a platform, an air window only picks
-skills whose measured shift fits the room left: the navigator sets
+skills whose measured air shift fits the room left: the navigator sets
 `air_slack` (px the landing may move back and forward, from the target
 platform's ends with a 6 px margin) for each flash leg, and the weave
-sets it from the weave bounds. Unmeasured skills aren't held back. Ground
-windows ignore it.
+sets it from the weave bounds. A ground window does the same with the
+skills' ground shifts: inside a leg it uses that landing's room, else the
+platform room either side of the character (one extra capture, only when
+a skill with a measured ground shift is in the kit). Unmeasured skills
+aren't held back.
 
 ### Walk taps
 
@@ -300,9 +333,10 @@ carries (`profiles.walk_taps`: `{ms, n, dx, sd}`), then times the walking
 pace and slide (`profiles.walk_speed`). Each direction change spends one
 discarded tap: the first only turns the character. With a tap table,
 `Body::nudge_to` closes in on a target with the longest tap that doesn't
-overshoot, re-reading the dot after each (8 taps at most), and the
-navigator's exact walks finish that way; the planner's walking cost uses
-the measured pace. Without a sweep, nothing changes.
+overshoot, re-reading the dot after each (8 taps at most). Only a **rope
+grab's takeoff** finishes that way — every other leg's takeoff alignment
+stays a plain walk, so the taps don't slow the loop. The planner's walking
+cost uses the measured pace. Without a sweep, nothing changes.
 
 ## Summons (`summons.rs`)
 

@@ -17,6 +17,19 @@ export function PatrolPage({ s }: { s: AppState }) {
         <NumberField value={s.temp} step={0.1} min={0.05}
                      onCommit={(v) => send(`patrol|temp|${v}`)} />
       </Field>
+      <Section title="Walking and ropes"
+               hint="Raise these to make the planner prefer hops. Ropes are a last resort: a rope is used only when no hop path is within the penalty of it in seconds. Walking cost scales every walking leg, so routes that walk less win.">
+        <Field label="Rope penalty (seconds)"
+               hint="5 by default; 30 or more all but bans ropes.">
+          <NumberField value={s.ropePenalty} min={0} max={600} step={5}
+                       onCommit={(v) => send(`patrol|rope_penalty|${v}`)} />
+        </Field>
+        <Field label="Walking cost factor"
+               hint="1 by default; 2 makes walking count twice as costly.">
+          <NumberField value={s.walkFactor} min={0.1} max={10} step={0.5}
+                       onCommit={(v) => send(`patrol|walk_factor|${v}`)} />
+        </Field>
+      </Section>
       {s.anchorStats.length > 0 && (
         <AnchorStatsList
           rows={s.anchorStats}

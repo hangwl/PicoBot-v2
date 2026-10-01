@@ -55,7 +55,9 @@ what was tried and what was learned in `docs/learnings.md` instead.
   navigation. No line auto-detection.
 - **Panel region**: found by `find_frame` (sizes differ per map); dropped
   on arrival unless `config`-pinned; relocated only when a frame is
-  actually found elsewhere.
+  actually found elsewhere. The whole frame (all four edges) is re-checked
+  against the live window every second, and a located frame beats a map's
+  stored layout.
 - **Pin semantics**: `active_map` stands unless a confident title match
   names a different stored map. Blank-name layout writes need `via: ocr`.
 - **Class profiles** gate the move kit: `class_travel` (flash|teleport|

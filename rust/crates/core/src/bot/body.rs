@@ -16,11 +16,12 @@ use rand::{Rng, SeedableRng};
 
 use super::session::Session;
 use crate::config::{BotConfig, ClassTravel};
+use crate::effects::{SkillEffect, MOVES_PX};
 use crate::maps::MapEntry;
 use crate::navgraph::{GraphCache, GraphOptions, NavGraph};
 use crate::reach::{base_reach, ReachModel};
 use crate::rotation::{resolve_coord, Rotation};
-use crate::skills::{Skill, SkillBook, SkillKind, Stance};
+use crate::skills::{Skill, SkillBook, Stance};
 use crate::summons::SummonTracker;
 use crate::timing::{human_between, human_hold, key_gap, release_lag};
 use crate::vision::{platform_row_at, platform_span_at, Image};
@@ -320,6 +321,7 @@ pub trait Body {
             rope_penalty: cfg.rope_penalty,
             allow_flash: cfg.class_travel == ClassTravel::Flash && cfg.flash_jump_enabled,
             allow_double_flash: cfg.double_flash,
+            walk_factor: cfg.walk_cost_factor.max(0.1),
             walk_speed: self
                 .state_ref()
                 .reach
@@ -369,7 +371,7 @@ pub trait Body {
         if self.keys().press(&skill.key, skill.hold) {
             let now = self.now();
             self.state().skills.mark_used(&skill.name, now);
-            if skill.kind == SkillKind::Attack {
+            if skill.kind.is_attack() {
                 self.state().attack_log.push_back(now);
             }
             self.log(&format!("Skill: {}", skill.name));
@@ -382,13 +384,25 @@ pub trait Body {
     /// preferred over spam, and `weight` sets the odds within the pool.
     fn pick_attack(&mut self, w: Window) -> Option<Skill> {
         let now = self.now();
-        let st = self.state();
-        // In the air, a skill measured to shift the landing further than the
-        // move has room for would land it off the platform.
-        let effects = match (w, st.air_slack) {
-            (Window::Air, Some(slack)) => Some((slack, st.reach.skill_effects())),
-            _ => None,
+        // A skill measured to shift the character further than there is
+        // room for would put it off the platform: skip it in this window.
+        let ground = w == Window::Ground;
+        let fx: Vec<SkillEffect> = self
+            .state()
+            .reach
+            .skill_effects()
+            .into_iter()
+            .filter(|e| e.on_ground == ground && e.dx.abs() >= MOVES_PX)
+            .collect();
+        let slack = if fx.is_empty() {
+            None
+        } else if ground {
+            self.ground_slack()
+        } else {
+            self.state().air_slack
         };
+        let effects = slack.map(|s| (s, fx));
+        let st = self.state();
         let ready: Vec<Skill> = st
             .skills
             .ready_attacks(now)
@@ -420,6 +434,21 @@ pub trait Body {
             }
         }
         pool.last().map(|s| (*s).clone())
+    }
+
+    /// Room to be shifted on the ground: the current leg's landing room
+    /// when there is one, else (back and forward) the platform room around
+    /// the character, less a margin.
+    fn ground_slack(&mut self) -> Option<(f64, f64)> {
+        const MARGIN: f64 = 6.0;
+        if let Some(s) = self.state().air_slack {
+            return Some(s);
+        }
+        let pos = self.pos()?;
+        let g = self.graph()?;
+        let p = g.platforms[g.locate(pos.0, pos.1)?];
+        let room = ((pos.0 - p.x0).min(p.x1 - pos.0) - MARGIN).max(0.0);
+        Some((room, room))
     }
 
     /// Attacks cast in the last minute.
@@ -1141,9 +1170,4 @@ fn vert_stuck<B: Body + ?Sized>(body: &mut B, dx: f64, start_band: f64, verb: &s
     }
     body.log(&format!("Vertically blocked ({verb}) — aborting leg"));
     false
-}
-
-/// Whether a skill kind fires on its own (not a traversal keybind).
-pub fn auto_fires(kind: SkillKind) -> bool {
-    kind != SkillKind::Movement
 }

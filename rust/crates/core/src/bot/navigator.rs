@@ -79,7 +79,7 @@ impl Navigator {
 
     /// Walk to `x` on the current platform (a planned walk leg).
     pub fn execute_walk<B: Body + ?Sized>(&self, body: &mut B, x: f64) -> bool {
-        self.walk_to(body, x, false, None)
+        self.walk_to(body, x, false, None, false)
     }
 
     fn arrived<B: Body + ?Sized>(
@@ -211,6 +211,11 @@ impl Navigator {
         body.state().air_slack = self.landing_slack(leg);
         let status = self.leg_inner(body, leg);
         body.state().air_slack = None;
+        match status {
+            LegStatus::Ok => body.state().session.record_move(leg.kind.as_str(), true),
+            LegStatus::Failed => body.state().session.record_move(leg.kind.as_str(), false),
+            LegStatus::Cooldown => {}
+        }
         status
     }
 
@@ -219,7 +224,7 @@ impl Navigator {
             return LegStatus::Failed;
         }
         if leg.kind == MoveKind::Walk {
-            return if self.walk_to(body, leg.x1, false, None) {
+            return if self.walk_to(body, leg.x1, false, None, false) {
                 LegStatus::Ok
             } else {
                 LegStatus::Failed
@@ -230,7 +235,9 @@ impl Navigator {
         // ping-pong over the takeoff.
         let rope = leg.kind == MoveKind::RopeLift;
         let band = body.config().walk_band_px;
-        if !self.walk_to(body, leg.x0, !rope, rope.then_some(band)) {
+        // Only a rope grab needs the takeoff to the pixel.
+        let precise = matches!(leg.kind, MoveKind::ClimbUp | MoveKind::ClimbDown);
+        if !self.walk_to(body, leg.x0, !rope, rope.then_some(band), precise) {
             return LegStatus::Failed;
         }
         if rope && body.rope_lift_remaining() > 0.0 {
@@ -326,6 +333,7 @@ impl Navigator {
         x: f64,
         exact: bool,
         tol: Option<f64>,
+        nudge: bool,
     ) -> bool {
         let Some(pos) = body.pos() else { return false };
         let tol = tol.unwrap_or(if exact {
@@ -336,7 +344,7 @@ impl Navigator {
         if (pos.0 - x).abs() <= tol {
             return true;
         }
-        if exact && body.state_ref().reach.tap_table().is_some() {
+        if exact && nudge && body.state_ref().reach.tap_table().is_some() {
             // Hold-and-release overshoots a tight target: close in, then tap.
             return body.move_to_point(
                 x.round(),

@@ -6,9 +6,10 @@ import { effectNote } from "./measure";
 
 export function SkillsPage({ s }: { s: AppState }) {
   const names = Object.keys(s.skills).sort();
-  const effects = new Map(
-    ((s.measure.profiles.skill_effects?.rows ?? []) as SkillEffectRow[]).map((e) => [e.skill, e]),
-  );
+  const effects = new Map<string, SkillEffectRow[]>();
+  for (const e of (s.measure.profiles.skill_effects?.rows ?? []) as SkillEffectRow[]) {
+    effects.set(e.skill, [...(effects.get(e.skill) ?? []), e]);
+  }
   return (
     <div class="form">
       <p class="muted">
@@ -35,9 +36,9 @@ export function SkillsPage({ s }: { s: AppState }) {
               {sk.stance && sk.stance !== "any" && (
                 <span class="pill">{sk.stance} only</span>
               )}
-              {effects.has(n) && (
-                <span class="pill">{effectNote(effects.get(n)!)}</span>
-              )}
+              {(effects.get(n) ?? []).map((e) => (
+                <span key={e.where ?? "air"} class="pill">{effectNote(e)}</span>
+              ))}
               {sk.weight != null && sk.weight !== 1 && (
                 <span class="pill">weight {sk.weight}</span>
               )}
@@ -46,6 +47,12 @@ export function SkillsPage({ s }: { s: AppState }) {
               )}
               {sk.kind === "summon" && !!sk.duration && (
                 <span class="pill">lasts {sk.duration}s</span>
+              )}
+              {sk.kind === "movement" && (
+                <button class="small" disabled={s.botRunning || s.measure.running || s.ws !== "on"}
+                        onClick={() => send(`measure|effect|${n}`)}>
+                  Measure
+                </button>
               )}
               <button class="icon" aria-label={`Remove ${n}`}
                       onClick={() => {
@@ -151,6 +158,13 @@ function SkillAdd() {
           </Field>
         )}
       </div>
+      {kind === "movement" && (
+        <p class="hint">
+          An attack that also moves you — a rush, a dash. It is cast like any
+          attack, and Measure (in the list) records how far it moves you so it
+          is kept off platform ends.
+        </p>
+      )}
       {summon && (
         <p class="hint">
           Placed at anchors while standing on a platform — one summon per

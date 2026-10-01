@@ -35,6 +35,7 @@ and follows the same view.
 | `class|add|<name>\|{spec}` | create a profile (travel, air_attacks, double_flash, teleport_key, teleport_cooldown, skills) and apply it |
 | `class|caps|{json}` | edit the active profile's abilities (`double_flash`, `air_attacks`: bool); re-sends `class` and `config` |
 | `patrol|policy|<weighted\|greedy>` | set the loop-ordering policy |
+| `patrol|rope_penalty|<s>` / `patrol|walk_factor|<x>` | planner costs: seconds added to every rope climb (0–600) and the multiplier on walking legs (0.1–10); saved to `config.json`, then re-sends `config` |
 | `patrol|temp|<v>` | set the weighted-roulette temperature |
 | `skills|set\|{json}` (`name, key, kind, cooldown`, attacks also `stance` (ground/air/any) and `weight`, summons also `charges, duration`) / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
 | `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`: bool), `allowed_other_players` (≥ 0), `other_player_min_px` (≥ 1) and `heartbeat_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
@@ -46,7 +47,8 @@ and follows the same view.
 | `nav|show|on\|off` / `nav|preview|x,y` | graph overlay + route preview (minimap px) |
 | `measure|start` / `measure|stop` / `measure|status` | move measurement (the moves the active class can use); `status` re-sends the `measure` event |
 | `measure|start|<move>` | measure one move of the class's plan (e.g. `rope_lift`); others keep their reach |
-| `measure|profile|effects` | skill-effect sweep (flash classes): how far each air-capable attack shifts a flash's landing and how long it holds; saves `profiles.skill_effects` in the reach file |
+| `measure|profile|effects` | skill-effect sweep: how far each attack shifts a flash's landing and how long it holds (flash classes), and how far each ground-castable attack moves a standing character; saves `profiles.skill_effects` (rows tagged `where: air\|ground`) in the reach file |
+| `measure|effect|<skill>` | the skill-effect sweep for one skill (keeps the other skills' rows); each skill's rows are saved as soon as it is done |
 | `measure|profile|walk` | walk-tap sweep then walking pace (stopped with `measure|stop`); saves `profiles.walk_taps` and `profiles.walk_speed` in the reach file |
 | `measure|profile|up_flash` | up-flash timing sweep (stopped with `measure|stop`); saves `profiles.up_flash` in the reach file |
 | `host|serial\|<port\|auto>` / `host|window|<title>` | connection |
@@ -99,7 +101,7 @@ charges: {skill: [have, max]}}`) and `patrol` (`{target, leg, legs, move,
 misses, next: [anchor], arrived, halted}` — the loop's current target,
 the leg being run, misses toward it, the next anchors, anchors reached
 this run, and whether it's halted with no plan) in every view,
-`player`, `others` (other-player markers on the minimap), `session` (the run's `{up, visits, misses, skips, pauses, paused}` in seconds and counts; only while the bot runs), and map identity (`map`, `map_via`,
+`player`, `others` (other-player markers on the minimap), `session` (the run's `{up, visits, misses, skips, pauses, paused, apm, moves: {kind: {ok, failed}}}` in seconds and counts; only while the bot runs), and map identity (`map`, `map_via`,
 `map_conf`, `map_title`, `layout`, `no_rotation`). Overlays (platforms,
 ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
 view shifted by `ox`/`oy`, in the Window view shifted to where the

@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use picobot_core::bot::{Body, BotState, FlightRecorder, Keys, Machine, Mode, MoveMeasurer};
 use picobot_core::config::BotConfig;
 use picobot_core::maps::{MapEntry, PlayerRule};
-use picobot_core::minimap::{MinimapAnalyzer, PlayerTracker};
+use picobot_core::minimap::{MinimapAnalyzer, PlayerTracker, RegionSource};
 use picobot_core::timing::{monotonic, new_session};
 use picobot_core::vision::Image;
 use picobot_io::hid::HidController;
@@ -135,7 +135,13 @@ impl HostBody {
             return;
         }
         let region = (x as i32, y as i32, w as i32, h as i32);
-        if self.analyzer.region() != Some(region) {
+        // A frame found on screen beats a remembered one: the stored layout
+        // only fills in when nothing is located.
+        let unlocated = matches!(
+            self.analyzer.region_source(),
+            None | Some(RegionSource::Stored)
+        );
+        if unlocated && self.analyzer.region() != Some(region) {
             self.analyzer.set_region(region, false);
             self.host
                 .bus

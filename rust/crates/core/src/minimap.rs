@@ -144,6 +144,9 @@ struct State {
     source: Option<RegionSource>,
     transition: TransitionDetector,
     edge_lost_since: Option<f64>,
+    /// A live frame that differs from the region, and how many checks in a
+    /// row have seen it.
+    pending: Option<(Region, u32)>,
     /// (feet, bbox) of the last detected dot, for the overlay.
     last_box: Option<((i32, i32), BoxPx)>,
 }
@@ -181,6 +184,7 @@ impl MinimapAnalyzer {
                 source: region.map(|_| RegionSource::Config),
                 transition: TransitionDetector::default(),
                 edge_lost_since: None,
+                pending: None,
                 last_box: None,
             }),
             epoch: AtomicU64::new(0),
@@ -275,6 +279,49 @@ impl MinimapAnalyzer {
             .unwrap()
             .edge_lost_since
             .is_some_and(|t| now - t >= self.edge_lost_s)
+    }
+
+    /// Check the whole frame against the live window: every edge, not just
+    /// the top. A different frame seen on `CONFIRM_CHECKS` checks in a row
+    /// replaces the region (source `Auto`); returns `(old, new)` then.
+    /// A pinned or hand-drawn region, no region, or no frame found leaves
+    /// things alone.
+    pub fn verify_region(&self, window: &Image) -> Option<(Region, Region)> {
+        const CONFIRM_CHECKS: u32 = 2;
+        let near = |a: Region, b: Region| {
+            (a.0 - b.0).abs() <= 1
+                && (a.1 - b.1).abs() <= 1
+                && (a.2 - b.2).abs() <= 1
+                && (a.3 - b.3).abs() <= 1
+        };
+        let (region, source) = {
+            let s = self.state.lock().unwrap();
+            (s.region?, s.source?)
+        };
+        if matches!(source, RegionSource::Config | RegionSource::Manual) {
+            return None;
+        }
+        let found = find_frame(window, self.colors.border, self.border_tolerance);
+        let mut s = self.state.lock().unwrap();
+        let Some(found) = found.filter(|f| !near(*f, region)) else {
+            s.pending = None;
+            return None;
+        };
+        let seen = match s.pending {
+            Some((p, n)) if near(p, found) => n + 1,
+            _ => 1,
+        };
+        if seen < CONFIRM_CHECKS {
+            s.pending = Some((found, seen));
+            return None;
+        }
+        s.pending = None;
+        s.region = Some(found);
+        s.source = Some(RegionSource::Auto);
+        s.edge_lost_since = None;
+        drop(s);
+        self.bump();
+        Some((region, found))
     }
 
     /// Re-detect after `edge_lost`; switches only when a frame is actually

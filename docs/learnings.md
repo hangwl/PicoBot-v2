@@ -309,3 +309,11 @@ A whole-codebase pass before the Rust port found, among others:
   title scores 0.6 against it. Now an accepted read that fits neither the
   recorded title nor the alias (0.7) contradicts the pin, and an arrival
   holds the bot until the read is settled.
+- **A region with the right corner and the wrong size** (2026-10-01): the
+  panel's size differs per map (stored regions span 170–236 px wide and
+  61–105 tall, all at the same corner), but tracking only watched the frame's
+  top edge, which a wrong-size region still satisfies — and a title-verified
+  arrival installed the stored region over what had just been located. The
+  overlay then sat shifted until the next map change. Now the whole frame
+  is verified against the live window (two agreeing checks, so one stray
+  rectangle can't flip it) and a located frame wins over a stored one.
