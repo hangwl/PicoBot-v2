@@ -24,6 +24,10 @@ struct KeyBody {
     held: Option<Dir>,
     ys: VecDeque<f64>,
     clock: f64,
+    /// The dot can't be read.
+    blind: bool,
+    /// Drawn platforms (px).
+    segs: Vec<[f64; 4]>,
 }
 
 impl KeyBody {
@@ -47,6 +51,8 @@ impl KeyBody {
             held: None,
             ys: VecDeque::new(),
             clock: 0.0,
+            blind: false,
+            segs: Vec::new(),
         }
     }
 
@@ -109,6 +115,9 @@ impl Body for KeyBody {
         Some(Image::new(1, 1))
     }
     fn locate_player(&mut self, _img: &Image) -> Option<(i32, i32)> {
+        if self.blind {
+            return None;
+        }
         if let Some(y) = self.ys.pop_front() {
             self.pos.1 = y;
         }
@@ -141,6 +150,9 @@ impl Body for KeyBody {
     }
     fn region_wh(&self) -> Option<(f64, f64)> {
         Some((200.0, 150.0))
+    }
+    fn segments_px(&mut self) -> Vec<[f64; 4]> {
+        self.segs.clone()
     }
 }
 
@@ -216,6 +228,47 @@ fn walking_holds_a_direction_and_lets_go_at_the_target() {
     let first_down = b.events.iter().find(|e| e.starts_with("down:"));
     assert_eq!(first_down.map(String::as_str), Some("down:right"));
     assert!(b.events.contains(&"up:right".to_owned()));
+}
+
+#[test]
+fn a_walk_gives_up_when_the_dot_never_shows() {
+    let mut b = KeyBody::new();
+    b.blind = true;
+    assert!(!b.move_to_point(80.0, 100.0, Some(4.0), Travel::Walk, true));
+    assert!(b.clock < 10.0);
+    assert!(b.state.viz.player.is_none());
+}
+
+#[test]
+fn a_walk_gives_up_on_a_target_it_never_reaches() {
+    let mut b = KeyBody::new();
+    b.cfg.flash_jump_enabled = false;
+    b.cfg.nav_stuck_limit = i64::MAX; // only the deadline can end it
+                                      // Walking 2px a tick toward a target the arrow keeps overshooting.
+    assert!(!b.move_to_point(80.5, 100.0, Some(0.2), Travel::Walk, true));
+    assert!(b.clock < 30.0);
+}
+
+#[test]
+fn near_the_platform_end_the_last_stretch_is_walked_not_jumped() {
+    let mut b = KeyBody::new();
+    b.segs = vec![[0.0, 100.0, 59.0, 100.0]]; // 9px left: under a 10px jump
+    assert!(b.move_to_point(59.0, 100.0, Some(1.0), Travel::Mixed, true));
+    assert!(!b.presses().contains(&"space"));
+    assert!(b.events.contains(&"down:right".to_owned()));
+}
+
+#[test]
+fn a_cooling_teleport_weave_falls_back_to_walking() {
+    let mut b = KeyBody::new();
+    b.cfg.class_travel = ClassTravel::Teleport;
+    b.cfg.teleport_key = Some("w".into());
+    b.cfg.teleport_cooldown = 1.0;
+    b.cfg.flash_jump_enabled = false;
+    b.weave_move(Dir::Right);
+    assert!(b.clock < 1.0); // the second weave comes while it cools
+    b.weave_move(Dir::Right);
+    assert_eq!(b.presses().iter().filter(|k| **k == "w").count(), 1);
 }
 
 #[test]

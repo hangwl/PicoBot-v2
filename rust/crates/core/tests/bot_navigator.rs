@@ -240,6 +240,62 @@ fn a_move_that_never_leaves_is_a_miss_after_the_takeoff_wait() {
     assert!(b.slept < 3.0); // bounded wait
 }
 
+#[test]
+fn a_move_that_never_left_the_ground_teaches_no_reach() {
+    let mut b = no_rope(Sim::new(&[FLOOR, MID], (80.0, 100.0)));
+    b.fizzle = 2;
+    let before = b.state.reach.get(Move::UpFlash);
+    let n = nav(b.graph());
+    for _ in 0..2 {
+        assert_eq!(n.step(&mut b, (80.0, 84.0)), StepStatus::Failed);
+    }
+    assert_eq!(b.state.reach.get(Move::UpFlash), before);
+    assert!(b.state.reach.ceiling_of(Move::UpFlash).is_none());
+}
+
+#[test]
+fn a_cooling_teleport_is_reported_before_walking_to_its_takeoff() {
+    let mut b = Sim::new(&[FLOOR], (20.0, 100.0));
+    b.teleport_cd = 0.5;
+    let leg = Leg {
+        kind: MoveKind::Teleport,
+        x0: 120.0,
+        y0: 100.0,
+        x1: 145.0,
+        y1: 100.0,
+        cost: 0.5,
+    };
+    assert_eq!(
+        nav(b.graph()).execute_leg(&mut b, &leg),
+        picobot_core::bot::LegStatus::Cooldown
+    );
+    assert_eq!(b.pos, (20.0, 100.0));
+}
+
+#[test]
+fn an_interrupted_leg_is_aborted_not_missed() {
+    let leg = Leg {
+        kind: MoveKind::UpFlash,
+        x0: 80.0,
+        y0: 100.0,
+        x1: 80.0,
+        y1: 84.0,
+        cost: 1.0,
+    };
+    let mut b = no_rope(Sim::new(&[FLOOR, MID], (80.0, 100.0)));
+    b.focus = false;
+    let n = nav(b.graph());
+    assert_eq!(
+        n.execute_leg(&mut b, &leg),
+        picobot_core::bot::LegStatus::Aborted
+    );
+    b.focus = true;
+    b.hazard = Some("rune".into());
+    assert_eq!(n.step(&mut b, (80.0, 84.0)), StepStatus::Aborted);
+    assert!(b.moves.is_empty());
+    assert!(!b.state.session.summary(1.0).contains("moves"));
+}
+
 fn tap_table(b: &mut Sim) {
     let rows: Vec<serde_json::Value> = [(30, 1.5), (80, 4.0), (180, 9.0)]
         .iter()

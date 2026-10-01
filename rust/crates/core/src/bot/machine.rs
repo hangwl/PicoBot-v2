@@ -41,7 +41,7 @@ enum Next {
 pub struct Machine {
     pub state: State,
     /// The state PAUSE interrupted.
-    stack: Vec<State>,
+    paused_from: Option<State>,
     travel_done: bool,
     pub patrol: Patrol,
     watchdog: Watchdog,
@@ -51,7 +51,7 @@ impl Default for Machine {
     fn default() -> Self {
         Machine {
             state: State::Grind,
-            stack: Vec::new(),
+            paused_from: None,
             travel_done: false,
             patrol: Patrol::default(),
             watchdog: Watchdog::default(),
@@ -153,13 +153,13 @@ impl Machine {
         }
         let next = match self.check(body) {
             Next::Stay => return false,
-            Next::Resume => match self.stack.pop() {
+            Next::Resume => match self.paused_from.take() {
                 Some(s) => s,
                 None => return false,
             },
             Next::Go(s) => {
                 if s == State::Pause {
-                    self.stack.push(self.state);
+                    self.paused_from = Some(self.state);
                 }
                 s
             }

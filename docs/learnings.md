@@ -197,6 +197,45 @@ A whole-codebase pass before the Rust port found, among others:
   the patrol replans when they change. A running bot also read a stale
   copy of the map's anchors after any layout save.
 
+## Bot-logic review (2026-10-01)
+
+- **Re-routes started from the takeoff, not the landing**: after a miss
+  the patrol spliced a route from the position read *before* the leg, so
+  the next legs ran from a platform the player had left — usually a
+  second miss and a ban. The re-route now waits for the next tick and
+  reads the player afresh.
+- **Moves that never happened taught reach**: a key eaten by focus loss
+  or a stun reads as "landed where it started", which scored as falling
+  short — one capped exploration, two shrank the envelope. Reach now
+  learns only from moves seen leaving the takeoff spot, and interrupted
+  legs are aborted rather than counted as misses.
+- **Stale anchor indices**: arrival skills, TRAVEL targets and bans are
+  indices into the anchor list. A dashboard delete right after an arrival
+  panicked the bot thread, and bans and the roam origin carried over to
+  the next map. Indices are checked on use and cleared on map change.
+- **Unbounded walks**: `move_to_point` had no deadline — a lost dot or a
+  target the arrow kept overshooting held the tick forever, and the
+  watchdog (which runs between ticks) never fired. It now has a
+  distance-based budget.
+- **Cooldowns checked late**: a cooling rope lift or teleport was only
+  noticed after walking to its takeoff, and the patrol's re-route didn't
+  exclude a cooling teleport, so it re-picked it every tick. Planning
+  itself still ignores cooldowns; the re-route covers them.
+- **Pauses banned TRAVEL targets**: a hazard or focus loss mid-TRAVEL
+  held the target out of routes for 45s as if it were unreachable.
+- **Clamped timing had spikes**: `human_between` clamped log-normal draws,
+  so tight windows put up to ~25% of delays on the exact bound — the
+  kind of repeated value the timing module exists to avoid. Draws are
+  now redrawn inside the window.
+- **Teleport weaves ignored the cooldown**: each weave pressed teleport
+  and restarted the bot's cooldown clock, so a teleport leg planned
+  after a weave always read as cooling. A cooling teleport now weaves on
+  foot.
+- **The approach jump ignored the platform's end**: the short plain jump
+  that closes the last hop only checked the distance to the target, so
+  near an edge it could carry the character off. It now needs a jump's
+  worth of platform ahead, else it walks.
+
 ## Movement and detection
 
 - **Dot lost on ropes** (2026-09-30): markers were found with a 3x3

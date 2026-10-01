@@ -73,6 +73,9 @@ pub struct Sim {
     pub teleport_cd: f64,
     /// The first N airborne moves go nowhere.
     pub fizzle: u32,
+    /// The mid-air point of the last airborne move, read once before the
+    /// landing (a real dot is seen in flight).
+    pub apex: Option<(f64, f64)>,
     pub fail_rope: bool,
     pub opts: GraphOptions,
     // Patrol surface
@@ -144,6 +147,7 @@ impl Sim {
             rope_cd: 0.0,
             teleport_cd: 0.0,
             fizzle: 0,
+            apex: None,
             fail_rope: false,
             opts: GraphOptions::default(),
             entry: None,
@@ -234,6 +238,9 @@ impl Sim {
             return;
         }
         let (x, y) = (self.pos.0 + dx, self.pos.1);
+        if rise > 0.0 {
+            self.apex = Some((self.pos.0 + dx / 2.0, y - rise));
+        }
         let g = self.physics();
         let best = g
             .platforms
@@ -364,6 +371,9 @@ impl Body for Sim {
     fn locate_player(&mut self, _img: &Image) -> Option<(i32, i32)> {
         if self.hidden {
             return None;
+        }
+        if let (true, Some(a)) = (self.script.is_empty(), self.apex.take()) {
+            return Some((a.0.round() as i32, a.1.round() as i32));
         }
         let p = if self.script.len() > 1 {
             self.script.pop_front().unwrap()

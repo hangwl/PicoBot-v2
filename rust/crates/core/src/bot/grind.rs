@@ -3,8 +3,8 @@
 //! patrol, and recorded legs.
 
 use super::body::{Body, Dir, Travel};
-use super::navigator::Navigator;
-use crate::rotation::{ClimbDir, Rotation, Step, TravelStyle};
+use super::navigator::{interrupted, Navigator};
+use crate::rotation::{Anchor, ClimbDir, Rotation, Step, TravelStyle};
 use crate::skills::{Skill, SkillBook, SkillKind};
 use crate::vision::platform_span_at;
 
@@ -28,6 +28,9 @@ pub fn sync_map<B: Body + ?Sized>(body: &mut B) -> bool {
     st.skills = book.carry_from(&st.skills);
     st.anchor_idx = 0;
     st.travel_target = None;
+    st.arrive_pending.clear();
+    st.bans.clear();
+    st.roam_origin = None;
     st.weave_dir = None;
     st.weave_bounds = None;
     st.route.clear();
@@ -50,10 +53,16 @@ pub fn blind_wait<B: Body + ?Sized>(body: &mut B) {
     body.sleep(0.15);
 }
 
+/// Turn to the anchor's set facing, if it has one.
+pub fn face_anchor<B: Body + ?Sized>(body: &mut B, anchor: &Anchor) {
+    if let Some(face) = anchor.face {
+        body.keys().press(Dir::from(face).key(), None);
+    }
+}
+
 /// Skills allowed at an anchor: its `on_arrive` list, or every summon.
-fn anchor_skills<B: Body + ?Sized>(body: &mut B, rot: &Rotation, idx: usize) -> Vec<Skill> {
+fn anchor_skills<B: Body + ?Sized>(body: &mut B, anchor: &Anchor) -> Vec<Skill> {
     let st = body.state();
-    let anchor = &rot.anchors[idx];
     let names: Vec<String> = if anchor.on_arrive.is_empty() {
         st.skills
             .skills()
@@ -135,8 +144,11 @@ fn on_drawn_line<B: Body + ?Sized>(body: &mut B, pos: (f64, f64)) -> bool {
 /// charge, and the character stands on a platform. The fullest skill
 /// (most charges banked) goes first.
 pub fn cast_at_anchor<B: Body + ?Sized>(body: &mut B, rot: &Rotation, idx: usize) {
-    let allowed = anchor_skills(body, rot, idx);
-    let name = rot.anchors[idx].name.clone();
+    let Some(anchor) = rot.anchors.get(idx) else {
+        return; // removed since the arrival
+    };
+    let allowed = anchor_skills(body, anchor);
+    let name = anchor.name.clone();
     for s in allowed.iter().filter(|s| s.kind != SkillKind::Summon) {
         let now = body.now();
         if body.state().skills.ready(&s.name, now) {
@@ -424,6 +436,10 @@ pub fn legacy_patrol_tick<B: Body + ?Sized>(body: &mut B) {
             }
         }
         let idx = body.state().route[0];
+        if idx >= rot.anchors.len() {
+            body.state().route.clear(); // anchors removed: replan
+            continue;
+        }
         let t = (body.rx(rot.anchors[idx].x), body.ry(rot.anchors[idx].y));
         if (t.1 - pos.1).abs() > band || other_platform(body, pos, t) {
             // Another level: TRAVEL owns that transition.
@@ -442,14 +458,7 @@ pub fn legacy_patrol_tick<B: Body + ?Sized>(body: &mut B) {
         st.anchor_idx = idx;
         st.checkpoint = None;
         st.arrive_pending = vec![idx];
-        if let Some(face) = rot.anchors[idx].face {
-            let key = if face == crate::rotation::Face::Left {
-                "left"
-            } else {
-                "right"
-            };
-            body.keys().press(key, None);
-        }
+        face_anchor(body, &rot.anchors[idx]);
         let name = rot.anchors[idx].name.clone();
         body.log(&format!("Checkpoint: {name}"));
         body.stat("visit", &name, "");
@@ -548,14 +557,7 @@ pub fn begin_grind<B: Body + ?Sized>(body: &mut B) {
     match rot.anchors.get(idx) {
         Some(a) => {
             body.state().arrive_pending = vec![idx];
-            if let Some(face) = a.face {
-                let key = if face == crate::rotation::Face::Left {
-                    "left"
-                } else {
-                    "right"
-                };
-                body.keys().press(key, None);
-            }
+            face_anchor(body, a);
         }
         None => body.state().arrive_pending.clear(),
     }
@@ -571,9 +573,10 @@ pub fn begin_travel<B: Body + ?Sized>(body: &mut B) -> bool {
     if body.state().anchor_idx >= rot.anchors.len() {
         body.state().anchor_idx = 0;
     }
+    let valid = |i: &usize| *i < rot.anchors.len();
     let target = match (
-        body.state().travel_target,
-        body.state().route.first().copied(),
+        body.state().travel_target.filter(valid),
+        body.state().route.first().copied().filter(valid),
     ) {
         (Some(t), _) => t,
         (None, Some(r)) => r,
@@ -597,10 +600,14 @@ pub fn begin_travel<B: Body + ?Sized>(body: &mut B) -> bool {
 /// A failed target is held out of routes for 45s.
 pub fn run_travel<B: Body + ?Sized>(body: &mut B) -> bool {
     let rot = body.rotation();
-    let Some(target) = body.state().travel_target else {
+    let Some((target, a)) = body
+        .state()
+        .travel_target
+        .and_then(|t| Some((t, rot.anchors.get(t)?)))
+    else {
+        body.state().travel_target = None;
         return false;
     };
-    let a = &rot.anchors[target];
     let goal = (body.rx(a.x), body.ry(a.y));
     let from = body.state().anchor_idx;
     let graph = body.graph();
@@ -616,6 +623,11 @@ pub fn run_travel<B: Body + ?Sized>(body: &mut B) -> bool {
             run_leg(body, &steps)
         }
     };
+    if !ok && interrupted(body) {
+        // Not the target's fault: keep it armed for after the pause.
+        body.log("Leg interrupted — resuming it later");
+        return false;
+    }
     let now = body.now();
     let st = body.state();
     st.travel_target = None;

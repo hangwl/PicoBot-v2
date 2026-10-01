@@ -11,8 +11,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::body::{Body, Dir, PatrolStatus};
-use super::grind::{blind_wait, legacy_patrol_tick, run_leg};
-use super::navigator::{legs_viz, LegStatus, Navigator};
+use super::grind::{blind_wait, face_anchor, legacy_patrol_tick, run_leg};
+use super::navigator::{interrupted, legs_viz, LegStatus, Navigator};
 use crate::navgraph::{MoveKind, NavGraph, ROPE_BOTTOM_GAP, ROPE_TOP_OVERSHOOT};
 use crate::planner::{plan_loop, LoopRequest, PlanSegment};
 use crate::timing::human_reaction;
@@ -30,12 +30,14 @@ pub struct Patrol {
     replan_at: f64,
     /// Since when, and where, the player has held still off the graph.
     pub stuck: Option<(f64, (f64, f64))>,
+    /// The current segment must be re-routed from the player's position.
+    resplice: bool,
 }
 
 enum Outcome {
-    Ok,
     Failed,
     Cooldown,
+    Aborted,
 }
 
 impl Patrol {
@@ -112,6 +114,8 @@ impl Patrol {
             let st = body.state();
             st.bans.clear();
             st.anchor_idx = 0;
+            st.arrive_pending.clear();
+            st.travel_target = None;
             body.log("Patrol: anchors changed — replanning");
         }
         let Some(pos) = body.pos() else {
@@ -127,12 +131,16 @@ impl Patrol {
             self.off_graph(body, &graph, pos);
             return;
         }
+        self.stuck = None;
         if self
             .nav
             .as_ref()
             .is_none_or(|n| !Arc::ptr_eq(&n.graph, &graph))
         {
             self.nav = Some(Navigator::new(graph.clone(), &mut body.state().rng));
+        }
+        if self.resplice {
+            self.reroute(body, &graph, pos);
         }
         if self.seg >= self.plan.len() {
             let now = body.now();
@@ -171,40 +179,35 @@ impl Patrol {
                     }
                     return;
                 }
-                Outcome::Failed
+                if interrupted(body) {
+                    Outcome::Aborted
+                } else {
+                    Outcome::Failed
+                }
             }
             Some(legs) => {
                 let leg = legs[self.leg_i];
                 let nav = self.nav.as_ref().expect("navigator set above");
-                let out = if leg.kind == MoveKind::Walk {
-                    if nav.execute_walk(body, leg.x1) {
-                        Outcome::Ok
-                    } else {
-                        Outcome::Failed
+                match nav.execute_leg(body, &leg) {
+                    LegStatus::Ok => {
+                        self.leg_i += 1;
+                        self.publish(body);
+                        return;
                     }
-                } else {
-                    match nav.execute_leg(body, &leg) {
-                        LegStatus::Ok => Outcome::Ok,
-                        LegStatus::Failed => Outcome::Failed,
-                        LegStatus::Cooldown => Outcome::Cooldown,
-                    }
-                };
-                if matches!(out, Outcome::Ok) {
-                    self.leg_i += 1;
-                    self.publish(body);
-                    return;
+                    LegStatus::Failed => Outcome::Failed,
+                    LegStatus::Cooldown => Outcome::Cooldown,
+                    LegStatus::Aborted => Outcome::Aborted,
                 }
-                out
             }
         };
+        // The leg moved the player: re-route from wherever it ended, on the
+        // next tick (which first waits out any time off the platforms).
         match outcome {
-            Outcome::Ok => {}
+            Outcome::Aborted => self.resplice = true,
             Outcome::Cooldown => {
-                // Rope lift started cooling: re-route without it (up flash
-                // instead) — never wait, never count a failure.
-                if !self.splice(body, &graph, pos, idx) {
-                    self.ban(body, &graph, pos, idx, "no route");
-                }
+                // Rope lift or teleport started cooling: re-route without
+                // it — never wait, never count a failure.
+                self.resplice = true;
             }
             Outcome::Failed => {
                 self.fails += 1;
@@ -221,10 +224,9 @@ impl Patrol {
                 ));
                 body.sleep(human_reaction()); // noticing takes a moment
                 if self.fails >= 2 {
-                    self.ban(body, &graph, pos, idx, "unreachable after retries");
-                } else {
-                    self.splice(body, &graph, pos, idx);
+                    self.ban(body, idx, "unreachable after retries");
                 }
+                self.resplice = true;
             }
         }
     }
@@ -243,7 +245,7 @@ impl Patrol {
             Some((since, p)) if (pos.0 - p.0).abs() <= 3.0 && (pos.1 - p.1).abs() <= 3.0 => {
                 if now - since > 2.0 {
                     self.stuck = Some((now, p));
-                    let exit = exit_dir(graph, pos);
+                    let exit: Dir = graph.exit_direction(pos.0, pos.1).into();
                     match body.probe_rope() {
                         Some(true) => {
                             self.learn_rope(body, graph, pos);
@@ -407,11 +409,13 @@ impl Patrol {
         pos: (f64, f64),
         idx: usize,
     ) -> bool {
-        let exclude: Vec<MoveKind> = if body.rope_lift_remaining() > 0.0 {
-            vec![MoveKind::RopeLift]
-        } else {
-            Vec::new()
-        };
+        let mut exclude = Vec::new();
+        if body.rope_lift_remaining() > 0.0 {
+            exclude.push(MoveKind::RopeLift);
+        }
+        if body.teleport_remaining() > 0.0 {
+            exclude.push(MoveKind::Teleport);
+        }
         let goal = body.anchors_px()[idx];
         let Some(legs) = graph.route(pos, goal, &exclude) else {
             return false;
@@ -440,29 +444,31 @@ impl Patrol {
         st.weave_bounds = None;
         st.arrive_pending = vec![idx];
         st.viz.route = None;
-        if let Some(face) = a.face {
-            let key = if face == crate::rotation::Face::Left {
-                "left"
-            } else {
-                "right"
-            };
-            body.keys().press(key, None);
-        }
+        face_anchor(body, a);
         body.log(&format!("Checkpoint: {}", a.name));
     }
 
-    /// Hold `idx` out of planning for 30s and move past it (and past any
-    /// following anchor that can't be spliced either).
-    fn ban<B: Body + ?Sized>(
-        &mut self,
-        body: &mut B,
-        graph: &NavGraph,
-        pos: (f64, f64),
-        idx: usize,
-        why: &str,
-    ) {
-        let rot = body.rotation();
-        let name = rot
+    /// Re-route the current segment from `pos`, skipping past anchors with
+    /// no route from here; the next loop is planned if this left the last
+    /// segment.
+    fn reroute<B: Body + ?Sized>(&mut self, body: &mut B, graph: &NavGraph, pos: (f64, f64)) {
+        self.resplice = false;
+        while let Some(idx) = self.plan.get(self.seg).map(|s| s.anchor) {
+            if self.splice(body, graph, pos, idx) {
+                if self.seg + 1 == self.plan.len() {
+                    self.plan_next(body, graph);
+                }
+                return;
+            }
+            self.ban(body, idx, "no route");
+        }
+    }
+
+    /// Hold `idx` out of planning for 30s and drop it from the plan if it's
+    /// the current target.
+    fn ban<B: Body + ?Sized>(&mut self, body: &mut B, idx: usize, why: &str) {
+        let name = body
+            .rotation()
             .anchors
             .get(idx)
             .map(|a| a.name.clone())
@@ -475,20 +481,6 @@ impl Patrol {
             self.plan.remove(self.seg);
             self.leg_i = 0;
             self.fails = 0;
-            while let Some(next) = self.plan.get(self.seg).map(|s| s.anchor) {
-                if self.splice(body, graph, pos, next) {
-                    break;
-                }
-                body.state().bans.insert(next, now + 30.0);
-                self.plan.remove(self.seg);
-                let n = rot
-                    .anchors
-                    .get(next)
-                    .map(|a| a.name.clone())
-                    .unwrap_or_default();
-                body.log(&format!("Patrol: skipping {n} for a while (no route)"));
-                body.stat("skip", &n, "no route");
-            }
         }
     }
 
@@ -511,12 +503,5 @@ impl Patrol {
             .flat_map(|l| legs_viz(l))
             .collect();
         st.viz.plan = Some(plan);
-    }
-}
-
-fn exit_dir(graph: &NavGraph, pos: (f64, f64)) -> Dir {
-    match graph.exit_direction(pos.0, pos.1) {
-        crate::navgraph::Direction::Left => Dir::Left,
-        crate::navgraph::Direction::Right => Dir::Right,
     }
 }

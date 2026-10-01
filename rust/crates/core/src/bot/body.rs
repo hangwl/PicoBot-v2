@@ -18,9 +18,9 @@ use super::session::Session;
 use crate::config::{BotConfig, ClassTravel};
 use crate::effects::{SkillEffect, MOVES_PX};
 use crate::maps::MapEntry;
-use crate::navgraph::{GraphCache, GraphOptions, NavGraph};
-use crate::reach::{base_reach, ReachModel};
-use crate::rotation::{resolve_coord, Rotation};
+use crate::navgraph::{Direction, GraphCache, GraphOptions, NavGraph};
+use crate::reach::{base_reach, Move, ReachModel};
+use crate::rotation::{resolve_coord, Face, Rotation};
 use crate::skills::{Skill, SkillBook, Stance};
 use crate::summons::SummonTracker;
 use crate::timing::{human_between, human_hold, key_gap, release_lag};
@@ -53,6 +53,24 @@ impl Dir {
         match self {
             Dir::Left => Dir::Right,
             Dir::Right => Dir::Left,
+        }
+    }
+}
+
+impl From<Direction> for Dir {
+    fn from(d: Direction) -> Dir {
+        match d {
+            Direction::Left => Dir::Left,
+            Direction::Right => Dir::Right,
+        }
+    }
+}
+
+impl From<Face> for Dir {
+    fn from(f: Face) -> Dir {
+        match f {
+            Face::Left => Dir::Left,
+            Face::Right => Dir::Right,
         }
     }
 }
@@ -134,6 +152,10 @@ const ROPE_LOST_READS: u32 = 20;
 const ROPE_TOP_NEAR: f64 = 6.0;
 /// The attack rate is counted over this many seconds.
 const RATE_WINDOW_S: f64 = 60.0;
+/// A `move_to_point` gives up after this, plus `MOVE_SLACK` times the
+/// straight walk to the target.
+const MOVE_BASE_S: f64 = 8.0;
+const MOVE_SLACK: f64 = 3.0;
 
 /// Everything the bot remembers between ticks. Owned by the bot thread.
 pub struct BotState {
@@ -893,7 +915,12 @@ pub trait Body {
     /// attacks), teleport (blink → attacks), or a plain walk weave.
     fn weave_move(&mut self, dir: Dir) {
         let cfg = self.config();
-        if cfg.class_travel == ClassTravel::Teleport && cfg.teleport_key.is_some() {
+        // A cooling teleport weaves on foot (or by flash) instead: pressing
+        // it would do nothing in game and restart the cooldown here.
+        if cfg.class_travel == ClassTravel::Teleport
+            && cfg.teleport_key.is_some()
+            && self.teleport_remaining() <= 0.0
+        {
             self.keys().key_down(dir.key());
             let key = self.config().teleport_key.clone().unwrap_or_default();
             self.keys().press(&key, None);
@@ -988,9 +1015,15 @@ pub trait Body {
         let (mut vert_ref, mut vert_fails): (Option<f64>, u32) = (None, 0);
         let (mut stuck, mut last, mut hop_from): (i64, Option<(f64, f64)>, Option<f64>) =
             (0, None, None);
+        let (t0, mut budget) = (self.now(), None::<f64>);
 
         let result = 'nav: loop {
             if !self.should_continue() || !self.focused() {
+                break 'nav false;
+            }
+            // Blind or bouncing around the target: never hold the bot here.
+            if self.now() - t0 > budget.unwrap_or(MOVE_BASE_S) {
+                self.log("Navigation timed out — abandoning leg");
                 break 'nav false;
             }
             let Some(img) = self.frame() else {
@@ -1002,12 +1035,19 @@ pub trait Body {
                 break 'nav false;
             }
             let Some(p) = self.locate_player(&img) else {
+                self.state().viz.player = None;
                 self.sleep(0.5);
                 continue;
             };
             let pos = (p.0 as f64, p.1 as f64);
+            self.state().viz.player = Some(pos);
             self.note_pos(pos);
             let (cx, cy) = pos;
+            if budget.is_none() {
+                let dist = (tx - cx).hypot(if flat { 0.0 } else { ty - cy });
+                let speed = self.graph_options().walk_speed.max(1.0);
+                budget = Some(MOVE_BASE_S + MOVE_SLACK * dist / speed);
+            }
             if let Some(from) = hop_from.take() {
                 let moved = (cx - from).abs();
                 if moved > 2.0 {
@@ -1034,15 +1074,15 @@ pub trait Body {
             }
             let hop = self.state().hop_px;
             if flash_ok {
-                let span = platform_span_at(&self.segments_px(), cx, cy, 6.0);
-                let room = span.is_none_or(|(x0, x1)| {
+                // Platform left ahead of the character (None: no drawing).
+                let ahead = platform_span_at(&self.segments_px(), cx, cy, 6.0).map(|(x0, x1)| {
                     if dx > 0.0 {
-                        x1 as f64 - cx > hop
+                        x1 as f64 - cx
                     } else {
-                        cx - x0 as f64 > hop
+                        cx - x0 as f64
                     }
                 });
-                if room && dx.abs() > hop {
+                if ahead.is_none_or(|r| r > hop) && dx.abs() > hop {
                     set_dir(self, &mut held, None, false);
                     hop_from = Some(cx);
                     self.weave_move(Dir::toward(dx));
@@ -1055,9 +1095,11 @@ pub trait Body {
                     }
                     continue;
                 }
-                if dx.abs() > cfg.walk_band_px {
+                let jump = self.state_ref().reach.get(Move::Jump).dx;
+                if dx.abs() > cfg.walk_band_px && ahead.is_none_or(|r| r > jump) {
                     // One hop away: a plain jump closes it without the
-                    // overshoot that ping-pongs over the target.
+                    // overshoot that ping-pongs over the target. Near the
+                    // platform's end, walk instead.
                     set_dir(self, &mut held, None, false);
                     let d = Dir::toward(dx);
                     self.keys().key_down(d.key());
