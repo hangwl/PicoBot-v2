@@ -1,6 +1,10 @@
-//! Evidence for detection work: the minimap crop whenever the player dot
-//! can't be read while the bot runs, saved losslessly with the numbers
-//! that explain the miss. Kept under `debug/frames/<ts>_dotlost/`.
+//! Evidence for detection and movement work, saved while the bot runs:
+//! minimap crops (lossless) with the numbers and context that explain
+//! them, under `debug/frames/<ts><suffix>/`:
+//!
+//! - `_dotlost` — the player dot couldn't be read;
+//! - `_offplatform` — the player stood off every drawn platform (with an
+//!   `overlay.png` of the drawn geometry and the last leg).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,70 +14,80 @@ use picobot_core::vision::Image;
 use serde_json::{json, Value};
 
 const DIR: &str = "debug/frames";
-const SUFFIX: &str = "_dotlost";
 /// Saves closer together than this are skipped (one loss is one story).
 const MIN_GAP: Duration = Duration::from_secs(2);
-/// Newest captures kept.
+/// Newest captures kept, per kind.
 const KEEP: usize = 200;
 
-pub struct LostDotSaver {
+pub struct Evidence {
     root: PathBuf,
+    suffix: &'static str,
     last: Option<Instant>,
 }
 
-impl Default for LostDotSaver {
-    fn default() -> Self {
-        Self::at(DIR)
+impl Evidence {
+    pub fn dot_lost() -> Self {
+        Self::at(DIR, "_dotlost")
     }
-}
 
-impl LostDotSaver {
-    pub fn at(root: impl Into<PathBuf>) -> Self {
-        LostDotSaver {
+    pub fn off_platform() -> Self {
+        Self::at(DIR, "_offplatform")
+    }
+
+    pub fn at(root: impl Into<PathBuf>, suffix: &'static str) -> Self {
+        Evidence {
             root: root.into(),
+            suffix,
             last: None,
         }
     }
 
-    /// Save `img` (the minimap crop) with `ctx` about what the bot was doing.
-    /// Errors only cost the capture, so they are dropped.
-    pub fn save(&mut self, img: &Image, player: [u8; 3], ctx: Value) {
+    /// Save `images` (name → picture, as `<name>.png`) and `meta`. Errors
+    /// only cost the capture, so they are dropped.
+    pub fn save(&mut self, images: &[(&str, &Image)], meta: &Value) {
         if self.last.is_some_and(|t| t.elapsed() < MIN_GAP) {
             return;
         }
         self.last = Some(Instant::now());
-        let dir = self.root.join(format!("{}{SUFFIX}", stamp()));
+        let dir = self.root.join(format!("{}{}", stamp(), self.suffix));
         if fs::create_dir_all(&dir).is_err() {
             return;
         }
-        let mut meta = pixel_stats(img, player);
-        if let (Some(m), Some(c)) = (meta.as_object_mut(), ctx.as_object()) {
-            m.extend(c.iter().map(|(k, v)| (k.clone(), v.clone())));
+        for (name, img) in images {
+            let _ = write_png(&dir.join(format!("{name}.png")), img);
         }
-        let _ = write_png(&dir.join("frame.png"), img);
         let _ = fs::write(
             dir.join("meta.json"),
-            serde_json::to_string_pretty(&meta).unwrap_or_default(),
+            serde_json::to_string_pretty(meta).unwrap_or_default(),
         );
-        prune(&self.root);
+        prune(&self.root, self.suffix);
     }
 }
 
-/// How many pixels match the dot colour at a few tolerances, and the
-/// closest pixel to it: tells a missing dot from a changed colour.
-fn pixel_stats(img: &Image, player: [u8; 3]) -> Value {
+/// `ctx` with `more`'s fields added.
+pub fn merged(mut ctx: Value, more: Value) -> Value {
+    if let (Some(m), Some(c)) = (ctx.as_object_mut(), more.as_object()) {
+        m.extend(c.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    ctx
+}
+
+/// How many pixels match the dot colour at the detector's tolerance and
+/// looser ones, and the closest pixel to it: tells a missing dot from a
+/// changed colour. Distances are the detector's: the sum of the three
+/// channel differences (it accepts under 30).
+pub fn pixel_stats(img: &Image, player: [u8; 3]) -> Value {
     let mut within = [0usize; 3];
-    let tols = [10, 30, 60];
+    let limits = [30, 60, 120];
     let mut best = (i32::MAX, 0usize, 0usize);
     for y in 0..img.height {
         for x in 0..img.width {
             let px = img.bgr(x, y);
-            let d = (0..3)
+            let d: i32 = (0..3)
                 .map(|i| (i32::from(px[i]) - i32::from(player[i])).abs())
-                .max()
-                .unwrap_or(0);
-            for (n, t) in within.iter_mut().zip(tols) {
-                if d <= t {
+                .sum();
+            for (n, t) in within.iter_mut().zip(limits) {
+                if d < t {
                     *n += 1;
                 }
             }
@@ -86,8 +100,8 @@ fn pixel_stats(img: &Image, player: [u8; 3]) -> Value {
     json!({
         "size": [img.width, img.height],
         "player_bgr": player,
-        "pixels_within": { "10": within[0], "30": within[1], "60": within[2] },
-        "closest": { "distance": best.0, "at": [best.1, best.2], "bgr": nearest },
+        "pixels_within_sum": { "30": within[0], "60": within[1], "120": within[2] },
+        "closest": { "distance_sum": best.0, "at": [best.1, best.2], "bgr": nearest },
     })
 }
 
@@ -107,8 +121,8 @@ fn write_png(path: &Path, img: &Image) -> std::io::Result<()> {
     w.write_image_data(&rgb).map_err(std::io::Error::other)
 }
 
-/// Drop the oldest captures beyond `KEEP`.
-fn prune(root: &Path) {
+/// Drop the oldest `suffix` captures beyond `KEEP`.
+fn prune(root: &Path, suffix: &str) {
     let Ok(rd) = fs::read_dir(root) else { return };
     let mut dirs: Vec<PathBuf> = rd
         .flatten()
@@ -116,7 +130,7 @@ fn prune(root: &Path) {
         .filter(|p| {
             p.is_dir()
                 && p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().ends_with(SUFFIX))
+                    .is_some_and(|n| n.to_string_lossy().ends_with(suffix))
         })
         .collect();
     dirs.sort();
@@ -166,14 +180,15 @@ mod tests {
     fn a_loss_is_saved_as_a_png_with_its_numbers_and_throttled() {
         let root = std::env::temp_dir().join(format!("lostdot-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let mut s = LostDotSaver::at(&root);
+        let mut s = Evidence::at(&root, "_dotlost");
         let img = Image::new(12, 8);
-        s.save(&img, [12, 240, 239], json!({ "map": "m" }));
-        s.save(&img, [12, 240, 239], json!({ "map": "again" })); // too soon
+        let meta = |map| merged(pixel_stats(&img, [12, 240, 239]), json!({ "map": map }));
+        s.save(&[("frame", &img)], &meta("m"));
+        s.save(&[("frame", &img)], &meta("again")); // too soon
         let dirs: Vec<_> = fs::read_dir(&root).unwrap().flatten().collect();
         assert_eq!(dirs.len(), 1);
         let d = dirs[0].path();
-        assert!(d.to_string_lossy().ends_with(SUFFIX));
+        assert!(d.to_string_lossy().ends_with("_dotlost"));
         let meta: Value =
             serde_json::from_str(&fs::read_to_string(d.join("meta.json")).unwrap()).unwrap();
         assert_eq!(
@@ -185,16 +200,26 @@ mod tests {
     }
 
     #[test]
-    fn only_the_newest_captures_are_kept() {
+    fn the_stats_use_the_detectors_distance() {
+        let mut img = Image::new(4, 1);
+        img.set_bgr(0, 0, [0, 239, 254]); // the real dot vs the configured colour
+        let s = pixel_stats(&img, [12, 240, 239]);
+        assert_eq!(s["closest"]["distance_sum"], 28);
+        assert_eq!(s["pixels_within_sum"]["30"], 1);
+    }
+
+    #[test]
+    fn only_the_newest_captures_of_a_kind_are_kept() {
         let root = std::env::temp_dir().join(format!("lostdot-prune-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         for i in 0..KEEP + 3 {
-            fs::create_dir_all(root.join(format!("2026{i:04}{SUFFIX}"))).unwrap();
+            fs::create_dir_all(root.join(format!("2026{i:04}_dotlost"))).unwrap();
         }
         fs::create_dir_all(root.join("other_ocr")).unwrap();
-        prune(&root);
-        assert_eq!(fs::read_dir(&root).unwrap().count(), KEEP + 1);
-        assert!(!root.join(format!("20260000{SUFFIX}")).exists());
+        fs::create_dir_all(root.join("1_offplatform")).unwrap();
+        prune(&root, "_dotlost");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), KEEP + 2);
+        assert!(!root.join("20260000_dotlost").exists());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -203,9 +228,9 @@ mod tests {
         let mut img = Image::new(10, 10);
         img.set_bgr(3, 4, [12, 200, 239]); // off by 40 on one channel
         let v = pixel_stats(&img, [12, 240, 239]);
-        assert_eq!(v["pixels_within"]["10"], 0);
-        assert_eq!(v["pixels_within"]["60"], 1);
+        assert_eq!(v["pixels_within_sum"]["30"], 0);
+        assert_eq!(v["pixels_within_sum"]["60"], 1);
         assert_eq!(v["closest"]["at"], json!([3, 4]));
-        assert_eq!(v["closest"]["distance"], 40);
+        assert_eq!(v["closest"]["distance_sum"], 40);
     }
 }

@@ -529,3 +529,26 @@ fn a_saved_rope_ending_under_its_platform_still_links() {
     let g = graph_for(&entry, (200.0, 100.0), &reach(), GraphOptions::default()).unwrap();
     assert!(!transfers(&g, MoveKind::ClimbUp).is_empty());
 }
+
+#[test]
+fn a_down_jump_never_takes_off_on_a_rope_top() {
+    let plats = [FLOOR, MID];
+    let jumps = |ropes: &[[f64; 4]]| -> Vec<f64> {
+        let mut xs: Vec<f64> = transfers(
+            &with_ropes(&plats, ropes, GraphOptions::default()),
+            MoveKind::DownJump,
+        )
+        .iter()
+        .map(|l| l.x0)
+        .collect();
+        xs.sort_by(f64::total_cmp);
+        xs
+    };
+    assert_eq!(jumps(&[]), [44.0, 80.0, 116.0]); // ends and middle of the overlap
+                                                 // A rope from MID down to the floor, hanging at the middle column.
+    let xs = jumps(&[[80.0, 81.0, 80.0, 95.0]]);
+    assert_eq!(xs.len(), 3);
+    assert!(xs.iter().all(|x| (x - 80.0).abs() > 8.0), "{xs:?}");
+    // A rope that hangs off another platform doesn't move them.
+    assert_eq!(jumps(&[[80.0, 40.0, 80.0, 79.0]]), [44.0, 80.0, 116.0]);
+}

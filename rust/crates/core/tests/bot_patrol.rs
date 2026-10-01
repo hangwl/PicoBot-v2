@@ -282,6 +282,29 @@ fn a_player_off_the_graph_waits() {
     assert!(b.moves.is_empty() && b.state.bans.is_empty());
 }
 
+#[test]
+fn each_spell_off_the_platforms_is_reported_once_with_its_context() {
+    let mut b = Sim::patrol(
+        &[FLOOR, MID],
+        (80.0, 90.0),
+        &[(20.0, 100.0), (180.0, 100.0)],
+    );
+    let mut p = Patrol::default();
+    ticks(&mut p, &mut b, 3);
+    assert_eq!(b.off.len(), 1);
+    let (pos, info) = &b.off[0];
+    assert_eq!(*pos, (80.0, 90.0));
+    assert_eq!(info["pos"], serde_json::json!([80.0, 90.0]));
+    assert_eq!(info["above"]["dy"], -6.0); // MID's row, 6px over the feet
+    assert_eq!(info["below"]["dy"], 10.0); // the floor
+    assert!(b.log_has("not on any drawn platform at (80, 90)"));
+    b.pos = (80.0, 100.0); // back on the floor
+    p.tick(&mut b);
+    b.pos = (150.0, 60.0); // and off again
+    p.tick(&mut b);
+    assert_eq!(b.off.len(), 2);
+}
+
 fn rope_sim(pos: (f64, f64)) -> Sim {
     Sim::patrol(
         &[FLOOR, [40.0, 40.0, 160.0, 40.0]],
@@ -461,6 +484,50 @@ fn a_lost_focus_mid_patrol_is_not_a_miss() {
     assert_eq!(p.fails, 0);
     assert!(!b.log_has("missed a landing"));
     assert!(b.state.bans.is_empty());
+}
+
+fn rope_legs(p: &Patrol) -> usize {
+    p.plan
+        .iter()
+        .flat_map(|s| s.legs.iter().flatten())
+        .filter(|l| l.kind == MoveKind::RopeLift)
+        .count()
+}
+
+#[test]
+fn an_unbound_rope_lift_is_never_planned() {
+    let plats = [FLOOR, [20.0, 85.0, 60.0, 85.0], [140.0, 85.0, 180.0, 85.0]];
+    let anchors = [(40.0, 85.0), (160.0, 85.0)];
+    let mut b = Sim::patrol(&plats, (100.0, 100.0), &anchors);
+    p_tick_count(&mut b, 1, |p| assert!(rope_legs(p) > 0)); // bound: preferred
+    let mut b = Sim::patrol(&plats, (100.0, 100.0), &anchors);
+    b.rope = 0.0; // no key: never ready
+    let mut p = Patrol::default();
+    ticks(&mut p, &mut b, 16);
+    assert_eq!(rope_legs(&p), 0);
+    assert!(!b.moves.contains(&"rope_lift".to_owned()));
+    assert!(arrivals(&b).len() >= 2);
+    assert!(!b.log_has("missed"));
+}
+
+fn p_tick_count(b: &mut Sim, n: usize, check: impl Fn(&Patrol)) {
+    let mut p = Patrol::default();
+    ticks(&mut p, b, n);
+    check(&p);
+}
+
+#[test]
+fn the_pace_is_learned_from_segment_times_and_kept_across_a_reset() {
+    let mut b = Sim::patrol(&[FLOOR], (10.0, 100.0), &[(20.0, 100.0), (180.0, 100.0)]);
+    let mut p = Patrol::default();
+    assert_eq!(p.pace(), 1.0);
+    ticks(&mut p, &mut b, 8);
+    assert!(arrivals(&b).len() >= 2);
+    let pace = p.pace();
+    assert_ne!(pace, 1.0);
+    assert!((0.5..=4.0).contains(&pace));
+    p.reset();
+    assert_eq!(p.pace(), pace);
 }
 
 #[test]

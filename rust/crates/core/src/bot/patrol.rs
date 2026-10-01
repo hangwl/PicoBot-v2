@@ -13,8 +13,8 @@ use std::sync::Arc;
 use super::body::{Body, Dir, PatrolStatus};
 use super::grind::{blind_wait, face_anchor, legacy_patrol_tick, run_leg};
 use super::navigator::{interrupted, legs_viz, LegStatus, Navigator};
-use crate::navgraph::{MoveKind, NavGraph, ROPE_BOTTOM_GAP, ROPE_TOP_OVERSHOOT};
-use crate::planner::{plan_loop, LoopRequest, PlanSegment};
+use crate::navgraph::{Leg, MoveKind, NavGraph, ROPE_BOTTOM_GAP, ROPE_TOP_OVERSHOOT};
+use crate::planner::{after_legs, plan_loop, Cooldown, LoopRequest, PlanSegment};
 use crate::timing::human_reaction;
 
 #[derive(Default)]
@@ -32,6 +32,15 @@ pub struct Patrol {
     pub stuck: Option<(f64, (f64, f64))>,
     /// The current segment must be re-routed from the player's position.
     resplice: bool,
+    /// Learned real seconds per second of route cost (0: not yet).
+    pace: f64,
+    /// When the current segment started, and its planned cost.
+    seg_started: f64,
+    seg_cost: f64,
+    /// The last planned leg run, and how it ended.
+    last_leg: Option<(Leg, LegStatus)>,
+    /// This spell off the platforms has been reported.
+    off_noted: bool,
 }
 
 enum Outcome {
@@ -41,8 +50,57 @@ enum Outcome {
 }
 
 impl Patrol {
+    /// Start over (the learned pace is the character's, so it stays).
     pub fn reset(&mut self) {
+        let pace = self.pace;
         *self = Patrol::default();
+        self.pace = pace;
+    }
+
+    /// Real seconds per second of planned route cost (1 until learned).
+    pub fn pace(&self) -> f64 {
+        if self.pace > 0.0 {
+            self.pace
+        } else {
+            1.0
+        }
+    }
+
+    /// The current segment starts now.
+    fn start_seg(&mut self, now: f64) {
+        self.seg_started = now;
+        self.seg_cost = self
+            .plan
+            .get(self.seg)
+            .and_then(|s| s.legs.as_ref())
+            .map_or(0.0, |l| l.iter().map(|l| l.cost).sum());
+    }
+
+    /// Fold the finished segment's real duration into the pace.
+    fn learn_pace(&mut self, now: f64) {
+        if self.seg_cost < 1.0 {
+            return; // too short to say much
+        }
+        let r = ((now - self.seg_started) / self.seg_cost).clamp(0.5, 4.0);
+        self.pace = if self.pace > 0.0 {
+            0.8 * self.pace + 0.2 * r
+        } else {
+            r
+        };
+    }
+
+    /// Arrived at the current segment's anchor: on to the next segment,
+    /// with the next loop planned before this one runs out.
+    fn advance<B: Body + ?Sized>(&mut self, body: &mut B, graph: &NavGraph, idx: usize) {
+        self.arrive(body, idx);
+        let now = body.now();
+        self.learn_pace(now);
+        self.seg += 1;
+        self.leg_i = 0;
+        self.start_seg(now);
+        if self.seg + 1 == self.plan.len() {
+            self.plan_next(body, graph);
+        }
     }
 
     pub fn tick<B: Body + ?Sized>(&mut self, body: &mut B) {
@@ -132,6 +190,7 @@ impl Patrol {
             return;
         }
         self.stuck = None;
+        self.off_noted = false;
         if self
             .nav
             .as_ref()
@@ -157,12 +216,7 @@ impl Patrol {
         let idx = seg.anchor;
         let outcome = match &seg.legs {
             Some(legs) if self.leg_i >= legs.len() => {
-                self.arrive(body, idx);
-                self.seg += 1;
-                self.leg_i = 0;
-                if self.seg + 1 == self.plan.len() {
-                    self.plan_next(body, &graph); // next loop ready before this one ends
-                }
+                self.advance(body, &graph, idx);
                 return;
             }
             None => {
@@ -172,11 +226,7 @@ impl Patrol {
                     .and_then(|f| rot.legs.get(&(f, idx)).cloned())
                     .unwrap_or_default();
                 if run_leg(body, &steps) {
-                    self.arrive(body, idx);
-                    self.seg += 1;
-                    if self.seg + 1 == self.plan.len() {
-                        self.plan_next(body, &graph);
-                    }
+                    self.advance(body, &graph, idx);
                     return;
                 }
                 if interrupted(body) {
@@ -188,7 +238,9 @@ impl Patrol {
             Some(legs) => {
                 let leg = legs[self.leg_i];
                 let nav = self.nav.as_ref().expect("navigator set above");
-                match nav.execute_leg(body, &leg) {
+                let status = nav.execute_leg(body, &leg);
+                self.last_leg = Some((leg, status));
+                match status {
                     LegStatus::Ok => {
                         self.leg_i += 1;
                         self.publish(body);
@@ -238,8 +290,16 @@ impl Patrol {
         body.log_every(
             "off_graph",
             5.0,
-            "Player is not on any drawn platform — waiting (mid-move, or check the platform drawing)",
+            &format!(
+                "Player is not on any drawn platform at ({:.0}, {:.0}) — waiting (mid-move, or check the platform drawing)",
+                pos.0, pos.1
+            ),
         );
+        if !self.off_noted {
+            self.off_noted = true;
+            let info = self.off_info(body, graph, pos);
+            body.off_platform(pos, info);
+        }
         let now = body.now();
         match self.stuck {
             Some((since, p)) if (pos.0 - p.0).abs() <= 3.0 && (pos.1 - p.1).abs() <= 3.0 => {
@@ -265,6 +325,51 @@ impl Patrol {
             _ => self.stuck = Some((now, pos)),
         }
         blind_wait(body);
+    }
+
+    /// What the patrol knows about a spell off the platforms: the leg that
+    /// led there, the platforms just above and below, and learned ropes
+    /// in that column.
+    fn off_info<B: Body + ?Sized>(
+        &self,
+        body: &mut B,
+        graph: &NavGraph,
+        pos: (f64, f64),
+    ) -> serde_json::Value {
+        let (x, y) = pos;
+        let near = |i: Option<usize>| {
+            i.map(|i| {
+                let p = graph.platforms[i];
+                serde_json::json!({
+                    "platform": [p.x0, p.y0, p.x1, p.y1],
+                    "dy": ((p.y_at(x) - y) * 10.0).round() / 10.0,
+                })
+            })
+        };
+        let target = self.plan.get(self.seg).and_then(|s| {
+            body.rotation()
+                .anchors
+                .get(s.anchor)
+                .map(|a| a.name.clone())
+        });
+        let ropes: Vec<_> = graph
+            .ropes
+            .iter()
+            .filter(|r| ((r[0] + r[2]) / 2.0 - x).abs() <= 8.0)
+            .collect();
+        serde_json::json!({
+            "pos": [x, y],
+            "target": target,
+            "last_leg": self.last_leg.map(|(l, s)| serde_json::json!({
+                "kind": l.kind.as_str(),
+                "from": [l.x0, l.y0],
+                "to": [l.x1, l.y1],
+                "status": format!("{s:?}"),
+            })),
+            "above": near(graph.above(x, y, None)),
+            "below": near(graph.below(x, y, None)),
+            "ropes_near": ropes,
+        })
     }
 
     /// Record a confirmed rope hang, connected to the platform above; a
@@ -319,32 +424,32 @@ impl Patrol {
         ));
     }
 
-    fn request<'a>(
-        graph: &'a NavGraph,
-        anchors: &'a [(f64, f64)],
-        banned: &'a HashSet<usize>,
-        recorded: &'a dyn Fn(usize, usize) -> bool,
-        cfg: &crate::config::BotConfig,
-    ) -> LoopRequest<'a> {
-        LoopRequest {
-            graph,
-            anchors,
-            banned,
-            tol: cfg.nav_threshold_px as f64,
-            recorded,
-            policy: cfg.patrol_policy,
-            temp: cfg.patrol_weight_temp,
-        }
+    /// Rope lift and teleport as the planner sees them now.
+    fn cooldowns<B: Body + ?Sized>(body: &B) -> Vec<Cooldown> {
+        let cfg = body.config();
+        vec![
+            Cooldown {
+                kind: MoveKind::RopeLift,
+                ready_in: body.rope_lift_remaining(),
+                every: cfg.up_jump_skill_cooldown,
+            },
+            Cooldown {
+                kind: MoveKind::Teleport,
+                ready_in: body.teleport_remaining(),
+                every: cfg.teleport_cooldown,
+            },
+        ]
     }
 
-    /// Plan one loop from `cur` (at anchor `cur_i`, if any), recording the
-    /// anchors it had to skip.
+    /// Plan one loop from `cur` (at anchor `cur_i`, if any), to start once
+    /// the `ahead` legs have run; records the anchors it had to skip.
     fn plan<B: Body + ?Sized>(
         &mut self,
         body: &mut B,
         graph: &NavGraph,
         cur: (f64, f64),
         cur_i: Option<usize>,
+        ahead: &[Leg],
     ) -> Vec<PlanSegment> {
         let rot = body.rotation();
         let anchors = body.anchors_px();
@@ -353,7 +458,18 @@ impl Patrol {
         let banned: HashSet<usize> = body.state().bans.keys().copied().collect();
         let recorded = |a: usize, b: usize| rot.legs.contains_key(&(a, b));
         let cfg = body.config().clone();
-        let req = Patrol::request(graph, &anchors, &banned, &recorded, &cfg);
+        let cooldowns = after_legs(&Patrol::cooldowns(body), ahead, self.pace());
+        let req = LoopRequest {
+            graph,
+            anchors: &anchors,
+            banned: &banned,
+            tol: cfg.nav_threshold_px as f64,
+            recorded: &recorded,
+            policy: cfg.patrol_policy,
+            temp: cfg.patrol_weight_temp,
+            cooldowns: &cooldowns,
+            pace: self.pace(),
+        };
         let (segments, skipped) = plan_loop(&req, cur, cur_i, &mut body.state().rng);
         for (i, why) in skipped {
             let name = rot.anchors[i].name.clone();
@@ -368,10 +484,11 @@ impl Patrol {
     }
 
     fn plan_first<B: Body + ?Sized>(&mut self, body: &mut B, graph: &NavGraph, pos: (f64, f64)) {
-        self.plan = self.plan(body, graph, pos, None);
+        self.plan = self.plan(body, graph, pos, None, &[]);
         self.seg = 0;
         self.leg_i = 0;
         self.fails = 0;
+        self.start_seg(body.now());
         self.publish(body);
         if !self.plan.is_empty() {
             let names = self.names(body, &self.plan);
@@ -384,7 +501,14 @@ impl Patrol {
     fn plan_next<B: Body + ?Sized>(&mut self, body: &mut B, graph: &NavGraph) {
         let idx = self.plan[self.seg].anchor;
         let cur = body.anchors_px()[idx];
-        let segments = self.plan(body, graph, cur, Some(idx));
+        let ahead = self.plan[self.seg].legs.clone().unwrap_or_default();
+        let segments = self.plan(
+            body,
+            graph,
+            cur,
+            Some(idx),
+            &ahead[self.leg_i.min(ahead.len())..],
+        );
         if !segments.is_empty() {
             let names = self.names(body, &segments);
             self.plan.extend(segments);
@@ -455,6 +579,7 @@ impl Patrol {
         self.resplice = false;
         while let Some(idx) = self.plan.get(self.seg).map(|s| s.anchor) {
             if self.splice(body, graph, pos, idx) {
+                self.start_seg(body.now());
                 if self.seg + 1 == self.plan.len() {
                     self.plan_next(body, graph);
                 }

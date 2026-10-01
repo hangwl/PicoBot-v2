@@ -27,6 +27,14 @@ loop:
   enters the last segment), so a planned path always exists. If planning
   ever yields nothing, the bot **halts and takes a break** — no movement,
   no attacks — and retries every few seconds.
+- **Planning respects cooldowns**: the planner runs a clock along the
+  loop (route cost × a learned pace, the real seconds a segment takes
+  per second of cost) and only plans rope lift or teleport where it will
+  be ready again; a cooling one is replaced by the next-cheapest move.
+  An unbound one is never planned. When only a cooling move gets
+  somewhere, it's planned anyway (the run re-routes if it's still
+  cooling) — a cooldown never skips an anchor. The next loop starts its
+  clock after the current segment's legs.
 - **One leg per tick**; safety checks run between legs. A failed leg
   splices a re-route into the plan on the next tick, from where the
   player ended up (after any time off the platforms); rope lift and
@@ -87,7 +95,7 @@ below) with every move whose **reach** covers the gap:
 | `up_flash` | jump, then Up + jump mid-air | platform directly above |
 | `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
 | `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column; preferred while ready |
-| `down_jump` / `drop` | down + jump; walk off an end | lower platforms |
+| `down_jump` / `drop` | down + jump; walk off an end | lower platforms; a down jump takes off more than `rope_clear_px` (8px) from any learned rope hanging off its platform — Down on a rope's top grabs the rope instead |
 | `climb_up` | a **moving grab**: Up held ~0.15–0.25s before takeoff, then a hop toward the rope from 6px beside it (or a flash jump off a platform end up to 20px out, flash kits) — then climb and mount the top platform. Straight-up only when the platform is too narrow to step aside | boards from any platform within jump reach below the rope's bottom end, which stays ≥5px above the platform under it |
 | `climb_down` | grab at the top (hold down), descend past the rope's bottom end, land below | lands on the nearest platform under the rope's end |
 

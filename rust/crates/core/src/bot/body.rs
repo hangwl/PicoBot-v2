@@ -272,6 +272,9 @@ pub trait Body {
     }
     /// A settled feet position, for the platform-fit diagnostic.
     fn note_pos(&mut self, _pos: (f64, f64)) {}
+    /// The player stands off every drawn platform at `pos`; `info` is what
+    /// the patrol knows (the host saves it as evidence).
+    fn off_platform(&mut self, _pos: (f64, f64), _info: serde_json::Value) {}
     /// Persist a learned rope on the current map.
     fn save_map(&mut self, _entry: MapEntry) {}
     /// Anchor statistics: visit / miss / skip.

@@ -113,6 +113,8 @@ pub struct Sim {
     pub stop: Arc<AtomicBool>,
     /// A measurement stops when it reaches this move.
     pub stop_on: Option<String>,
+    /// Off-platform reports: (position, what the patrol knew).
+    pub off: Vec<((f64, f64), serde_json::Value)>,
 }
 
 impl Sim {
@@ -168,6 +170,7 @@ impl Sim {
             flights: Arc::default(),
             stop: Arc::default(),
             stop_on: None,
+            off: Vec::new(),
         }
     }
 
@@ -420,6 +423,9 @@ impl Body for Sim {
     }
     fn stat(&mut self, kind: &str, anchor: &str, why: &str) {
         self.stats.push((kind.into(), anchor.into(), why.into()));
+    }
+    fn off_platform(&mut self, pos: (f64, f64), info: serde_json::Value) {
+        self.off.push((pos, info));
     }
     fn probe_rope(&mut self) -> Option<bool> {
         self.probe

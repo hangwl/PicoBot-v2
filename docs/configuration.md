@@ -94,6 +94,9 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   explicit `"skills"` map exists — new configs should use named skills.
 - `marker_inset_px` crops the minimap rim before marker detection — frame
   pixels can't register as markers; positions are largest-blob centroids.
+  The one exception is the player dot passing under the rim (a rope lift
+  to the map's top edge): a dot missed inside the crop is looked for in
+  the rim within 12px of its last sighting.
 - Vertical jumps that produce no progress twice in a row end the leg
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.

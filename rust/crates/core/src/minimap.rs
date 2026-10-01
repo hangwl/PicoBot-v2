@@ -134,6 +134,8 @@ pub struct PlayerTracker {
     epoch: u64,
     last: Option<(i32, i32)>,
     misses: u32,
+    /// The last real sighting, kept after the dot is lost.
+    seen: Option<(i32, i32)>,
 }
 
 impl PlayerTracker {
@@ -174,6 +176,9 @@ pub struct MinimapAnalyzer {
 pub const MARKER_MIN_PX: usize = 6;
 /// A lost dot is held this many consecutive reads (one flicker).
 pub const PLAYER_HOLD_FRAMES: u32 = 1;
+/// How far (px) from its last sighting a dot in the frame rim is still
+/// taken for the player.
+pub const RIM_REACH: i32 = 12;
 /// The client's player glyph (6x6).
 pub const DOT_W: i32 = 6;
 pub const DOT_H: i32 = 6;
@@ -437,8 +442,12 @@ impl MinimapAnalyzer {
                 ..Default::default()
             };
         }
-        if let Some(pos) = self.marker(img, self.colors.player, 10, true, tracker.last) {
+        let found = self
+            .marker(img, self.colors.player, 10, true, tracker.last)
+            .or_else(|| tracker.seen.and_then(|s| self.rim_dot(img, s)));
+        if let Some(pos) = found {
             tracker.last = Some(pos);
+            tracker.seen = Some(pos);
             tracker.misses = 0;
             return Some(pos);
         }
@@ -448,6 +457,24 @@ impl MinimapAnalyzer {
         }
         tracker.last = None;
         None
+    }
+
+    /// The dot half under the frame rim (a rope lift to a platform at the
+    /// map's top edge): the inset crop hides it, so look in the rim itself
+    /// — only near `seen`, the last sighting, since the rim is frame. Its
+    /// bottom row is still the feet.
+    fn rim_dot(&self, img: &Image, seen: (i32, i32)) -> Option<(i32, i32)> {
+        let i = self.marker_inset;
+        if i == 0 {
+            return None; // nothing was cropped
+        }
+        let (w, h) = (img.width, img.height);
+        marker_blobs(&color_mask(img, self.colors.player, 10), MARKER_MIN_PX)
+            .iter()
+            .filter(|b| b.y_min < i || b.x_min < i || b.y_max + i >= h || b.x_max + i >= w)
+            .map(|b| ((b.cx + 0.5).floor() as i32, b.y_max as i32))
+            .filter(|p| (p.0 - seen.0).abs() <= RIM_REACH && (p.1 - seen.1).abs() <= RIM_REACH)
+            .min_by_key(|p| (p.0 - seen.0).abs() + (p.1 - seen.1).abs())
     }
 
     pub fn rune_pos(&self, img: &Image) -> Option<(i32, i32)> {
@@ -538,6 +565,43 @@ mod tests {
         let empty = frame(100, 60, [40, 30, 20]);
         assert_eq!(mm.player_pos(&empty, &mut t), Some(got)); // held once
         assert_eq!(mm.player_pos(&empty, &mut t), None);
+    }
+
+    #[test]
+    fn a_dot_rising_under_the_frame_rim_is_still_read_near_its_last_sighting() {
+        let colors = MinimapColors::default();
+        let mm = MinimapAnalyzer::new(colors, Some((0, 0, 100, 60)), 4);
+        let bg = [40, 30, 20];
+        let mut img = frame(100, 60, bg);
+        dot(&mut img, 50, 14, colors.player);
+        let mut t = PlayerTracker::default();
+        assert_eq!(mm.player_pos(&img, &mut t), Some((50, 14)));
+        // A rope lift to the top: only rows 2-4 of the dot show, and just
+        // its 2px bottom tip is inside the 4px rim (the captured Hotel
+        // Arcus case).
+        let sliver = |img: &mut Image, x0: usize| {
+            for y in 2..=3 {
+                for x in x0..x0 + 6 {
+                    img.set_bgr(x, y, colors.player);
+                }
+            }
+            img.set_bgr(x0 + 2, 4, colors.player);
+            img.set_bgr(x0 + 3, 4, colors.player);
+        };
+        let mut top = frame(100, 60, bg);
+        sliver(&mut top, 47);
+        for _ in 0..3 {
+            assert_eq!(mm.player_pos(&top, &mut t), Some((50, 4)));
+        }
+        // Never seen: the rim is frame, not a dot.
+        assert_eq!(mm.player_pos(&top, &mut PlayerTracker::default()), None);
+        // Far from the last sighting: not the player either.
+        let mut far = frame(100, 60, bg);
+        sliver(&mut far, 5);
+        let mut t = PlayerTracker::default();
+        mm.player_pos(&img, &mut t);
+        mm.player_pos(&far, &mut t); // the one held read
+        assert_eq!(mm.player_pos(&far, &mut t), None);
     }
 
     #[test]

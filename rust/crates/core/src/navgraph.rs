@@ -42,6 +42,10 @@ pub const ROPE_TOP_OVERSHOOT: f64 = 3.0;
 /// A stored rope top this far below its platform (older maps) still
 /// belongs to it: it is lifted onto the row when the graph is built.
 pub const ROPE_TOP_SLACK: f64 = 6.0;
+/// A down jump takes off more than this far from a rope hanging off its
+/// platform (the default `rope_clear_px`): Down on a rope's top grabs the
+/// rope instead of dropping.
+pub const ROPE_CLEAR_PX: f64 = 8.0;
 pub const EXPLORE_PENALTY: f64 = 1.6;
 /// Max rise for a "horizontal" gap move.
 pub const LEVEL_PX: f64 = 4.0;
@@ -195,6 +199,8 @@ pub struct GraphOptions {
     pub allow_flash: bool,
     pub allow_double_flash: bool,
     pub allow_teleport: bool,
+    /// How far a down jump's takeoff keeps from a rope off its platform.
+    pub rope_clear_px: f64,
 }
 
 impl Default for GraphOptions {
@@ -210,6 +216,7 @@ impl Default for GraphOptions {
             allow_flash: true,
             allow_double_flash: true,
             allow_teleport: false,
+            rope_clear_px: ROPE_CLEAR_PX,
         }
     }
 }
@@ -495,8 +502,13 @@ impl NavGraph {
         for x in xs {
             let yp = p.y_at(x);
             if self.below(x, yp, Some(i)) == Some(j) {
-                let (a, b) = (self.node(i, x), self.node(j, x));
-                self.link(a, b, MoveKind::DownJump, MoveKind::DownJump.cost());
+                let clear = self
+                    .clear_of_ropes(i, x, lo, hi)
+                    .filter(|&cx| self.below(cx, p.y_at(cx), Some(i)) == Some(j));
+                if let Some(cx) = clear {
+                    let (a, b) = (self.node(i, cx), self.node(j, cx));
+                    self.link(a, b, MoveKind::DownJump, MoveKind::DownJump.cost());
+                }
             } else if self.above(x, yp, Some(i)) == Some(j) {
                 self.mv(reach, i, x, j, x, MoveKind::Teleport, 0.0, yp - q.y_at(x));
             }
@@ -504,6 +516,30 @@ impl NavGraph {
                 self.mv(reach, i, x, j, x, MoveKind::UpFlash, 0.0, yp - q.y_at(x));
             }
         }
+    }
+
+    /// `x`, or the nearest spot in `lo..=hi` clear of every rope hanging off
+    /// platform `i` (`rope_clear_px`); None when there's no such spot.
+    fn clear_of_ropes(&self, i: usize, x: f64, lo: f64, hi: f64) -> Option<f64> {
+        let gap = self.opts.rope_clear_px;
+        if gap <= 0.0 {
+            return Some(x);
+        }
+        let tops: Vec<f64> = self
+            .ropes
+            .iter()
+            .map(|r| ((r[0] + r[2]) / 2.0, r[1].min(r[3])))
+            .filter(|&(rx, top)| self.locate(rx, top) == Some(i))
+            .map(|(rx, _)| rx)
+            .collect();
+        let clear = |x: f64| tops.iter().all(|rx| (x - rx).abs() > gap);
+        if clear(x) {
+            return Some(x);
+        }
+        tops.iter()
+            .flat_map(|rx| [rx - gap - 1.0, rx + gap + 1.0])
+            .filter(|&c| (lo..=hi).contains(&c) && clear(c))
+            .min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()))
     }
 
     /// Whether an up flash rising from `y` at column `x` comes down on

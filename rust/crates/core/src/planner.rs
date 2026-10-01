@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use rand::Rng;
 
 use crate::config::PatrolPolicy;
-use crate::navgraph::{Leg, NavGraph};
+use crate::navgraph::{Leg, MoveKind, NavGraph};
 
 /// One leg of the loop: to `anchor`, along planned `legs` — or, when
 /// `legs` is None, the hand-recorded leg from anchor `from`.
@@ -52,6 +52,98 @@ pub struct LoopRequest<'a> {
     pub recorded: &'a dyn Fn(usize, usize) -> bool,
     pub policy: PatrolPolicy,
     pub temp: f64,
+    /// Moves with a cooldown, as of the loop's start.
+    pub cooldowns: &'a [Cooldown],
+    /// Real seconds per second of route cost.
+    pub pace: f64,
+}
+
+/// A move with a cooldown.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Cooldown {
+    pub kind: MoveKind,
+    /// Seconds until it's usable (infinite: never, e.g. no key bound).
+    pub ready_in: f64,
+    /// Seconds from one use to the next.
+    pub every: f64,
+}
+
+/// When each cooled move is usable along a planned loop, on a clock that
+/// runs `pace` real seconds per second of route cost.
+#[derive(Debug, Clone)]
+struct Clock {
+    t: f64,
+    pace: f64,
+    /// (kind, usable at, every).
+    ready: Vec<(MoveKind, f64, f64)>,
+}
+
+impl Clock {
+    fn new(cds: &[Cooldown], pace: f64) -> Self {
+        Clock {
+            t: 0.0,
+            pace: pace.max(0.1),
+            ready: cds.iter().map(|c| (c.kind, c.ready_in, c.every)).collect(),
+        }
+    }
+
+    fn never(&self) -> Vec<MoveKind> {
+        self.ready
+            .iter()
+            .filter(|r| r.1.is_infinite())
+            .map(|r| r.0)
+            .collect()
+    }
+
+    /// Advance over `legs`; the first move they'd fire while still cooling.
+    fn run(&mut self, legs: &[Leg]) -> Option<MoveKind> {
+        let mut early = None;
+        for l in legs {
+            if let Some(r) = self.ready.iter_mut().find(|r| r.0 == l.kind) {
+                if r.1 > self.t + 1e-9 && early.is_none() {
+                    early = Some(l.kind);
+                }
+                if r.1.is_finite() {
+                    r.1 = self.t + r.2;
+                }
+            }
+            self.t += l.cost * self.pace;
+        }
+        early
+    }
+
+    fn idle(&mut self, cost: f64) {
+        self.t += cost * self.pace;
+    }
+
+    /// The cheapest route that only fires moves once they're ready; failing
+    /// that, the cheapest at all (the run re-routes if one is still
+    /// cooling) — a cooldown never makes an anchor unreachable.
+    fn route(&self, g: &NavGraph, from: (f64, f64), to: (f64, f64)) -> Option<Vec<Leg>> {
+        let never = self.never();
+        let mut exclude = never.clone();
+        while let Some(legs) = g.route(from, to, &exclude) {
+            match self.clone().run(&legs) {
+                None => return Some(legs),
+                Some(k) => exclude.push(k),
+            }
+        }
+        g.route(from, to, &never)
+    }
+}
+
+/// The cooldowns after running `legs` at `pace` (for planning past them).
+pub fn after_legs(cds: &[Cooldown], legs: &[Leg], pace: f64) -> Vec<Cooldown> {
+    let mut c = Clock::new(cds, pace);
+    c.run(legs);
+    c.ready
+        .iter()
+        .map(|&(kind, at, every)| Cooldown {
+            kind,
+            ready_in: (at - c.t).max(0.0),
+            every,
+        })
+        .collect()
 }
 
 /// Plan one loop from `cur` (whose anchor is `cur_i`, if at one).
@@ -70,34 +162,50 @@ pub fn plan_loop<R: Rng + ?Sized>(
             !((ax - cur.0).abs() <= req.tol && g.locate(ax, ay) == here)
         })
         .collect();
+    let mut clock = Clock::new(req.cooldowns, req.pace);
     let (mut segments, mut skipped) = (Vec::new(), Vec::new());
     while !remaining.is_empty() {
-        let costs: Vec<(usize, f64)> = remaining
-            .iter()
-            .map(|&i| (i, g.route_cost(cur, req.anchors[i], &[])))
-            .collect();
-        // Unreachable anchors can't be picked by either policy: skip them
-        // up front so the loop always makes progress.
-        for &(i, c) in &costs {
-            if c.is_infinite() {
-                let (ax, ay) = req.anchors[i];
-                let why = if g.locate(ax, ay).is_none() {
-                    SkipReason::OffPlatform
-                } else {
-                    SkipReason::NoRoute
-                };
-                skipped.push((i, why));
-                remaining.retain(|&r| r != i);
+        let mut routes: Vec<(usize, Vec<Leg>)> = Vec::new();
+        for &i in &remaining {
+            match clock.route(g, cur, req.anchors[i]) {
+                Some(legs) => routes.push((i, legs)),
+                None => {
+                    let (ax, ay) = req.anchors[i];
+                    let why = if g.locate(ax, ay).is_none() {
+                        SkipReason::OffPlatform
+                    } else {
+                        SkipReason::NoRoute
+                    };
+                    skipped.push((i, why));
+                }
             }
         }
-        let costs: Vec<(usize, f64)> = costs.into_iter().filter(|(_, c)| c.is_finite()).collect();
-        if costs.is_empty() {
+        // Unreachable anchors can't be picked by either policy: skip them
+        // up front so the loop always makes progress.
+        remaining.retain(|i| routes.iter().any(|r| r.0 == *i));
+        if routes.is_empty() {
             break;
         }
+        let costs: Vec<(usize, f64)> = routes
+            .iter()
+            .map(|(i, legs)| (*i, legs.iter().map(|l| l.cost).sum()))
+            .collect();
         let next = pick_next(&costs, req.policy, req.temp, rng);
+        let (route, cost) = routes
+            .into_iter()
+            .zip(&costs)
+            .find(|((i, _), _)| *i == next)
+            .map(|((_, legs), (_, c))| (legs, *c))
+            .expect("picked from the candidates");
         let legs = match cur_i {
-            Some(from) if (req.recorded)(from, next) => None,
-            _ => Some(g.route(cur, req.anchors[next], &[]).unwrap_or_default()),
+            Some(from) if (req.recorded)(from, next) => {
+                clock.idle(cost);
+                None
+            }
+            _ => {
+                clock.run(&route);
+                Some(route)
+            }
         };
         let from = if legs.is_none() { cur_i } else { None };
         segments.push(PlanSegment {
@@ -202,6 +310,8 @@ mod tests {
             recorded: &|_, _| false,
             policy: PatrolPolicy::Greedy,
             temp: 1.0,
+            cooldowns: &[],
+            pace: 1.0,
         };
         let (plan, skipped) = plan_loop(&req, (100.0, 100.0), None, &mut StdRng::seed_from_u64(1));
         let mut visited: Vec<usize> = plan.iter().map(|s| s.anchor).collect();
@@ -224,6 +334,8 @@ mod tests {
             recorded: &|a, b| (a, b) == (0, 1),
             policy: PatrolPolicy::Greedy,
             temp: 1.0,
+            cooldowns: &[],
+            pace: 1.0,
         };
         let (plan, _) = plan_loop(&req, (20.0, 100.0), Some(0), &mut StdRng::seed_from_u64(2));
         assert_eq!(
@@ -234,5 +346,104 @@ mod tests {
                 from: Some(0)
             }]
         );
+    }
+
+    /// Two ledges 15px up, too far apart to cross: each is a rise from the
+    /// floor, by rope lift (cheapest) or up flash.
+    fn two_rises(cooldowns: &[Cooldown]) -> (Vec<PlanSegment>, Vec<(usize, SkipReason)>) {
+        let g = graph(&[
+            [0.0, 100.0, 200.0, 100.0],
+            [20.0, 85.0, 60.0, 85.0],
+            [140.0, 85.0, 180.0, 85.0],
+        ]);
+        let anchors = [(40.0, 85.0), (160.0, 85.0)];
+        let banned = HashSet::new();
+        let req = LoopRequest {
+            graph: &g,
+            anchors: &anchors,
+            banned: &banned,
+            tol: 5.0,
+            recorded: &|_, _| false,
+            policy: PatrolPolicy::Greedy,
+            temp: 1.0,
+            cooldowns,
+            pace: 1.0,
+        };
+        plan_loop(&req, (100.0, 100.0), None, &mut StdRng::seed_from_u64(3))
+    }
+
+    fn count(plan: &[PlanSegment], kind: MoveKind) -> usize {
+        plan.iter()
+            .flat_map(|s| s.legs.iter().flatten())
+            .filter(|l| l.kind == kind)
+            .count()
+    }
+
+    fn rope(ready_in: f64, every: f64) -> [Cooldown; 1] {
+        [Cooldown {
+            kind: MoveKind::RopeLift,
+            ready_in,
+            every,
+        }]
+    }
+
+    #[test]
+    fn a_cooling_move_is_planned_only_once_it_is_ready_again() {
+        let (plan, _) = two_rises(&[]);
+        assert_eq!(count(&plan, MoveKind::RopeLift), 2); // unconstrained
+        let (plan, _) = two_rises(&rope(0.0, 1000.0));
+        assert_eq!(plan.len(), 2);
+        assert_eq!(count(&plan, MoveKind::RopeLift), 1);
+        assert_eq!(count(&plan, MoveKind::UpFlash), 1);
+        let (plan, _) = two_rises(&rope(f64::INFINITY, 3.0)); // unbound
+        assert_eq!(plan.len(), 2);
+        assert_eq!(count(&plan, MoveKind::RopeLift), 0);
+    }
+
+    #[test]
+    fn a_cooldown_never_makes_an_anchor_unreachable() {
+        // 60px up: only a rope lift gets there.
+        let g = graph(&[[0.0, 100.0, 200.0, 100.0], [80.0, 40.0, 120.0, 40.0]]);
+        let anchors = [(100.0, 40.0)];
+        let banned = HashSet::new();
+        let plan = |cds: &[Cooldown]| {
+            let req = LoopRequest {
+                graph: &g,
+                anchors: &anchors,
+                banned: &banned,
+                tol: 5.0,
+                recorded: &|_, _| false,
+                policy: PatrolPolicy::Greedy,
+                temp: 1.0,
+                cooldowns: cds,
+                pace: 1.0,
+            };
+            plan_loop(&req, (20.0, 100.0), None, &mut StdRng::seed_from_u64(4))
+        };
+        let (segs, skipped) = plan(&rope(1000.0, 3.0));
+        assert_eq!(count(&segs, MoveKind::RopeLift), 1);
+        assert!(skipped.is_empty());
+        let (segs, skipped) = plan(&rope(f64::INFINITY, 3.0));
+        assert!(segs.is_empty());
+        assert_eq!(skipped, [(0, SkipReason::NoRoute)]);
+    }
+
+    #[test]
+    fn cooldowns_run_down_over_the_legs_ahead() {
+        let leg = |kind, cost| Leg {
+            kind,
+            x0: 0.0,
+            y0: 0.0,
+            x1: 0.0,
+            y1: 0.0,
+            cost,
+        };
+        let legs = [leg(MoveKind::RopeLift, 0.5), leg(MoveKind::Walk, 2.0)];
+        let after = after_legs(&rope(0.0, 3.0), &legs, 1.0);
+        assert!((after[0].ready_in - 0.5).abs() < 1e-9);
+        let after = after_legs(&rope(0.0, 3.0), &legs, 2.0); // a slower pace
+        assert_eq!(after[0].ready_in, 0.0);
+        let after = after_legs(&rope(f64::INFINITY, 3.0), &legs, 1.0);
+        assert!(after[0].ready_in.is_infinite());
     }
 }

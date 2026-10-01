@@ -158,7 +158,7 @@ Rust host (`rust/crates/`):
 | Host + dashboard cmds | `host/src/host.rs` (state, bot/measure runs, maps), `commands.rs` (edits: class, skills, layout, nav), `server.rs` (HTTP + WS), `clients.rs`, `bus.rs`, `telegram.rs` |
 | The real body | `host/src/botbody.rs` (`HostBody`: Pico keys, captures, stop-aware sleeps) |
 | Frame pipeline | `host/src/streamer.rs` (`FrameStreamer` thread), `frames.rs` (`assemble_panel`, `annotate`, `PBF1`) |
-| Lost-dot captures | `host/src/lostdot.rs` — minimap crop + stats to `debug/frames/*_dotlost/` whenever the dot is unreadable while the bot runs |
+| Evidence captures | `host/src/evidence.rs` — minimap crop + context to `debug/frames/*_dotlost/` when the dot is unreadable, and `*_offplatform/` (with a geometry overlay) when the player stands off every drawn platform, while the bot runs |
 | Serial / HID / screen | `io/src/serial.rs` (`SerialLink`, v2 protocol), `hid.rs` (`HidController`), `capture.rs`, `window.rs` |
 | Layout geometry | `core/src/layout.rs` (tidy, anchors follow lines), `platform_fit.rs` |
 | Tests | `core/tests/` (physics sim `tests/sim`, bot suites ported from Python, parity against fixtures the Python host wrote, generator on `legacy/python`) |
