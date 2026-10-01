@@ -219,8 +219,14 @@ A whole-codebase pass before the Rust port found, among others:
   distance-based budget.
 - **Cooldowns checked late**: a cooling rope lift or teleport was only
   noticed after walking to its takeoff, and the patrol's re-route didn't
-  exclude a cooling teleport, so it re-picked it every tick. Planning
-  itself still ignores cooldowns; the re-route covers them.
+  exclude a cooling teleport, so it re-picked it every tick.
+- **Loops planned moves that couldn't fire**: the planner ignored
+  cooldowns, so a loop chained rope lifts seconds apart (each later one
+  hit its cooldown and was re-routed at run time), and planned them even
+  with no rope-lift key bound. It now runs a clock along the loop. Plain
+  route cost underestimates real time (attack windows, landing waits,
+  summons), which would exclude moves that are in fact ready — so the
+  clock runs at a pace learned from how long segments really take.
 - **Pauses banned TRAVEL targets**: a hazard or focus loss mid-TRAVEL
   held the target out of routes for 45s as if it were unreachable.
 - **Clamped timing had spikes**: `human_between` clamped log-normal draws,
@@ -235,6 +241,24 @@ A whole-codebase pass before the Rust port found, among others:
   that closes the last hop only checked the distance to the target, so
   near an edge it could carry the character off. It now needs a jump's
   worth of platform ahead, else it walks.
+
+## Rope hugs and the top rim (2026-10-01)
+
+- **Down jumps onto a rope top**: a down jump's takeoff columns (the
+  overlap's ends and middle) ignored ropes. Standing on a rope's top,
+  Down grabs the rope, so the character hung under the platform ("not on
+  any drawn platform") until the off-graph probe learned the rope and
+  leapt off. Takeoffs now keep clear of learned ropes off that platform;
+  the first hug on an unlearned rope still happens, and learns it.
+- **The dot vanished under the top rim on rope lifts**: every one of 53
+  dot-lost captures was a rope lift to a platform near the minimap's top,
+  last seen at y 5-8. The dot was still there — its lower rows showing
+  just under a 2px frame — but the 4px `marker_inset` crop left 2 of its
+  pixels, under the 6px marker minimum. The capture stats made it look
+  like a colour problem (max-channel distance 15 against a sum-tolerance
+  detector); they now use the detector's metric. A dot missed inside the
+  crop is now looked for in the rim, but only within 12px of its last
+  sighting — the rim is frame everywhere else. All 53 captures read.
 
 ## Movement and detection
 

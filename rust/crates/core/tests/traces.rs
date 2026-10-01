@@ -202,6 +202,7 @@ fn navigation_graph_matches_python_on_random_maps() {
             rope_penalty: g["penalty"].as_f64().unwrap(),
             allow_flash: g["allow_flash"].as_bool().unwrap(),
             allow_teleport: g["allow_teleport"].as_bool().unwrap(),
+            rope_clear_px: 0.0, // the Python host had no rope clearance
             ..Default::default()
         };
         let graph = NavGraph::new(&plats, &ropes, &m, opts);

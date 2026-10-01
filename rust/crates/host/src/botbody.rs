@@ -17,9 +17,10 @@ use picobot_core::timing::{monotonic, new_session};
 use picobot_core::vision::Image;
 use picobot_io::hid::HidController;
 
+use crate::evidence::{merged, pixel_stats, Evidence};
 use crate::feed::Eyes;
+use crate::frames::{annotate, Overlay};
 use crate::host::Host;
-use crate::lostdot::LostDotSaver;
 
 /// A stop that wakes sleepers at once.
 #[derive(Default)]
@@ -72,7 +73,8 @@ pub struct HostBody {
     pub analyzer: Arc<MinimapAnalyzer>,
     pub stop: Arc<Stop>,
     tracker: PlayerTracker,
-    lost_dot: LostDotSaver,
+    lost_dot: Evidence,
+    off_platform: Evidence,
     map: Option<(MapKey, Option<Arc<MapEntry>>)>,
     /// Bumped only when the resolved map's name changes.
     map_version: u64,
@@ -104,7 +106,8 @@ impl HostBody {
             analyzer,
             stop,
             tracker: PlayerTracker::default(),
-            lost_dot: LostDotSaver::default(),
+            lost_dot: Evidence::dot_lost(),
+            off_platform: Evidence::off_platform(),
             map: None,
             map_version: 0,
             map_name: None,
@@ -226,19 +229,55 @@ impl Body for HostBody {
         let pos = self.analyzer.player_pos(img, &mut self.tracker);
         if pos.is_none() && !self.analyzer.loading() {
             let patrol = self.state.viz.patrol.as_ref();
-            self.lost_dot.save(
-                img,
-                self.analyzer.colors.player,
+            let meta = merged(
+                pixel_stats(img, self.analyzer.colors.player),
                 serde_json::json!({
                     "map": self.map_name,
                     "bot_state": self.state.viz.state,
                     "last_pos": before,
+                    "marker_inset": self.analyzer.marker_inset,
                     "patrol_target": patrol.and_then(|p| p.target.clone()),
                     "patrol_move": patrol.and_then(|p| p.move_kind.clone()),
                 }),
             );
+            self.lost_dot.save(&[("frame", img)], &meta);
         }
         pos
+    }
+
+    fn off_platform(&mut self, pos: (f64, f64), info: serde_json::Value) {
+        let Some(img) = self.frame() else { return };
+        let ropes = match (self.map(), self.region_wh()) {
+            (Some(e), Some((w, h))) => e
+                .ropes
+                .iter()
+                .flatten()
+                .map(|r| [r[0] * w, r[1] * h, r[2] * w, r[3] * h])
+                .collect(),
+            _ => Vec::new(),
+        };
+        let mut overlay = img.clone();
+        let mut o = Overlay {
+            platforms: self.segments_px(),
+            ropes,
+            player: Some(pos),
+            ..Default::default()
+        };
+        if let Some(l) = info["last_leg"].as_object() {
+            let pt = |k: &str, i: usize| l[k][i].as_f64().unwrap_or(0.0);
+            let kind = l["kind"].as_str().unwrap_or("").to_owned();
+            o.nav_route = vec![(kind, pt("from", 0), pt("from", 1), pt("to", 0), pt("to", 1))];
+        }
+        annotate(&mut overlay, &o);
+        let meta = merged(
+            info,
+            serde_json::json!({
+                "map": self.map_name,
+                "bot_state": self.state.viz.state,
+            }),
+        );
+        self.off_platform
+            .save(&[("frame", &img), ("overlay", &overlay)], &meta);
     }
 
     fn hazard_note(&self) -> Option<String> {

@@ -55,3 +55,25 @@ fn monster_markers_are_not_counted_as_players() {
     let img = load("monsters.png").crop(8, 69, 170, 62);
     assert_eq!(mm.count_other_players(&img, MARKER_MIN_PX), 0);
 }
+
+#[test]
+fn a_rope_lift_to_the_top_keeps_the_dot_under_the_frame_rim() {
+    // A dot-lost capture: the dot's bottom shows at rows 2-4 at x 90,
+    // mostly inside the 4px rim the marker search crops.
+    let colors = MinimapColors::default();
+    let rim = load("dot_under_top_rim.png");
+    let mm = MinimapAnalyzer::new(colors, Some((0, 0, rim.width as i32, rim.height as i32)), 4);
+    assert_eq!(mm.player_pos(&rim, &mut PlayerTracker::default()), None);
+    // Seen just below a moment earlier (on the rope lift's way up).
+    let mut before = rim.clone();
+    for y in 10..=15 {
+        for x in 87..93 {
+            before.set_bgr(x, y, colors.player);
+        }
+    }
+    let mut t = PlayerTracker::default();
+    assert_eq!(mm.player_pos(&before, &mut t), Some((90, 15)));
+    for _ in 0..3 {
+        assert_eq!(mm.player_pos(&rim, &mut t), Some((90, 4)));
+    }
+}

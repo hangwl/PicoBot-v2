@@ -82,14 +82,23 @@ rust\target\release\picobot.exe --root . --notify-test               # one Teleg
 
 Saving detection evidence to `debug/frames/` (blackout episodes, every
 title read, frame-not-found windows) was a feature of the Python host
-(`--debug-frames`, on `legacy/python`); the Rust host has only the lost-dot
-captures below. The recorded title bands in `debug/frames/*_ocr/` are what
-`ocr_check` reads.
+(`--debug-frames`, on `legacy/python`); the Rust host has the two
+evidence captures below (`evidence.rs`; at most one per 2s each, newest
+200 of each kind kept). The recorded title bands in `debug/frames/*_ocr/`
+are what `ocr_check` reads.
 
 **Lost-dot captures**: whenever the player dot can't be read while the bot
 runs (not during a map load), the host saves the minimap crop to
 `debug/frames/<utc-stamp>_dotlost/` — `frame.png` (lossless) and
-`meta.json`: map, bot state, last position, patrol target and move, and
-pixel counts near the dot colour (tolerance 10/30/60) plus the closest
-pixel. They tell a covered dot from a recoloured one. At most one per 2s,
-newest 200 kept (`lostdot.rs`).
+`meta.json`: map, bot state, last position, `marker_inset`, patrol target
+and move, and pixel counts near the dot colour plus the closest pixel, in
+the detector's own distance (sum of the three channel differences; it
+accepts under 30). They tell a covered dot from a recoloured one.
+
+**Off-platform captures**: the first tick of each spell the patrol finds
+the player off every drawn platform ("Player is not on any drawn
+platform"), the host saves `debug/frames/<utc-stamp>_offplatform/` —
+`frame.png`, `overlay.png` (drawn platforms, learned ropes, the player and
+the last leg) and `meta.json`: position, patrol target, the last leg run
+(kind, from, to, how it ended), the platforms just above and below with
+their row offsets (`dy`), and learned ropes within 8px of the column.
