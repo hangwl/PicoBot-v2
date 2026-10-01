@@ -144,7 +144,7 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   the odds a move or a landing opens an attack window;
   `weave_double_chance` is the chance a firing window casts two;
   `target_attacks_per_min` (default 0 = off) steers those odds toward a
-  rate. Setup → Attacks edits them (`attacks|set`).
+  rate. Setup → Tuning → Attacks edits them (`attacks|set`).
 - `allowed_other_players` (default 0) — other players tolerated on the
   minimap before the bot pauses (`stop_when_players_appear`);
   `other_player_min_px` (default 6) — the smallest marker that counts.
@@ -157,7 +157,7 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   (`map|players`). On an ignoring map the count is logged at debug level.
 - `rope_penalty` (default 5 s) and `walk_cost_factor` (default 1) — how
   strongly the planner avoids ropes and walking (see bot-behavior.md);
-  Setup → Patrol edits them.
+  Setup → Tuning → Patrol edits them.
 - `heartbeat_minutes` — Telegram status message every N minutes while
   the bot runs (default 30; 0 turns it off).
 - `pause_on_lie_detector` is a stub seam — keep it off.

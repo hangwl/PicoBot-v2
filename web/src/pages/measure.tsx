@@ -39,14 +39,14 @@ export function MeasurePage({ s }: { s: AppState }) {
   const plan = m.plan.length ? m.plan : s.measurePlan;
   return (
     <div class="form">
-      <p class="muted">
+      <Section title="How it works" hint={<>
         Stop the bot and stand mid-way along a long platform with another
         one above it. The character works each move
         {s.classActive ? ` ${s.classActive}` : " this class"} can use, and
         the best result becomes that move's reach. Results are saved per
         class. Measure one move on its own when a spot suits it — rope lift
         needs a platform above; sideways moves need room.
-      </p>
+      </>} />
       <ul class="rows moves">
         {plan.map((mv) => {
           const [text, tone] = moveStatus(s, mv);
@@ -77,7 +77,6 @@ export function MeasurePage({ s }: { s: AppState }) {
           </button>
         )}
       {s.botRunning && <p class="hint warn">Stop the bot first.</p>}
-      <p class="hint">Switching away from the game also stops a measurement.</p>
       {plan.includes("up_flash") && <UpFlashSweep s={s} />}
       <WalkTaps s={s} />
       <SkillEffects s={s} />
@@ -138,7 +137,7 @@ function SkillEffects({ s }: { s: AppState }) {
       {!names.length && (
         <p class="hint">
           No movement skills. Add an attack that moves you with the kind
-          “movement” on the Skills page.
+          “movement” under Setup → Class → Skills.
         </p>
       )}
       {names.length > 0 && (

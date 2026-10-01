@@ -69,18 +69,11 @@ export function MapPage({ s }: { s: AppState }) {
           {creating ? "Create map" : "Save map"}
         </button>
         <button onClick={() => send("layout|reset")}>Re-detect</button>
-        <button class="danger" disabled={creating || bad}
-                onClick={() => {
-                  const label = target || s.detected || "the detected map";
-                  if (confirm(`Forget the stored layout for ${label}?`))
-                    send(`layout|clear|${target}`);
-                }}>
-          Forget
-        </button>
       </div>
-      {(s.detected || target) && (
+      <details class="more">
+        <summary>More</summary>
         <div class="actions">
-          <button disabled={creating || bad || !s.title}
+          <button disabled={creating || bad || !s.title || !(s.detected || target)}
                   onClick={() => act(`map|title|record|${target}`)}>
             Record title from screen
           </button>
@@ -91,15 +84,23 @@ export function MapPage({ s }: { s: AppState }) {
                   }}>
             Clear title
           </button>
+          <button class="danger" disabled={creating || bad}
+                  onClick={() => {
+                    const label = target || s.detected || "the detected map";
+                    if (confirm(`Forget the stored layout for ${label}?`))
+                      send(`layout|clear|${target}`);
+                  }}>
+            Forget layout
+          </button>
         </div>
-      )}
+        <p class="hint">
+          The map is detected by matching the title on screen to its
+          recorded title. If they belong to different maps, pin the right map
+          and record the title while standing in it.
+        </p>
+      </details>
       <Reply reply={reply} />
       <PlayersRule s={s} target={target} disabled={creating || bad} />
-      <p class="hint">
-        The map is detected by matching the title on screen to its
-        recorded title. If they belong to different maps, pin the right map
-        and record the title while standing in it.
-      </p>
     </div>
   );
 }

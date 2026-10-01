@@ -104,6 +104,40 @@ export function RunButton({ s }: { s: AppState }) {
   );
 }
 
+/** Home's class control: one tap switches the active profile. */
+export function ClassPicker({ s }: { s: AppState }) {
+  const names = Object.keys(s.profiles).sort();
+  if (!names.length) {
+    return (
+      <section class="card picker">
+        <p class="muted">No class profiles yet.</p>
+        <button onClick={() => go("setup/class")}>Add a class</button>
+      </section>
+    );
+  }
+  const off = s.ws !== "on";
+  return (
+    <section class="card picker">
+      <div class="head">
+        <span class="label">Class</span>
+        <button class="link-btn" onClick={() => go("setup/class")}>Edit</button>
+      </div>
+      <div class="chips" role="group" aria-label="class">
+        {names.map((n) => (
+          <button key={n} aria-pressed={n === s.classActive} disabled={off}
+                  onClick={() => n !== s.classActive && send(`class|use|${n}`)}>
+            {n}
+          </button>
+        ))}
+      </div>
+      <p class="hint">
+        {kitLabel(s.classActive, s.profiles[s.classActive])}
+        {s.botRunning && " — switching stops the bot."}
+      </p>
+    </section>
+  );
+}
+
 export function StatusList({ s }: { s: AppState }) {
   const last = [...s.logs].reverse().find((it) => it.kind === "skill");
   const conf = s.score != null ? ` ${Math.round(s.score * 100)}%` : "";
@@ -416,28 +450,26 @@ export function Pad({ s }: { s: AppState }) {
       <div class="keys">
         {quick.map((k) => <HoldKey key={k} name={k} />)}
       </div>
-      <div class="custom">
-        <input aria-label="key name" placeholder="Key name, like f or page up"
-               list="pico-keys" value={custom} autoCapitalize="off"
-               autoCorrect="off" spellcheck={false}
-               onInput={(e) => setCustom((e.target as HTMLInputElement).value)} />
-        <datalist id="pico-keys">
-          {PICO_KEYS.map((k) => <option key={k} value={k} />)}
-        </datalist>
-        <HoldKey name={name} label={`hold ${name || "key"}`}>
-          {name && isPicoKey(name) ? name : "Hold"}
-        </HoldKey>
-      </div>
-      {name && !isPicoKey(name) && (
-        <p class="hint warn">The Pico has no key called "{custom.trim()}".</p>
-      )}
+      <details class="more">
+        <summary>More keys</summary>
+        <div class="custom">
+          <input aria-label="key name" placeholder="Key name, like f or page up"
+                 list="pico-keys" value={custom} autoCapitalize="off"
+                 autoCorrect="off" spellcheck={false}
+                 onInput={(e) => setCustom((e.target as HTMLInputElement).value)} />
+          <datalist id="pico-keys">
+            {PICO_KEYS.map((k) => <option key={k} value={k} />)}
+          </datalist>
+          <HoldKey name={name} label={`hold ${name || "key"}`}>
+            {name && isPicoKey(name) ? name : "Hold"}
+          </HoldKey>
+        </div>
+        {name && !isPicoKey(name) && (
+          <p class="hint warn">The Pico has no key called "{custom.trim()}".</p>
+        )}
+        {s.platformsN > 0 && <AlignHere s={s} />}
+      </details>
       <p class="hint">Keys stay down while you hold them.</p>
-      {s.platformsN > 0 && (
-        <details class="card here">
-          <summary>Layout from here</summary>
-          <AlignHere s={s} />
-        </details>
-      )}
     </section>
   );
 }

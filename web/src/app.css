@@ -143,6 +143,32 @@ main {
 .kv dt { color: var(--dim); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 
+/* -- Class picker ---------------------------------------------------------- */
+.picker { display: flex; flex-direction: column; gap: 10px; }
+.picker .head { display: flex; align-items: center; justify-content: space-between; }
+.picker .label { font-size: 14px; color: var(--dim); }
+.picker .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.picker .chips button { flex: 1 1 auto; min-width: 80px; }
+button.link-btn {
+  background: none; border: 0; color: var(--accent); min-height: 32px; padding: 0 4px;
+  font-size: 14px;
+}
+
+/* -- Fold ------------------------------------------------------------------ */
+.fold { padding: 0; }
+.fold summary {
+  display: flex; align-items: center; gap: 10px; min-height: var(--tap);
+  padding: 0 14px; cursor: pointer; font-weight: 600; list-style: none;
+}
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary::after { content: "▾"; margin-left: auto; color: var(--muted); }
+.fold[open] summary::after { content: "▴"; }
+.fold summary .sub {
+  font-weight: 400; font-size: 13px; color: var(--muted); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fold .body { padding: 0 14px 14px; }
+
 /* -- Pad ----------------------------------------------------------------- */
 .pad { display: flex; flex-direction: column; gap: 12px; }
 .arrows {
@@ -208,8 +234,27 @@ main {
 .pill.accent { color: var(--accent); background: var(--accent-bg); }
 .moves li { min-height: var(--tap); }
 .moves li button { margin-left: auto; }
-.fit h3 { font-size: 15px; font-weight: 600; margin: 8px 0 4px; }
-.fit .rows li b { font-weight: 500; font-variant-numeric: tabular-nums; }
+.section { display: flex; flex-direction: column; gap: 8px; }
+.section h3 {
+  display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600;
+  margin: 8px 0 0;
+}
+button.help {
+  min-height: 24px; width: 24px; padding: 0; border-radius: 50%; font-size: 13px;
+  color: var(--dim);
+}
+.more summary {
+  cursor: pointer; color: var(--dim); min-height: var(--tap);
+  display: flex; align-items: center; gap: 6px; list-style: none;
+}
+.more summary::-webkit-details-marker { display: none; }
+.more summary::before { content: "▸"; font-size: 12px; }
+.more[open] summary::before { content: "▾"; }
+.skill-rows li { gap: 4px 8px; }
+.skill-rows .pills { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.skill-rows li button { order: 2; }
+.more .actions { padding-bottom: 8px; }
+.section .rows li b { font-weight: 500; font-variant-numeric: tabular-nums; }
 .sweep .bar {
   width: 64px; height: 6px; border-radius: 3px; background: var(--surface-2);
   overflow: hidden;

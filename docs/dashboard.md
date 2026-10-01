@@ -46,23 +46,22 @@ A sticky top bar always shows the bot's state (Farming / Traveling /
 Paused / Stopped / Offline, with a coloured dot), the map and the link.
 
 - **Home** — the live view, view switcher (Panel / Window / Title) and
-  fps, a status list and one large Start/Stop button. While the bot runs
-  the status shows the patrol: the anchor it's heading to, the move being
-  run (leg n of m) and misses toward it, the next anchors, and anchors
-  reached this run — or that it's halted with no planned path. Stopped,
-  it shows the map and how it was identified. Class kit, last skill and
-  summons follow.
+  fps, the **class picker** (one tap switches the profile; *Edit* opens
+  Setup → Class) and one large Start/Stop button.
 - **Control** — rune solving on one screen: hazard banner, a compact
   view, the arrow pad, quick keys (jump key, ctrl, shift, enter) and a
-  key-name field (limited to the Pico's `KEY_MAP` names), and a
-  collapsible **Layout from here** card when the map has platforms,
-  holding **Align platform to feet** (walk onto a platform with the pad,
-  tap it; the host's reply shows under it). Keys mirror the
+  key-name field (limited to the Pico's `KEY_MAP` names) and, when the
+  map has platforms, **Align platform to feet** (walk onto a platform
+  with the pad, tap it; the host's reply shows under it) — the last two
+  under **More keys** — and a collapsed **Status**
+  fold with the patrol (target anchor, move, leg n of m, misses, next
+  anchors, anchors reached), session, moves, class kit, last skill and
+  summons. Keys mirror the
   finger: `key|down` on touch, `key|up` on lift, so a tap is a tap, a
   hold is a hold, and several fingers chord (hold left, tap jump). Held
   keys are released when the page is hidden or loses focus; the host
   releases a disconnected client's keys. A new hazard (rune, another player, verification
-  prompt) jumps here from any screen and vibrates the phone where the
+  prompt) vibrates the phone where the
   browser allows it; the bot resumes by itself once it clears. The Control
   tab carries a red badge while a hazard is active.
 - **Setup** — a readiness banner (map identified → platforms → anchors →
@@ -84,7 +83,7 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     teleport key), and its **move keys** (jump / rope lift / flash keys
     and arrival radius; only edited fields are saved). Switching applies
     live and stops the bot first.
-  - **Skills** — the active skill book (the profile's kit when one is
+  - **Skills** (a fold on the Class page) — the active skill book (the profile's kit when one is
     active); add or remove (confirmed) attacks, buffs, summons.
   - **Measure moves** — the class's moves with each one's status (not
     measured / measuring / px result / skip reason) and a **Measure**
@@ -95,16 +94,16 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     per-delay peaks (live while sweeping, then the saved sweep).
     Every class also gets **Walk taps** (tap lengths, pace), and flash
     classes **Skill effects** (what each attack does to a flash in the air and to you on the ground;
-    shown on the Skills page too).
-  - **Patrol** — loop order + temperature, and per-anchor **stats**
+    shown in the Skills fold too).
+  - **Tuning** — three folds. **Patrol**: loop order + temperature, and per-anchor **stats**
     (visits, misses, skips by reason; Reset).
-  - **Attacks** — how often a move and a landing carry attacks, the
+    **Attacks**: how often a move and a landing carry attacks, the
     second-attack chance and a target attacks-per-minute; the running
     rate shows here and in the Session row.
-  - **Safety** — the pause toggles (rune, other players, unrecognized
+    **Safety**: the pause toggles (rune, other players, unrecognized
     map), how many other players are allowed and the smallest marker
-    that counts (Home shows the live count), the Telegram status interval (0 = off) and a **Send test
-    alert** button. Home's status list shows the running **Session**
+    that counts (Status shows the live count), the Telegram status interval (0 = off) and a **Send test
+    alert** button. the Status fold on Control shows the running **Session**
     (uptime, visits, misses, skips, pauses); an unrecognized map sends
     you to the Map page, whose banner offers to name and save it.
   - **Connection** (Pico serial port, *Find the Pico* auto-probe that

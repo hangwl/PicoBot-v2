@@ -2,8 +2,9 @@
 import { useState } from "preact/hooks";
 import { kitLabel } from "../live";
 import { type AppState, send } from "../protocol";
-import { Field, Section, val } from "../ui";
+import { Field, Fold, Section, val } from "../ui";
 import { MoveKeys } from "./keys";
+import { SkillsPage } from "./skills";
 
 export function ClassPage({ s }: { s: AppState }) {
   const [creating, setCreating] = useState(false);
@@ -25,10 +26,13 @@ export function ClassPage({ s }: { s: AppState }) {
       {creating
         ? <NewClass onDone={() => setCreating(false)} />
         : <button onClick={() => setCreating(true)}>New class</button>}
-      <Section title="Move keys"
-               hint={`Saved to ${s.classActive || "this class"}.`}>
+      <Fold title="Skills" sub={skillSummary(s) || "none yet"} open>
+        <SkillsPage s={s} />
+      </Fold>
+      <Fold title="Move keys" sub={`jump ${s.jumpKey || "–"}`}>
+        <p class="hint">Saved to {s.classActive || "this class"}.</p>
         <MoveKeys s={s} />
-      </Section>
+      </Fold>
     </div>
   );
 }
@@ -105,4 +109,10 @@ function NewClass({ onDone }: { onDone: () => void }) {
       </div>
     </div>
   );
+}
+
+export function skillSummary(s: AppState): string {
+  const n: Record<string, number> = {};
+  for (const sk of Object.values(s.skills)) n[sk.kind] = (n[sk.kind] ?? 0) + 1;
+  return Object.entries(n).map(([k, c]) => `${c} ${k}`).join(" · ");
 }
