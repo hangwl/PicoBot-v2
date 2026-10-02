@@ -433,9 +433,12 @@ after 5 reads without it with the player clearly off it (or once it has
 stayed covered 30s). Then the bot resumes farming, and the patrol
 re-routes from wherever the detour ended. A map change forgets the rune.
 
-Telegram hears about: a hazard pause, every stop (with its reason and
-the run's summary), a failed start, a crash (caught; keys released), a
-lost serial port, and the watchdog's three episodes — paused over 60 s,
-no player dot for 30 s, standing still for 45 s while moving states run
-(each once per episode). While running, a heartbeat message (map, state,
-uptime, visits, misses, skips, pauses) goes out every `heartbeat_minutes`.
+Telegram hears about hazards only: a hazard pause (other players, an
+unrecognized map, a loading screen) and runes (spotted with `rune_action:
+pause`, reached, or out of reach). Health checks only reach the log:
+every stop (with its reason and the run's summary), a failed start, a
+crash (caught; keys released), a lost serial port, the watchdog's three
+episodes — paused over 60 s, no player dot for 30 s, standing still for
+45 s while moving states run (each once per episode) — and a heartbeat
+line (map, state, uptime, visits, misses, skips, pauses) every
+`heartbeat_minutes`.

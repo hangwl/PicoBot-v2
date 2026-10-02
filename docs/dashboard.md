@@ -101,7 +101,7 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     **Safety**: the pause toggles (rune, other players, unrecognized
     map), what to do **on a rune** (walk over then pause, or pause
     here), **Record rune solves** (the solve dataset), how many other players are allowed and the smallest marker
-    that counts (Status shows the live count), the Telegram status interval (0 = off) and a **Send test
+    that counts (Status shows the live count), the log's status-line interval (0 = off; Telegram gets hazards only) and a **Send test
     alert** button. the Status fold on Control shows the running **Session**
     (uptime, visits, misses, skips, pauses); an unrecognized map sends
     you to the Map page, whose banner offers to name and save it.

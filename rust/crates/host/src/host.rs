@@ -424,14 +424,12 @@ impl Host {
             bus.emit_level("remote", &format!("RX: {line}"), "debug");
         });
         let bus = self.bus.clone();
-        let telegram = self.telegram.clone();
         link.on_lost(move |why| {
             bus.emit(
                 "remote",
                 &format!("ERR: serial port lost ({why}) — reconnect it in Connection"),
             );
             bus.emit("status", "Remote: Serial lost");
-            telegram.send_async(&format!("Serial port lost ({why})"));
         });
         let old = self.serial.lock().unwrap().replace(Arc::new(link));
         drop(old);
@@ -513,8 +511,7 @@ impl Host {
         match spawn_bot(self) {
             Ok(run) => *self.bot.lock().unwrap() = Some(run),
             Err(e) => {
-                self.bus.emit("error", &e);
-                self.notify(&format!("Bot failed to start: {e}"));
+                self.bus.emit("error", &format!("Bot failed to start: {e}"));
                 self.send_bot_state(false);
             }
         }
@@ -690,7 +687,9 @@ impl Host {
         self.send_maps();
     }
 
-    /// A safety alert: the event log, and Telegram when configured.
+    /// A hazard alert (a hazard pause, a rune): the event log, and Telegram
+    /// when configured. Health checks (watchdog, heartbeat, stops, crashes,
+    /// a lost serial port) only reach the log.
     pub fn notify(&self, msg: &str) {
         self.bus.emit("notify", msg);
         self.telegram.send_async(msg);
