@@ -102,3 +102,28 @@ platform"), the host saves `debug/frames/<utc-stamp>_offplatform/` —
 the last leg) and `meta.json`: position, patrol target, the last leg run
 (kind, from, to, how it ended), the platforms just above and below with
 their row offsets (`dy`), and learned ropes within 8px of the column.
+
+**Rune captures**: `debug/frames/<utc-stamp>_rune/` when a rune is first
+seen (`event: seen`), when the bot stands beside it (`arrived`, with the
+glyph gap and facing) and when it gives up (`failed`, with why) —
+`frame.png`, `overlay.png` and `meta.json` with the rune's box. They are
+the evidence for the rune glyph's real size and the side-by-side rule.
+
+**Rune-solve recordings** (the dataset for solving runes): while the bot
+is paused at a rune, the `RuneRecorder` thread (`solves.rs`, own grabber,
+8 fps) keeps 2s of game-window frames; the first dashboard key starts a
+recording. It ends when the bot resumes farming (`solved`), stops or
+pauses for something else (`interrupted`), or after 8s without a key or
+30s in all (`unsolved`), and is saved to
+`debug/frames/<utc-stamp>_runesolve/`:
+
+- `frames/NNN.jpg` (quality 90) from 2s before the first key to 1s after
+  the last, with their times in `frames.json`;
+- `key_NN_<arrow>.png` — the last frame before each arrow key-down,
+  lossless: the puzzle as it was read, labelled by the key pressed;
+- `keys.json` — every dashboard key event (down/up), times relative to
+  the first key;
+- `meta.json` — outcome, the arrow sequence, frame count, window size.
+
+Newest 30 kept; `record_rune_solves` turns it off. Only `solved`
+recordings make reliable labels.

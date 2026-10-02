@@ -1,6 +1,7 @@
 //! The bot: a body with movement primitives, the navigator that runs graph
 //! routes, the patrol loop, and the farming routines around them.
 
+pub mod approach;
 pub mod body;
 pub mod flight;
 pub mod grind;

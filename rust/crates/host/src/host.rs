@@ -3,7 +3,7 @@
 //! (files, serial handshakes, joining threads) runs on the
 //! `DashboardCommands` thread, in order.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -33,6 +33,7 @@ use crate::clients::Clients;
 use crate::commands::UndoStep;
 use crate::feed::{Feed, TitleJob};
 use crate::frames::Overlay;
+use crate::solves::KeyEvent;
 use crate::telegram::Telegram;
 
 /// WS message prefixes handled by the host; anything else is HID input
@@ -86,6 +87,8 @@ pub struct Host {
     pub(crate) measurer: Mutex<Option<BotRun>>,
     pub(crate) last_measure: Mutex<Option<MeasureStatus>>,
     pub(crate) bot_viz: Mutex<Option<Viz>>,
+    /// Dashboard key events, newest last, for the rune-solve recorder.
+    pub(crate) remote_keys: Mutex<VecDeque<KeyEvent>>,
     pub(crate) pending_skills: Mutex<Option<Vec<Skill>>>,
     /// Bumped by every map save (the bot re-reads its entry).
     pub(crate) map_edits: AtomicU64,
@@ -178,6 +181,7 @@ impl Host {
             measurer: Mutex::new(None),
             last_measure: Mutex::new(None),
             bot_viz: Mutex::new(None),
+            remote_keys: Mutex::default(),
             pending_skills: Mutex::new(None),
             map_edits: AtomicU64::new(0),
             maps_pushed: Mutex::new(f64::NEG_INFINITY),
@@ -295,7 +299,28 @@ impl Host {
             return;
         }
         self.clients.track_key(id, msg);
+        self.note_remote_key(msg);
         self.enqueue_hid(msg);
+    }
+
+    /// Keep a dashboard `key|down|x` / `key|up|x` for the solve recorder.
+    fn note_remote_key(&self, msg: &str) {
+        const KEEP: usize = 64;
+        let mut parts = msg.split('|');
+        if let (Some("key"), Some(ev @ ("down" | "up")), Some(key)) =
+            (parts.next(), parts.next(), parts.next())
+        {
+            let mut keys = self.remote_keys.lock().unwrap();
+            keys.push_back((monotonic(), ev.to_owned(), key.to_owned()));
+            while keys.len() > KEEP {
+                keys.pop_front();
+            }
+        }
+    }
+
+    /// The dashboard key events since the last call.
+    pub fn take_remote_keys(&self) -> Vec<KeyEvent> {
+        self.remote_keys.lock().unwrap().drain(..).collect()
     }
 
     pub(crate) fn submit(&self, msg: &str) {

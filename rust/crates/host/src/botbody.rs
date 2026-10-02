@@ -75,6 +75,7 @@ pub struct HostBody {
     tracker: PlayerTracker,
     lost_dot: Evidence,
     off_platform: Evidence,
+    rune_seen: Evidence,
     map: Option<(MapKey, Option<Arc<MapEntry>>)>,
     /// Bumped only when the resolved map's name changes.
     map_version: u64,
@@ -108,6 +109,7 @@ impl HostBody {
             tracker: PlayerTracker::default(),
             lost_dot: Evidence::dot_lost(),
             off_platform: Evidence::off_platform(),
+            rune_seen: Evidence::rune(),
             map: None,
             map_version: 0,
             map_name: None,
@@ -116,6 +118,35 @@ impl HostBody {
             cfg_version: host_version,
             players_allowed: 0,
         }
+    }
+
+    /// The drawn platforms and learned ropes, for an evidence overlay.
+    fn geometry_overlay(&mut self) -> Overlay {
+        let ropes = match (self.map(), self.region_wh()) {
+            (Some(e), Some((w, h))) => e
+                .ropes
+                .iter()
+                .flatten()
+                .map(|r| [r[0] * w, r[1] * h, r[2] * w, r[3] * h])
+                .collect(),
+            _ => Vec::new(),
+        };
+        Overlay {
+            platforms: self.segments_px(),
+            ropes,
+            ..Default::default()
+        }
+    }
+
+    /// `info` with the map and bot state added.
+    fn with_context(&self, info: serde_json::Value) -> serde_json::Value {
+        merged(
+            info,
+            serde_json::json!({
+                "map": self.map_name,
+                "bot_state": self.state.viz.state,
+            }),
+        )
     }
 
     /// Hand the dashboard what the bot sees, at most 20 times a second.
@@ -247,36 +278,39 @@ impl Body for HostBody {
 
     fn off_platform(&mut self, pos: (f64, f64), info: serde_json::Value) {
         let Some(img) = self.frame() else { return };
-        let ropes = match (self.map(), self.region_wh()) {
-            (Some(e), Some((w, h))) => e
-                .ropes
-                .iter()
-                .flatten()
-                .map(|r| [r[0] * w, r[1] * h, r[2] * w, r[3] * h])
-                .collect(),
-            _ => Vec::new(),
-        };
-        let mut overlay = img.clone();
-        let mut o = Overlay {
-            platforms: self.segments_px(),
-            ropes,
-            player: Some(pos),
-            ..Default::default()
-        };
+        let mut o = self.geometry_overlay();
+        o.player = Some(pos);
         if let Some(l) = info["last_leg"].as_object() {
             let pt = |k: &str, i: usize| l[k][i].as_f64().unwrap_or(0.0);
             let kind = l["kind"].as_str().unwrap_or("").to_owned();
             o.nav_route = vec![(kind, pt("from", 0), pt("from", 1), pt("to", 0), pt("to", 1))];
         }
+        let mut overlay = img.clone();
         annotate(&mut overlay, &o);
-        let meta = merged(
-            info,
-            serde_json::json!({
-                "map": self.map_name,
-                "bot_state": self.state.viz.state,
-            }),
-        );
+        let meta = self.with_context(info);
         self.off_platform
+            .save(&[("frame", &img), ("overlay", &overlay)], &meta);
+    }
+
+    fn locate_rune(&mut self, img: &Image) -> Option<picobot_core::rune::BoxPx> {
+        if self.analyzer.loading() {
+            return None;
+        }
+        self.analyzer.rune_box(img)
+    }
+
+    fn rune_event(&mut self, event: &str, info: serde_json::Value) {
+        let Some(img) = self.frame() else { return };
+        let mut o = self.geometry_overlay();
+        o.player = self.state.viz.player;
+        if let Some(b) = info["rune"].as_array() {
+            let v = |i: usize| b.get(i).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            o.rune = Some(((v(0) + v(2)) / 2.0, (v(1) + v(3)) / 2.0));
+        }
+        let mut overlay = img.clone();
+        annotate(&mut overlay, &o);
+        let meta = self.with_context(merged(serde_json::json!({ "event": event }), info));
+        self.rune_seen
             .save(&[("frame", &img), ("overlay", &overlay)], &meta);
     }
 
@@ -309,8 +343,6 @@ impl Body for HostBody {
             Some("identifying map")
         } else if self.cfg.stop_when_map_unrecognized && self.host.identity.unrecognized() {
             Some("unrecognized map")
-        } else if self.cfg.stop_when_rune_appears && self.analyzer.rune_pos(img).is_some() {
-            Some("rune")
         } else if self.cfg.stop_when_players_appear && others > self.players_allowed {
             Some("other players")
         } else {

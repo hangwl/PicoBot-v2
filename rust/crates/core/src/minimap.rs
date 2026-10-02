@@ -481,6 +481,24 @@ impl MinimapAnalyzer {
         self.marker(img, self.colors.rune, 10, false, None)
     }
 
+    /// The rune marker's box (inclusive, minimap px): the largest blob
+    /// inside the rim crop, else anywhere — a rune on a platform at the
+    /// map's top edge sits partly under the rim, like the player dot.
+    pub fn rune_box(&self, img: &Image) -> Option<crate::rune::BoxPx> {
+        let (inner, off) = self.interior(img);
+        let found = |img: &Image, off: usize| {
+            let b = *marker_blobs(&color_mask(img, self.colors.rune, 10), MARKER_MIN_PX).first()?;
+            let o = off as i32;
+            Some((
+                b.x_min as i32 + o,
+                b.y_min as i32 + o,
+                b.x_max as i32 + o,
+                b.y_max as i32 + o,
+            ))
+        };
+        found(&inner, off).or_else(|| found(img, 0))
+    }
+
     pub fn has_other_players(&self, img: &Image) -> bool {
         self.count_other_players(img, MARKER_MIN_PX) > 0
     }

@@ -19,6 +19,7 @@ mod feed;
 mod frames;
 mod host;
 mod server;
+mod solves;
 mod streamer;
 mod telegram;
 
@@ -215,6 +216,7 @@ fn main() -> ExitCode {
             if dual { "" } else { ", IPv4 only" }
         );
         let _streamer = streamer::Streamer::start(host.clone());
+        let _recorder = solves::RuneRecorder::start(host.clone());
         tokio::signal::ctrl_c().await.map_err(|e| e.to_string())
     });
     if let Err(e) = served {

@@ -101,7 +101,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     second-attack chance and a target attacks-per-minute; the running
     rate shows here and in the Session row.
     **Safety**: the pause toggles (rune, other players, unrecognized
-    map), how many other players are allowed and the smallest marker
+    map), what to do **on a rune** (walk over then pause, or pause
+    here), **Record rune solves** (the solve dataset), how many other players are allowed and the smallest marker
     that counts (Status shows the live count), the Telegram status interval (0 = off) and a **Send test
     alert** button. the Status fold on Control shows the running **Session**
     (uptime, visits, misses, skips, pauses); an unrecognized map sends
