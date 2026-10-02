@@ -23,6 +23,7 @@ pub mod platform_fit;
 pub mod reach;
 pub mod rotation;
 pub mod rune;
+pub mod rune_arrows;
 pub mod skills;
 pub mod summons;
 pub mod taps;

@@ -7,8 +7,6 @@ import {
   type AppState,
   type CanvasMode,
   type LogFilter,
-  type PatrolStatus,
-  type SessionStats,
   type ViewMode,
   go,
   send,
@@ -137,93 +135,6 @@ export function ClassPicker({ s }: { s: AppState }) {
       </p>
     </section>
   );
-}
-
-export function StatusList({ s }: { s: AppState }) {
-  const last = [...s.logs].reverse().find((it) => it.kind === "skill");
-  const conf = s.score != null ? ` ${Math.round(s.score * 100)}%` : "";
-  const p = s.botRunning ? s.patrol : null;
-  const rows: [string, string][] = [
-    ...(p ? patrolRows(p) : [["Map", s.detected
-      ? `${s.detected}${s.via ? ` · ${s.via}` : ""}${conf}`
-      : "Not identified"] as [string, string]]),
-    ...(s.botRunning && s.others > 0
-      ? [["Other players", `${s.others} on the minimap`] as [string, string]]
-      : []),
-    ...(s.botRunning && s.session ? [["Session", sessionLine(s.session)] as [string, string]] : []),
-    ...(s.botRunning && s.session?.moves && Object.keys(s.session.moves).length
-      ? [["Moves", movesLine(s.session.moves)] as [string, string]]
-      : []),
-    ["Class", kitLabel(s.classActive, s.profiles[s.classActive])],
-    ["Last skill", last ? `${last.msg}${last.t ? ` · ${ago(last.t)}` : ""}` : "–"],
-    ...(s.summons && Object.keys(s.summons.charges).length
-      ? [["Summons", summonLine(s.summons)] as [string, string]]
-      : []),
-  ];
-  return (
-    <dl class="kv">
-      {rows.map(([k, v]) => (
-        <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
-      ))}
-    </dl>
-  );
-}
-
-const MOVE_NAME: Record<string, string> = {
-  walk: "walking", jump: "jump", flash: "flash", double_flash: "double flash",
-  up_flash: "up flash", up_side_flash: "up-side flash", rope_lift: "rope lift",
-  down_jump: "down-jump", drop: "drop", teleport: "teleport",
-  climb_up: "rope climb", climb_down: "rope descent",
-};
-
-function patrolRows(p: PatrolStatus): [string, string][] {
-  if (p.halted || !p.target) return [["Patrol", "No planned path — taking a break"]];
-  const parts = [`to ${p.target}`];
-  if (p.move) {
-    parts.push(`${MOVE_NAME[p.move] ?? p.move}` +
-      (p.legs && p.legs > 1 ? ` (${p.leg}/${p.legs})` : ""));
-  }
-  if (p.misses) parts.push(`${p.misses} missed`);
-  const rows: [string, string][] = [["Patrol", parts.join(" · ")]];
-  if (p.next.length) rows.push(["Then", p.next.join(" → ")]);
-  rows.push(["Reached", `${p.arrived} anchor${p.arrived === 1 ? "" : "s"} this run`]);
-  return rows;
-}
-
-function movesLine(m: NonNullable<SessionStats["moves"]>): string {
-  return Object.entries(m)
-    .sort((a, b) => b[1].ok + b[1].failed - (a[1].ok + a[1].failed))
-    .map(([k, v]) => `${k.replace(/_/g, " ")} ${v.ok}${v.failed ? ` (${v.failed} missed)` : ""}`)
-    .join(" · ");
-}
-
-function sessionLine(x: SessionStats): string {
-  const dur = (sec: number) => sec >= 3600
-    ? `${Math.floor(sec / 3600)}h${String(Math.floor(sec / 60) % 60).padStart(2, "0")}m`
-    : sec >= 60 ? `${Math.floor(sec / 60)}m${String(sec % 60).padStart(2, "0")}s` : `${sec}s`;
-  const tries = x.visits + x.misses;
-  const rate = tries ? ` (${Math.round((100 * x.misses) / tries)}%)` : "";
-  return `up ${dur(x.up)} · ${x.visits} visits · ${x.misses} missed${rate}` +
-    (x.skips ? ` · ${x.skips} skipped` : "") +
-    (x.apm != null ? ` · ${x.apm} attacks/min` : "") +
-    (x.pauses ? ` · ${x.pauses} pause${x.pauses === 1 ? "" : "s"} (${dur(x.paused)})` : "");
-}
-
-function summonLine(sm: NonNullable<AppState["summons"]>): string {
-  const out = sm.placed.map((p) => {
-    const [have, max] = sm.charges[p.skill] ?? [0, 0];
-    return `${p.skill} at ${p.anchor} · ${Math.max(0, p.left)}s left · ${have}/${max}`;
-  });
-  const idle = Object.entries(sm.charges)
-    .filter(([name]) => !sm.placed.some((p) => p.skill === name))
-    .map(([name, [have, max]]) => `${name} ready ${have}/${max}`);
-  return [...out, ...idle].join("; ") || "–";
-}
-
-function ago(t: number): string {
-  const sec = Math.max(0, Math.round(Date.now() / 1000 - t));
-  if (sec < 5) return "just now";
-  return sec < 60 ? `${sec}s ago` : `${Math.round(sec / 60)} min ago`;
 }
 
 // -- Live view -----------------------------------------------------------------
@@ -433,8 +344,8 @@ function HoldKey({ name, label, class: cls, children }: {
 export function Pad({ s }: { s: AppState }) {
   const [custom, setCustom] = useState("");
   const name = custom.trim().toLowerCase();
-  const quick = [...new Set([s.jumpKey || "alt", "ctrl", "shift", "enter"])]
-    .filter(isPicoKey);
+  // The rune solve: arrows, then space/enter, and y to interact.
+  const quick = ["space", "enter", "y"];
   const arrow = (dir: string, rot: number) => (
     <HoldKey name={dir} class={`arrow ${dir}`}>
       <span style={{ transform: `rotate(${rot}deg)` }}><Icon name="arrowUp" size={24} /></span>
@@ -451,6 +362,7 @@ export function Pad({ s }: { s: AppState }) {
       <div class="keys">
         {quick.map((k) => <HoldKey key={k} name={k} />)}
       </div>
+      <SaveWindow s={s} />
       <details class="more">
         <summary>More keys</summary>
         <div class="custom">
@@ -472,6 +384,20 @@ export function Pad({ s }: { s: AppState }) {
       </details>
       <p class="hint">Keys stay down while you hold them.</p>
     </section>
+  );
+}
+
+/** Save the whole game window, lossless: templates for UI detection. */
+function SaveWindow({ s }: { s: AppState }) {
+  const [reply, act] = useReply(s);
+  return (
+    <div class="align">
+      <button disabled={s.ws !== "on"} onClick={() => act("host|snapshot")}>
+        Save window
+      </button>
+      <Reply reply={reply}
+             idle="Saves the game window as it is now (debug/frames, lossless) — tap it when a lie detector or other prompt shows." />
+    </div>
   );
 }
 

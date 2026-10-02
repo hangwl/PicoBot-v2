@@ -157,7 +157,7 @@ Rust host (`rust/crates/`):
 | Area | Files |
 |---|---|
 | Bot loop / FSM | `core/src/bot/machine.rs` (GRIND/TRAVEL/RUNE/PAUSE), `bot/grind.rs` (arrival skills, summons, buffs, weave), `bot/body.rs` (`Body` trait + movement primitives) |
-| Runes | `core/src/rune.rs` (`RuneTracker`, slots beside a rune, gap rule), `bot/approach.rs` (the detour), `minimap.rs` `rune_box`; `host/src/solves.rs` (`RuneRecorder` thread: dashboard solves → `debug/frames/*_runesolve/`, the arrow dataset) |
+| Runes | `core/src/rune.rs` (`RuneTracker`, slots beside a rune, gap rule), `bot/approach.rs` (the detour), `minimap.rs` `rune_box`; `core/src/rune_arrows.rs` (`read_arrows`: the arrow puzzle by colour, tested on strips in `tests/fixtures/rune`); `host/src/solves.rs` (`RuneRecorder` thread: dashboard solves → `debug/frames/*_runesolve/`, the arrow dataset) |
 | Pathfinding | `core/src/navgraph.rs` (graph + Dijkstra), `bot/navigator.rs` (execution, landing rule), `reach.rs` (learned reach), `planner.rs` (loop order), `bot/patrol.rs` (continuous loop, rope learning) |
 | Map-change monitor + identity | `host/src/feed.rs` (`MapMonitor` thread), `core/src/minimap.rs` (blackout, panel, dot), `core/src/identity.rs` (pin + voted title reads) |
 | Titles | `core/src/title.rs` (band segmentation, crop), `core/src/fuzzy.rs` (`title_score`), `io/src/ocr.rs` (recogniser) |
