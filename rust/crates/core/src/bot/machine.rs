@@ -145,10 +145,11 @@ impl Machine {
         body.state().viz.state = "STOPPED".into();
     }
 
+    /// Health checks: logged only — alerts are for hazards.
     fn watch<B: Body + ?Sized>(&mut self, body: &mut B) {
         let (now, player) = (body.now(), body.state_ref().viz.player);
         if let Some(msg) = self.watchdog.tick(now, self.state, player) {
-            body.notify(&msg);
+            body.log(&msg);
         }
         let every = body.config().heartbeat_minutes * 60.0;
         if body.state().session.beat_due(now, every) {
@@ -156,7 +157,7 @@ impl Machine {
                 .map()
                 .map_or("unknown map".to_owned(), |e| e.name.clone());
             let s = body.state_ref().session.summary(now);
-            body.notify(&format!(
+            body.log(&format!(
                 "Heartbeat: {name} — {} — {s}",
                 self.state.as_str()
             ));

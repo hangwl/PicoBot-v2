@@ -52,9 +52,9 @@ export function SafetyPage({ s }: { s: AppState }) {
         </Field>
       </Section>
       <Section title="Telegram"
-               hint="Alerts go out for hazards, every stop, crashes, a lost serial port, and a bot that stalls (paused 60 s, no player dot 30 s, or not moving 45 s).">
-        <Field label="Status message every (minutes)"
-               hint="A heartbeat with uptime, visits, misses and pauses while the bot runs. 0 turns it off.">
+               hint="Alerts go out for hazards only: a hazard pause (other players, an unrecognized map) and runes (spotted, reached, or out of reach). Stops, crashes, a lost serial port, stalls and the heartbeat stay in the log.">
+        <Field label="Log a status line every (minutes)"
+               hint="A heartbeat in the log with uptime, visits, misses and pauses while the bot runs. 0 turns it off.">
           <NumberField value={s.heartbeat} min={0} step={5}
                        onCommit={(v) => save({ heartbeat_minutes: v })} />
         </Field>

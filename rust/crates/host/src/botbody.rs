@@ -491,11 +491,8 @@ pub fn spawn_bot(host: &Arc<Host>) -> Result<BotRun, String> {
                 Err(e) => Err(format!("Bot failed to start: {e}")),
             };
             match ended {
-                Ok(msg) => h.notify(&msg),
-                Err(e) => {
-                    h.bus.emit("error", &e);
-                    h.notify(&e);
-                }
+                Ok(msg) => h.bus.emit("notify", &msg),
+                Err(e) => h.bus.emit("error", &e),
             }
             h.set_bot_viz(None);
             h.bus.emit("bot", "stopped");
