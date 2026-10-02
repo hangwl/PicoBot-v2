@@ -12,7 +12,9 @@
 //! - `key_NN_<key>.png` — the last frame before each arrow key-down,
 //!   lossless (the arrows as they were read);
 //! - `keys.json` — every key event, times relative to the first key;
-//! - `meta.json` — outcome, the arrow sequence, window size, frame rate.
+//! - `meta.json` — outcome, the arrow sequence, window size, frame rate,
+//!   and `watch`: what the arrow reader made of each attempt next to what
+//!   was pressed (watch-only — nothing is pressed for you).
 
 use std::collections::VecDeque;
 use std::fs;
@@ -22,6 +24,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use picobot_core::rune_arrows::read_arrows;
 use picobot_core::timing::monotonic;
 use picobot_core::vision::Image;
 use serde_json::json;
@@ -32,6 +35,8 @@ use crate::frames::encode_jpeg;
 use crate::host::Host;
 
 const DIR: &str = "debug/frames";
+/// Every watched attempt, one JSON line each: the reader's track record.
+const TALLY: &str = "debug/rune_watch.jsonl";
 const SUFFIX: &str = "_runesolve";
 /// Newest recordings kept.
 const KEEP: usize = 30;
@@ -118,6 +123,99 @@ impl Recording {
     }
 }
 
+/// An attempt shows no puzzle frame this long after its interact press
+/// (when no arrow was pressed to bound it).
+const WATCH_S: f64 = 5.0;
+
+/// What the arrow reader made of one attempt, next to what was pressed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Watch {
+    pub pressed: Vec<String>,
+    pub read: Option<Vec<&'static str>>,
+    /// Why nothing was read: the last frame's reason.
+    pub why: Option<String>,
+}
+
+impl Watch {
+    /// `match`, `differs` (a wrong press, or a misread), or `unread`.
+    pub fn verdict(&self) -> &'static str {
+        match &self.read {
+            None => "unread",
+            Some(r)
+                if r.iter()
+                    .copied()
+                    .eq(self.pressed.iter().map(String::as_str)) =>
+            {
+                "match"
+            }
+            Some(_) => "differs",
+        }
+    }
+
+    pub fn line(&self) -> String {
+        let pressed = self.pressed.join(" ");
+        match &self.read {
+            Some(r) => format!(
+                "Rune reader (watch only): read {} — you pressed {pressed} {}",
+                r.join(" "),
+                if self.verdict() == "match" {
+                    "✓"
+                } else {
+                    "≠"
+                }
+            ),
+            None => format!(
+                "Rune reader (watch only): couldn't read it ({}) — you pressed {pressed}",
+                self.why.as_deref().unwrap_or("no frames")
+            ),
+        }
+    }
+}
+
+/// Each attempt (an interact press and the arrows after it) read from the
+/// frames between that press and its first arrow — the puzzle as shown
+/// before any answer changes it.
+pub fn watch(rec: &Recording) -> Vec<Watch> {
+    // (interact time, first arrow time, arrows pressed)
+    let mut attempts: Vec<(f64, Option<f64>, Vec<String>)> = Vec::new();
+    for (t, ev, k) in &rec.keys {
+        if ev != "down" {
+            continue;
+        }
+        if ARROWS.contains(&k.as_str()) {
+            if let Some(a) = attempts.last_mut() {
+                a.1.get_or_insert(*t);
+                a.2.push(k.clone());
+            }
+        } else {
+            attempts.push((*t, None, Vec::new()));
+        }
+    }
+    attempts
+        .into_iter()
+        .filter(|a| !a.2.is_empty())
+        .map(|(start, first, pressed)| {
+            let end = first.unwrap_or(start + WATCH_S);
+            let mut why = None;
+            let mut read = None;
+            for (_, img) in rec.frames.iter().filter(|(t, _)| *t > start && *t < end) {
+                match read_arrows(img) {
+                    Ok(r) => {
+                        read = Some(r.keys());
+                        break;
+                    }
+                    Err(e) => why = Some(e),
+                }
+            }
+            Watch {
+                pressed,
+                why: if read.is_some() { None } else { why },
+                read,
+            }
+        })
+        .collect()
+}
+
 /// The recording logic, fed one tick at a time (no screen, no disk).
 #[derive(Default)]
 pub struct Recorder {
@@ -190,8 +288,49 @@ impl Recorder {
     }
 }
 
-/// Write `rec` under `root`; returns its folder.
-pub fn save(root: &std::path::Path, rec: &Recording) -> std::io::Result<PathBuf> {
+/// Append `watched` to the tally at `path`; returns the totals so far:
+/// (attempts, read, matched).
+pub fn tally(path: &std::path::Path, watched: &[Watch]) -> std::io::Result<(usize, usize, usize)> {
+    use std::io::Write;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    for w in watched {
+        let line = json!({
+            "at": stamp(),
+            "pressed": w.pressed,
+            "read": w.read,
+            "verdict": w.verdict(),
+        });
+        writeln!(f, "{line}")?;
+    }
+    drop(f);
+    let (mut n, mut read, mut matched) = (0, 0, 0);
+    for line in fs::read_to_string(path)?.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        n += 1;
+        match v["verdict"].as_str() {
+            Some("match") => (read, matched) = (read + 1, matched + 1),
+            Some("differs") => read += 1,
+            _ => {}
+        }
+    }
+    Ok((n, read, matched))
+}
+
+/// Write `rec` (with the reader's `watched` attempts) under `root`;
+/// returns its folder.
+pub fn save(
+    root: &std::path::Path,
+    rec: &Recording,
+    watched: &[Watch],
+) -> std::io::Result<PathBuf> {
     let dir = root.join(format!("{}{SUFFIX}", stamp()));
     fs::create_dir_all(dir.join("frames"))?;
     let t0 = rec.keys.first().map_or(0.0, |k| k.0);
@@ -224,6 +363,15 @@ pub fn save(root: &std::path::Path, rec: &Recording) -> std::io::Result<PathBuf>
         "outcome": rec.outcome.as_str(),
         "arrows": rec.arrows(),
         "attempts": rec.attempts(),
+        "watch": watched
+            .iter()
+            .map(|w| json!({
+                "pressed": w.pressed,
+                "read": w.read,
+                "why": w.why,
+                "verdict": w.verdict(),
+            }))
+            .collect::<Vec<_>>(),
         "frames": rec.frames.len(),
         "fps": FPS,
         "window": size,
@@ -295,8 +443,19 @@ fn run(host: Arc<Host>, stop: Arc<AtomicBool>) {
             None
         };
         if let Some(done) = rec.tick(started, phase, frame, keys) {
+            let watched = watch(&done);
+            for w in &watched {
+                host.log(&w.line());
+            }
+            if !watched.is_empty() {
+                if let Ok((n, read, matched)) = tally(std::path::Path::new(TALLY), &watched) {
+                    host.log(&format!(
+                        "Rune reader so far: {read}/{n} attempts read, {matched} matched what was pressed"
+                    ));
+                }
+            }
             let arrows = done.arrows().join(" ");
-            let msg = match save(std::path::Path::new(DIR), &done) {
+            let msg = match save(std::path::Path::new(DIR), &done, &watched) {
                 Ok(dir) => format!(
                     "Rune solve recorded ({}, arrows: {arrows}) → {}",
                     done.outcome.as_str(),
@@ -401,6 +560,93 @@ mod tests {
         assert_eq!(done.outcome, Outcome::Solved);
     }
 
+    /// A 1366x768 frame with four painted arrows (shaded tail→tip).
+    fn puzzle(arrows: [&str; 4]) -> Image {
+        let mut img = Image::new(1366, 768);
+        for y in 0..768 {
+            for x in 0..1366 {
+                img.set_bgr(x, y, [190, 160, 160]);
+            }
+        }
+        for (n, to) in arrows.iter().enumerate() {
+            let c = (520 + n as i64 * 100, 210i64);
+            for i in 0..24i64 {
+                let t = i as f64 / 23.0;
+                let bgr = [0u8, (255.0 - 170.0 * t) as u8, (80.0 + 175.0 * t) as u8];
+                for j in 0..12i64 {
+                    let (a, b) = (i - 12, j - 6);
+                    let (x, y) = match *to {
+                        "right" => (a, b),
+                        "left" => (-a, b),
+                        "down" => (b, a),
+                        _ => (b, -a),
+                    };
+                    img.set_bgr((c.0 + x) as usize, (c.1 + y) as usize, bgr);
+                }
+            }
+        }
+        img
+    }
+
+    #[test]
+    fn the_reader_watches_each_attempt_before_its_first_arrow() {
+        let shown = ["up", "down", "left", "right"];
+        let rec = Recording {
+            frames: vec![
+                (0.5, Image::new(1366, 768)), // before the puzzle shows
+                (1.2, puzzle(shown)),
+                (3.0, Image::new(1366, 768)), // after the first arrow: ignored
+                (4.2, puzzle(["up", "up", "up", "up"])),
+            ],
+            keys: vec![
+                key(1.0, "down", "y"),
+                key(2.0, "down", "up"),
+                key(2.1, "down", "down"),
+                key(2.2, "down", "left"),
+                key(2.3, "down", "right"),
+                key(4.0, "down", "y"),
+                key(5.0, "down", "up"),
+                key(5.1, "down", "down"), // a wrong press
+            ],
+            outcome: Outcome::Solved,
+        };
+        let w = watch(&rec);
+        assert_eq!(w.len(), 2);
+        assert_eq!(w[0].read.as_deref(), Some(&shown[..]));
+        assert_eq!(w[0].verdict(), "match");
+        assert!(w[0].line().ends_with('✓'));
+        assert_eq!(w[1].verdict(), "differs");
+    }
+
+    #[test]
+    fn the_tally_adds_up_across_solves() {
+        let path = std::env::temp_dir().join(format!("rune_watch-{}.jsonl", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let w = |read: Option<Vec<&'static str>>| Watch {
+            pressed: vec!["up".into()],
+            read,
+            why: None,
+        };
+        assert_eq!(tally(&path, &[w(Some(vec!["up"]))]).unwrap(), (1, 1, 1));
+        assert_eq!(
+            tally(&path, &[w(Some(vec!["down"])), w(None)]).unwrap(),
+            (3, 2, 1)
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_attempt_with_no_puzzle_frame_is_unread_with_a_reason() {
+        let rec = Recording {
+            frames: vec![(1.5, Image::new(1366, 768))],
+            keys: vec![key(1.0, "down", "y"), key(2.0, "down", "up")],
+            outcome: Outcome::Unsolved,
+        };
+        let w = watch(&rec);
+        assert_eq!(w[0].verdict(), "unread");
+        assert_eq!(w[0].why.as_deref(), Some("found 0 clear arrows"));
+    }
+
     #[test]
     fn each_interact_press_starts_an_attempt() {
         let keys = [
@@ -437,7 +683,7 @@ mod tests {
             ],
             outcome: Outcome::Solved,
         };
-        let dir = save(&root, &rec).unwrap();
+        let dir = save(&root, &rec, &watch(&rec)).unwrap();
         assert!(dir.join("frames/000.jpg").exists() && dir.join("frames/001.jpg").exists());
         assert!(dir.join("key_00_left.png").exists());
         let meta: serde_json::Value =

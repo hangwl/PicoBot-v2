@@ -136,3 +136,14 @@ reaction delay on the way back to farming), or after 8s without a key or
 
 Newest 30 kept; `record_rune_solves` turns it off. Only `solved`
 recordings make reliable labels.
+
+**Watch-only rune reading**: when a recording is saved, the arrow reader
+(`rune_arrows::read_arrows`) reads each attempt from the frames between
+its interact press and its first arrow, and the log says what it read
+next to what was pressed ("read up down up down — you pressed up down up
+down ✓", or ≠ — a wrong press or a misread — or why it couldn't read).
+Nothing is pressed for you. `meta.json` keeps it as `watch` (`verdict`:
+`match`|`differs`|`unread`), and every attempt is appended to
+`debug/rune_watch.jsonl`, with a running "Rune reader so far: read/n,
+matched" line — the track record for deciding when the bot may solve
+runes itself.
