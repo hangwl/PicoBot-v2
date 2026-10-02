@@ -417,6 +417,9 @@ impl Host {
                 {
                     edits.push((k.clone(), v.clone()))
                 }
+                ("rune_key", Value::String(key)) if !key.trim().is_empty() => {
+                    edits.push((k.clone(), Value::String(key.trim().to_lowercase())))
+                }
                 ("heartbeat_minutes", v) if v.as_f64().is_some_and(|m| m >= 0.0) => {
                     edits.push((k.clone(), v.clone()))
                 }

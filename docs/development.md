@@ -105,9 +105,10 @@ their row offsets (`dy`), and learned ropes within 8px of the column.
 
 **Rune captures**: `debug/frames/<utc-stamp>_rune/` when a rune is first
 seen (`event: seen`), when the bot stands beside it (`arrived`, with the
-glyph gap and facing) and when it gives up (`failed`, with why) —
-`frame.png`, `overlay.png` and `meta.json` with the rune's box. They are
-the evidence for the rune glyph's real size and the side-by-side rule.
+glyph gap and facing), at each solve attempt (`attempt`, with the arrows
+read — plus `window.png`, the game window the puzzle was read from, to
+check a misread against) and when it gives up (`failed`, with why) —
+`frame.png`, `overlay.png` and `meta.json` with the rune's box.
 
 **Window snapshots**: the Control page's **Save window** saves the whole
 game window as it is to `debug/frames/<utc-stamp>_snapshot/window.png`

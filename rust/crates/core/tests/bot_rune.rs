@@ -34,6 +34,7 @@ fn run(m: &mut Machine, b: &mut Sim, n: usize, done: impl Fn(&Machine, &Sim) -> 
 #[test]
 fn a_rune_is_walked_to_then_held_beside_until_it_is_gone() {
     let mut b = farming();
+    b.cfg.rune_action = RuneAction::Approach;
     let mut m = Machine::default();
     b.rune = Some(RUNE);
     assert!(m.switch(&mut b));
@@ -110,4 +111,106 @@ fn runes_are_ignored_when_turned_off() {
     }
     assert_eq!(m.state, State::Grind);
     assert!(!b.log_has("Rune"));
+}
+
+/// The arrow presses after the latest rune-key press: (time, key).
+fn answer_after_last_activation(b: &Sim) -> Vec<(f64, String)> {
+    let last_y = b
+        .pressed_at
+        .iter()
+        .rposition(|(_, k)| k == "y")
+        .expect("activated");
+    b.pressed_at[last_y + 1..]
+        .iter()
+        .filter(|(_, k)| ["up", "down", "left", "right"].contains(&k.as_str()))
+        .take(4)
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn a_rune_is_solved_standing_on_it_then_farming_resumes() {
+    let mut b = farming();
+    b.rune = Some(RUNE);
+    let mut m = Machine::default();
+    run(&mut m, &mut b, 200, |m, b| {
+        b.rune.is_none() && m.state == State::Grind
+    });
+    assert_eq!(m.state, State::Grind);
+    assert!(b.rune.is_none());
+    assert_eq!(b.activations, 1);
+    assert!(b.log_has("Rune: read up down left right — answering"));
+    assert!(b.log_has("Rune solved (attempt 1)"));
+    // Answered like a person: a moment to read, then uneven gaps.
+    let y_at = b.pressed_at.iter().find(|(_, k)| k == "y").unwrap().0;
+    let ans = answer_after_last_activation(&b);
+    let keys: Vec<&str> = ans.iter().map(|(_, k)| k.as_str()).collect();
+    assert_eq!(keys, ["up", "down", "left", "right"]);
+    assert!(ans[0].0 - y_at >= 0.4, "read for {:.2}s", ans[0].0 - y_at);
+    let gaps: Vec<f64> = ans.windows(2).map(|w| w[1].0 - w[0].0).collect();
+    assert!(gaps.iter().all(|g| (0.17..=0.7).contains(g)), "{gaps:?}");
+    assert!(
+        gaps.windows(2).any(|w| (w[0] - w[1]).abs() > 1e-6),
+        "{gaps:?}"
+    );
+}
+
+#[test]
+fn a_failed_solve_wiggles_through_the_lock_and_retries() {
+    let mut b = farming();
+    b.rune = Some(RUNE);
+    b.puzzle_fail = 1; // the first attempt fails whatever is pressed
+    let mut m = Machine::default();
+    run(&mut m, &mut b, 400, |m, b| {
+        b.rune.is_none() && m.state == State::Grind
+    });
+    assert!(b.rune.is_none(), "{:?}", b.logs);
+    assert_eq!(b.activations, 2);
+    assert!(b.log_has("Rune: attempt 1 failed"));
+    assert!(b.log_has("Rune solved (attempt 2)"));
+    // The retry waited out the 3s lock.
+    let ys: Vec<f64> = b
+        .pressed_at
+        .iter()
+        .filter(|(_, k)| k == "y")
+        .map(|(t, _)| *t)
+        .collect();
+    let first_fail = b
+        .pressed_at
+        .iter()
+        .find(|(t, k)| *t > ys[0] && ["up", "down", "left", "right"].contains(&k.as_str()))
+        .unwrap()
+        .0;
+    let retry = *ys.last().unwrap();
+    assert!(
+        retry >= first_fail + 3.0,
+        "retried {:.2}s after failing",
+        retry - first_fail
+    );
+    // Wiggled meanwhile: direction taps between the failure and the retry.
+    let taps = b
+        .pressed_at
+        .iter()
+        .filter(|(t, k)| *t > first_fail && *t < retry && (k == "left" || k == "right"))
+        .count();
+    assert!(taps >= 2, "{taps} taps");
+}
+
+#[test]
+fn an_unreadable_puzzle_is_given_up_with_a_pause() {
+    let mut b = farming();
+    b.rune = Some(RUNE);
+    b.puzzle_hidden = true;
+    let mut m = Machine::default();
+    run(&mut m, &mut b, 400, |m, _| m.state == State::Pause);
+    assert_eq!(m.state, State::Pause);
+    assert!(b.log_has("Rune: couldn't read its arrows — pausing"));
+    assert_eq!(b.state.viz.hazard.as_deref(), Some("rune"));
+    // No arrow was ever pressed into an unread puzzle.
+    let arrows_while_open = b
+        .pressed_at
+        .iter()
+        .filter(|(_, k)| k == "up" || k == "down")
+        .count();
+    assert_eq!(arrows_while_open, 0);
 }

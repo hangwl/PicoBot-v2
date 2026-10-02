@@ -279,6 +279,10 @@ pub trait Body {
     /// The player stands off every drawn platform at `pos`; `info` is what
     /// the patrol knows (the host saves it as evidence).
     fn off_platform(&mut self, _pos: (f64, f64), _info: serde_json::Value) {}
+    /// The whole game window (the rune's arrow puzzle shows there).
+    fn window_frame(&mut self) -> Option<Image> {
+        None
+    }
     /// The rune's box in `img`, if one shows (the host overrides).
     fn locate_rune(&mut self, _img: &Image) -> Option<BoxPx> {
         None

@@ -25,7 +25,7 @@ export function botStatus(s: AppState): [string, Tone] {
   if (!s.botRunning) return ["Stopped", "off"];
   if (s.hazard !== "none" || s.botState === "PAUSE") return ["Paused", "warn"];
   if (s.botState === "TRAVEL") return ["Traveling", "ok"];
-  if (s.botState === "RUNE") return ["To the rune", "ok"];
+  if (s.botState === "RUNE") return ["Rune", "ok"];
   if (s.botState === "GRIND") return ["Farming", "ok"];
   return ["Running", "ok"];
 }

@@ -119,6 +119,19 @@ pub struct Sim {
     pub rune: Option<(i32, i32, i32, i32)>,
     /// Rune milestones reported: (event, info).
     pub rune_events: Vec<(String, serde_json::Value)>,
+    /// The rune puzzle the next activation shows; while open, the index of
+    /// the arrow expected next. A wrong key (or a planted failure) closes
+    /// it and locks the rune until `puzzle_lock`.
+    pub puzzle: [&'static str; 4],
+    pub puzzle_at: Option<usize>,
+    pub puzzle_lock: f64,
+    /// Attempts that fail whatever is pressed.
+    pub puzzle_fail: u32,
+    /// The arrows never show (an unreadable puzzle).
+    pub puzzle_hidden: bool,
+    pub activations: u32,
+    /// Every press with the clock at the time.
+    pub pressed_at: Vec<(f64, String)>,
 }
 
 impl Sim {
@@ -177,6 +190,13 @@ impl Sim {
             off: Vec::new(),
             rune: None,
             rune_events: Vec::new(),
+            puzzle: ["up", "down", "left", "right"],
+            puzzle_at: None,
+            puzzle_lock: 0.0,
+            puzzle_fail: 0,
+            puzzle_hidden: false,
+            activations: 0,
+            pressed_at: Vec::new(),
         }
     }
 
@@ -281,6 +301,41 @@ impl Sim {
         self.teleport_cd = (self.teleport_cd - secs).max(0.0);
     }
 
+    /// The player's glyph overlaps the rune.
+    pub fn on_rune(&self) -> bool {
+        let Some(r) = self.rune else { return false };
+        let (x, y) = (self.pos.0.round() as i32, self.pos.1.round() as i32);
+        x - 3 <= r.2 && r.0 <= x + 2 && y - 5 <= r.3 && r.1 <= y
+    }
+
+    /// The rune key and the puzzle's arrows; true when `key` was one.
+    fn rune_key_press(&mut self, key: &str) -> bool {
+        if key == self.cfg.rune_key && self.rune.is_some() {
+            if self.puzzle_at.is_none() && self.on_rune() && self.clock >= self.puzzle_lock {
+                self.puzzle_at = Some(0);
+                self.activations += 1;
+            }
+            return true;
+        }
+        let Some(i) = self.puzzle_at else {
+            return false;
+        };
+        if !["up", "down", "left", "right"].contains(&key) {
+            return false;
+        }
+        if self.puzzle_fail > 0 || key != self.puzzle[i] {
+            self.puzzle_fail = self.puzzle_fail.saturating_sub(1);
+            self.puzzle_at = None;
+            self.puzzle_lock = self.clock + 3.0;
+        } else if i == 3 {
+            self.puzzle_at = None;
+            self.rune = None; // solved
+        } else {
+            self.puzzle_at = Some(i + 1);
+        }
+        true
+    }
+
     pub fn log_has(&self, needle: &str) -> bool {
         self.logs.iter().any(|l| l.contains(needle))
     }
@@ -311,6 +366,10 @@ impl Keys for Sim {
 
     fn press(&mut self, key: &str, hold: Option<f64>) -> bool {
         self.presses.push(key.into());
+        self.pressed_at.push((self.clock, key.into()));
+        if self.rune_key_press(key) {
+            return true;
+        }
         if let (Some(dx), Some(_)) = (self.skill_fx.get(key).copied(), self.held) {
             let s = self.sign();
             self.air(s * dx, 0.0);
@@ -432,6 +491,15 @@ impl Body for Sim {
     }
     fn off_platform(&mut self, pos: (f64, f64), info: serde_json::Value) {
         self.off.push((pos, info));
+    }
+    fn window_frame(&mut self) -> Option<Image> {
+        let mut img = Image::new(1366, 768);
+        if self.puzzle_at == Some(0) && !self.puzzle_hidden {
+            for (n, to) in self.puzzle.iter().enumerate() {
+                paint_arrow(&mut img, (520 + n as i64 * 100, 210), to);
+            }
+        }
+        Some(img)
     }
     fn locate_rune(&mut self, _img: &Image) -> Option<(i32, i32, i32, i32)> {
         let r = self.rune?;
@@ -592,5 +660,24 @@ impl Body for Sim {
             }
         }
         false
+    }
+}
+
+/// A solid arrow at `c` pointing `to`, shaded green (tail) to orange (tip)
+/// like the game's rune arrows.
+pub fn paint_arrow(img: &mut Image, c: (i64, i64), to: &str) {
+    for i in 0..24i64 {
+        let t = i as f64 / 23.0;
+        let bgr = [0u8, (255.0 - 170.0 * t) as u8, (80.0 + 175.0 * t) as u8];
+        for j in 0..12i64 {
+            let (a, b) = (i - 12, j - 6);
+            let (x, y) = match to {
+                "right" => (a, b),
+                "left" => (-a, b),
+                "down" => (b, a),
+                _ => (b, -a),
+            };
+            img.set_bgr((c.0 + x) as usize, (c.1 + y) as usize, bgr);
+        }
     }
 }

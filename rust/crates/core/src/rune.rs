@@ -114,6 +114,20 @@ pub fn gap(x: i32, rune: BoxPx) -> Option<i32> {
     }
 }
 
+/// Standing on the rune: feet this close (px) to `on_x`.
+pub const ON_TOL: i32 = 1;
+
+/// Feet x that centre the player's glyph over the rune.
+pub fn on_x(rune: BoxPx) -> i32 {
+    // The glyph spans x - DOT_W/2 ..= x + (DOT_W-1)/2: its centre is x - 0.5.
+    ((rune.0 + rune.2) as f64 / 2.0 + 0.5).round() as i32
+}
+
+/// Feet at `x` stand on the rune.
+pub fn on_rune(x: i32, rune: BoxPx) -> bool {
+    (x - on_x(rune)).abs() <= ON_TOL
+}
+
 /// Feet at `x` are at the rune: glyphs at most `MAX_GAP` apart, or
 /// overlapping (on it — the tracker still remembers a covered rune).
 pub fn at_rune(x: i32, rune: BoxPx) -> bool {
@@ -220,6 +234,9 @@ mod tests {
         assert!(at_rune(slot_x(RUNE, true, TARGET_GAP), RUNE));
         assert!(at_rune(52, RUNE)); // on it
         assert!(!at_rune(slot_x(RUNE, false, MAX_GAP + 1), RUNE));
+        assert!(on_rune(on_x(RUNE), RUNE) && on_rune(53, RUNE));
+        assert!(!on_rune(slot_x(RUNE, true, TARGET_GAP), RUNE));
+        assert_eq!(gap(on_x(RUNE), RUNE), None); // covering it
     }
 
     #[test]

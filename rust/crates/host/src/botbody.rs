@@ -76,6 +76,9 @@ pub struct HostBody {
     lost_dot: Evidence,
     off_platform: Evidence,
     rune_seen: Evidence,
+    /// Solve attempts get their own throttle: one may follow a sighting
+    /// within seconds.
+    rune_attempt: Evidence,
     map: Option<(MapKey, Option<Arc<MapEntry>>)>,
     /// Bumped only when the resolved map's name changes.
     map_version: u64,
@@ -110,6 +113,7 @@ impl HostBody {
             lost_dot: Evidence::dot_lost(),
             off_platform: Evidence::off_platform(),
             rune_seen: Evidence::rune(),
+            rune_attempt: Evidence::rune(),
             map: None,
             map_version: 0,
             map_name: None,
@@ -292,6 +296,10 @@ impl Body for HostBody {
             .save(&[("frame", &img), ("overlay", &overlay)], &meta);
     }
 
+    fn window_frame(&mut self) -> Option<Image> {
+        self.eyes.window_img()
+    }
+
     fn locate_rune(&mut self, img: &Image) -> Option<picobot_core::rune::BoxPx> {
         if self.analyzer.loading() {
             return None;
@@ -310,8 +318,19 @@ impl Body for HostBody {
         let mut overlay = img.clone();
         annotate(&mut overlay, &o);
         let meta = self.with_context(merged(serde_json::json!({ "event": event }), info));
-        self.rune_seen
-            .save(&[("frame", &img), ("overlay", &overlay)], &meta);
+        if event == "attempt" {
+            // The puzzle is still up (the answer comes after a pause): keep
+            // the window it was read from, to check a misread against.
+            let window = self.eyes.window_img();
+            let mut images = vec![("frame", &img), ("overlay", &overlay)];
+            if let Some(w) = window.as_ref() {
+                images.push(("window", w));
+            }
+            self.rune_attempt.save(&images, &meta);
+        } else {
+            self.rune_seen
+                .save(&[("frame", &img), ("overlay", &overlay)], &meta);
+        }
     }
 
     fn hazard_note(&self) -> Option<String> {

@@ -1,5 +1,6 @@
 // Setup → Safety: when the bot pauses on its own, and how it reaches you.
 import { type AppState, send } from "../protocol";
+import { isPicoKey } from "../keys";
 import { Field, NumberField, Reply, Section, useReply } from "../ui";
 
 const TOGGLES: [key: string, on: (s: AppState) => boolean, label: string, hint: string][] = [
@@ -26,12 +27,21 @@ export function SafetyPage({ s }: { s: AppState }) {
           </Field>
         ))}
         <Field label="On a rune"
-               hint="Walk over: the bot heads to a spot beside the rune (both dots showing, facing it), then pauses for the solve. Pause here: it stops where it is. Either way it carries on once the rune is gone.">
+               hint="Solve it: the bot stands on the rune, presses the rune key, reads the arrows and answers them, then steps off to check it's gone — retrying after the rune's 3 s lock, and pausing for you after 3 failed tries. Walk over: it stands beside the rune and pauses for you. Pause here: it stops where it is. It carries on once the rune is gone.">
           <select value={s.runeAction} disabled={!s.stopRune}
                   onChange={(e) => save({ rune_action: (e.target as HTMLSelectElement).value })}>
+            <option value="solve">Solve it</option>
             <option value="approach">Walk over, then pause</option>
             <option value="pause">Pause here</option>
           </select>
+        </Field>
+        <Field label="Rune key" hint="The key that activates a rune in the game.">
+          <input value={s.runeKey} disabled={!s.stopRune} autoCapitalize="off"
+                 autoCorrect="off" spellcheck={false}
+                 onChange={(e) => {
+                   const v = (e.target as HTMLInputElement).value.trim().toLowerCase();
+                   if (isPicoKey(v)) save({ rune_key: v });
+                 }} />
         </Field>
         <Field label="Record rune solves"
                hint="While paused at a rune, the keys you press here and the game window around them are saved to debug/frames/*_runesolve (newest 30, a few MB each) — the dataset for solving runes automatically later.">

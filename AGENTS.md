@@ -88,11 +88,17 @@ what was tried and what was learned in `docs/learnings.md` instead.
   grab). Skills carry a `stance` (ground|air|any) and `weight`; a
   `target_attacks_per_min` steers the odds toward a rate.
 - **A rune is a goal, not a hazard** (`stop_when_rune_appears`,
-  `rune_action`): the only planned detour. RUNE routes beside the rune
-  (glyphs touching, `rune::TARGET_GAP`, or on it; facing it), then PAUSE holds
-  until it's gone. The rune is remembered (`RuneTracker`): the player's dot
-  covers it, so a rune that vanishes under the player is still there. It
-  is never a host hazard — movement must not abort on it.
+  `rune_action`): the only planned detour. `solve` (default): RUNE
+  stands **on** the rune, presses `rune_key`, reads the arrows
+  (`rune_arrows`), answers with human timing, then **steps off to verify**
+  — a rune that shows again failed and is retried after its 3s lock
+  (wiggling meanwhile), up to 3 tries; one that stays gone is solved.
+  `approach`: stand beside it (glyphs touching, `rune::TARGET_GAP`; facing
+  it) and PAUSE until it's gone. Giving up holds in PAUSE too. The rune is
+  remembered (`RuneTracker`): the player's dot covers it, so a rune that
+  vanishes under the player is still there — only stepping off proves it
+  gone. It is never a host hazard — movement must not abort on it. Arrow
+  keys go only to a focused game window.
 - **Summons**: one live summon per anchor (any kind), cast only while
   standing on a platform (two stable reads, on a drawn line), a moving
   character gets up to 1s to settle and the route is never touched (a
@@ -157,7 +163,7 @@ Rust host (`rust/crates/`):
 | Area | Files |
 |---|---|
 | Bot loop / FSM | `core/src/bot/machine.rs` (GRIND/TRAVEL/RUNE/PAUSE), `bot/grind.rs` (arrival skills, summons, buffs, weave), `bot/body.rs` (`Body` trait + movement primitives) |
-| Runes | `core/src/rune.rs` (`RuneTracker`, slots beside a rune, gap rule), `bot/approach.rs` (the detour), `minimap.rs` `rune_box`; `core/src/rune_arrows.rs` (`read_arrows`: the arrow puzzle by colour, tested on strips in `tests/fixtures/rune`); `host/src/solves.rs` (`RuneRecorder` thread: dashboard solves → `debug/frames/*_runesolve/`, the arrow dataset) |
+| Runes | `core/src/rune.rs` (`RuneTracker`, slots beside a rune, gap rule), `bot/approach.rs` (the detour), `minimap.rs` `rune_box`; `core/src/rune_arrows.rs` (`read_arrows`: the arrow puzzle by colour, tested on strips in `tests/fixtures/rune`), `bot/solve.rs` (`RuneSolver`: activate, read, answer, step off to verify, wiggle through the lock, retry); `host/src/solves.rs` (`RuneRecorder` thread: dashboard solves → `debug/frames/*_runesolve/`, the arrow dataset) |
 | Pathfinding | `core/src/navgraph.rs` (graph + Dijkstra), `bot/navigator.rs` (execution, landing rule), `reach.rs` (learned reach), `planner.rs` (loop order), `bot/patrol.rs` (continuous loop, rope learning) |
 | Map-change monitor + identity | `host/src/feed.rs` (`MapMonitor` thread), `core/src/minimap.rs` (blackout, panel, dot), `core/src/identity.rs` (pin + voted title reads) |
 | Titles | `core/src/title.rs` (band segmentation, crop), `core/src/fuzzy.rs` (`title_score`), `io/src/ocr.rs` (recogniser) |
