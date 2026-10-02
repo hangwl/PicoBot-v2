@@ -256,6 +256,15 @@ A whole-codebase pass before the Rust port found, among others:
   first 5 recordings; the two that disagreed with the keys pressed were
   wrong presses (the retries that followed confirm it). Fixed RGB buckets
   first read only 1 of 7 — mid-tones like `99ff11` fell between them.
+- **`rune_arrows::read_arrows`** (the Rust reader): band x 0.28-0.72, y
+  0.22-0.38 of the window; arrows are blobs of 150-1000 px (coloured
+  scenery below the strip makes much larger ones); the four *clear* blobs
+  forming the tightest row (centres within 40px, sizes within 2.5x) are
+  the strip — taking the four largest picked scenery instead. Over all
+  ~550 recorded frames it read nothing before the puzzle showed or after
+  the first arrow was pressed (the strip changes then — read all four
+  first, then answer), and every attempt correctly from ~0.1-0.2s after
+  the interact press, JPEG frames included.
 - **Recordings mislabelled solves**: leaving PAUSE passes through a
   reaction delay published as a bare PAUSE, which the recorder took for
   an interruption; it now waits 1.5s before calling it that.

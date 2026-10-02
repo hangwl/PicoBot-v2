@@ -1,0 +1,14 @@
+{
+  "_note": "Rune arrow strips cut from dashboard solve recordings (debug/frames/*_runesolve, key frames before the first arrow of each attempt). Each PNG is the window area x 370..995, y 160..300 of a 1366x768 client; 'arrows' is what the strip shows (c and e verified by eye: the keys pressed there were wrong).",
+  "window": [1366, 768],
+  "offset": [370, 160],
+  "strips": [
+    { "file": "strip_a.png", "arrows": ["up", "down", "up", "down"] },
+    { "file": "strip_b.png", "arrows": ["right", "left", "right", "up"] },
+    { "file": "strip_c.png", "arrows": ["up", "down", "left", "left"] },
+    { "file": "strip_d.png", "arrows": ["up", "right", "left", "down"] },
+    { "file": "strip_e.png", "arrows": ["up", "left", "left", "down"] },
+    { "file": "strip_f.png", "arrows": ["left", "left", "left", "down"] },
+    { "file": "strip_g.png", "arrows": ["down", "right", "down", "left"] }
+  ]
+}
