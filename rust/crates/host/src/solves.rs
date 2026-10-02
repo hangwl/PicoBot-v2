@@ -43,6 +43,10 @@ const POST_ROLL_S: f64 = 1.0;
 const IDLE_S: f64 = 8.0;
 /// … or this long in all.
 const MAX_S: f64 = 30.0;
+/// Stopped or paused for something else this long ends a recording: the
+/// bot passes through a bare PAUSE (a reaction delay) on its way back to
+/// farming after a solve.
+const OTHER_GRACE_S: f64 = 1.5;
 const JPEG_QUALITY: u8 = 90;
 const ARROWS: [&str; 4] = ["up", "down", "left", "right"];
 
@@ -92,6 +96,26 @@ impl Recording {
             .map(|(_, _, k)| k.as_str())
             .collect()
     }
+
+    /// The arrows of each attempt: a non-arrow key-down (the interact
+    /// key) starts one, and the arrow key-downs after it are its answer.
+    pub fn attempts(&self) -> Vec<Vec<&str>> {
+        let mut out: Vec<Vec<&str>> = Vec::new();
+        for (_, ev, k) in &self.keys {
+            if ev != "down" {
+                continue;
+            }
+            if ARROWS.contains(&k.as_str()) {
+                if let Some(cur) = out.last_mut() {
+                    cur.push(k.as_str());
+                }
+            } else {
+                out.push(Vec::new());
+            }
+        }
+        out.retain(|a| !a.is_empty());
+        out
+    }
 }
 
 /// The recording logic, fed one tick at a time (no screen, no disk).
@@ -99,6 +123,7 @@ impl Recording {
 pub struct Recorder {
     pre: VecDeque<(f64, Image)>,
     cur: Option<Recording>,
+    other_since: Option<f64>,
 }
 
 impl Recorder {
@@ -141,13 +166,22 @@ impl Recorder {
         rec.keys.extend(keys);
         let first = rec.keys.first().map_or(now, |k| k.0);
         let last = rec.keys.last().map_or(now, |k| k.0);
+        let other_for = match phase {
+            Phase::Other => now - *self.other_since.get_or_insert(now),
+            _ => {
+                self.other_since = None;
+                0.0
+            }
+        };
         let outcome = match phase {
             Phase::Farming => Some(Outcome::Solved),
-            Phase::Other => Some(Outcome::Interrupted),
+            Phase::Other if other_for >= OTHER_GRACE_S => Some(Outcome::Interrupted),
+            Phase::Other => None,
             Phase::AtRune if now - last > IDLE_S || now - first > MAX_S => Some(Outcome::Unsolved),
             Phase::AtRune => None,
         }?;
         let mut rec = self.cur.take()?;
+        self.other_since = None;
         rec.outcome = outcome;
         // Only the frames around the keys: before, during, just after.
         rec.frames
@@ -189,6 +223,7 @@ pub fn save(root: &std::path::Path, rec: &Recording) -> std::io::Result<PathBuf>
     let meta = json!({
         "outcome": rec.outcome.as_str(),
         "arrows": rec.arrows(),
+        "attempts": rec.attempts(),
         "frames": rec.frames.len(),
         "fps": FPS,
         "window": size,
@@ -349,8 +384,44 @@ mod tests {
         assert_eq!(done.outcome, Outcome::Unsolved);
 
         r.tick(20.0, Phase::AtRune, None, vec![key(20.0, "down", "space")]);
-        let done = r.tick(20.5, Phase::Other, None, Vec::new()).expect("cut");
+        assert!(r.tick(20.5, Phase::Other, None, Vec::new()).is_none());
+        let done = r
+            .tick(20.5 + OTHER_GRACE_S, Phase::Other, None, Vec::new())
+            .expect("cut");
         assert_eq!(done.outcome, Outcome::Interrupted);
+    }
+
+    #[test]
+    fn the_pause_on_the_way_back_to_farming_still_counts_as_solved() {
+        let mut r = Recorder::default();
+        r.tick(0.0, Phase::AtRune, None, vec![key(0.0, "down", "y")]);
+        r.tick(1.0, Phase::AtRune, None, vec![key(1.0, "down", "up")]);
+        assert!(r.tick(5.0, Phase::Other, None, Vec::new()).is_none()); // reaction delay
+        let done = r.tick(5.3, Phase::Farming, None, Vec::new()).expect("done");
+        assert_eq!(done.outcome, Outcome::Solved);
+    }
+
+    #[test]
+    fn each_interact_press_starts_an_attempt() {
+        let keys = [
+            "y", "up", "down", "left", "up", "y", "up", "right", "left", "down",
+        ];
+        let rec = Recording {
+            frames: Vec::new(),
+            keys: keys
+                .iter()
+                .enumerate()
+                .map(|(i, k)| key(i as f64, "down", k))
+                .collect(),
+            outcome: Outcome::Solved,
+        };
+        assert_eq!(
+            rec.attempts(),
+            [
+                vec!["up", "down", "left", "up"],
+                vec!["up", "right", "left", "down"]
+            ]
+        );
     }
 
     #[test]

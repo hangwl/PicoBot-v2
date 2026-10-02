@@ -49,14 +49,12 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
   fps, the **class picker** (one tap switches the profile; *Edit* opens
   Setup → Class) and one large Start/Stop button.
 - **Control** — rune solving on one screen: hazard banner, a compact
-  view, the arrow pad, quick keys (jump key, ctrl, shift, enter) and a
-  key-name field (limited to the Pico's `KEY_MAP` names) and, when the
-  map has platforms, **Align platform to feet** (walk onto a platform
-  with the pad, tap it; the host's reply shows under it) — the last two
-  under **More keys** — and a collapsed **Status**
-  fold with the patrol (target anchor, move, leg n of m, misses, next
-  anchors, anchors reached), session, moves, class kit, last skill and
-  summons. Keys mirror the
+  view, the arrow pad, the solve keys (space, enter, and `y` to interact
+  with the rune), **Save window** (a lossless capture of the game window,
+  for detection templates), and under **More keys** a key-name field
+  (limited to the Pico's `KEY_MAP` names) and, when the map has
+  platforms, **Align platform to feet** (walk onto a platform with the
+  pad, tap it; the host's reply shows under it). Keys mirror the
   finger: `key|down` on touch, `key|up` on lift, so a tap is a tap, a
   hold is a hold, and several fingers chord (hold left, tap jump). Held
   keys are released when the page is hidden or loses focus; the host

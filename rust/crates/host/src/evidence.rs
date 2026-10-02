@@ -5,7 +5,9 @@
 //! - `_dotlost` — the player dot couldn't be read;
 //! - `_offplatform` — the player stood off every drawn platform (with an
 //!   `overlay.png` of the drawn geometry and the last leg);
-//! - `_rune` — a rune was seen, reached, or given up on (with an overlay).
+//! - `_rune` — a rune was seen, reached, or given up on (with an overlay);
+//! - `_snapshot` — the whole game window, on request (dashboard "Save
+//!   window"): templates for UI detection, such as the lie detector.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,6 +69,21 @@ impl Evidence {
         );
         prune(&self.root, self.suffix, KEEP);
     }
+}
+
+/// Save the whole window (`window.png`, lossless) and `meta` under
+/// `root`, unthrottled; returns the folder.
+pub fn snapshot(root: &Path, img: &Image, meta: &Value) -> std::io::Result<PathBuf> {
+    const SNAPSHOTS_KEPT: usize = 100;
+    let dir = root.join(format!("{}_snapshot", stamp()));
+    fs::create_dir_all(&dir)?;
+    write_png(&dir.join("window.png"), img)?;
+    fs::write(
+        dir.join("meta.json"),
+        serde_json::to_string_pretty(meta).unwrap_or_default(),
+    )?;
+    prune(root, "_snapshot", SNAPSHOTS_KEPT);
+    Ok(dir)
 }
 
 /// `ctx` with `more`'s fields added.
@@ -201,6 +218,20 @@ mod tests {
             (Some("m"), Some(12))
         );
         assert_eq!(&fs::read(d.join("frame.png")).unwrap()[1..4], b"PNG");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_snapshot_is_saved_whole_and_unthrottled() {
+        let root = std::env::temp_dir().join(format!("snapshot-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let img = Image::new(20, 10);
+        let a = snapshot(&root, &img, &json!({ "window": "w" })).unwrap();
+        std::thread::sleep(Duration::from_millis(2)); // a distinct stamp
+        let b = snapshot(&root, &img, &json!({ "window": "w" })).unwrap();
+        assert_ne!(a, b);
+        assert!(a.to_string_lossy().ends_with("_snapshot"));
+        assert_eq!(&fs::read(a.join("window.png")).unwrap()[1..4], b"PNG");
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -4,7 +4,7 @@
 //! `DashboardCommands` thread, in order.
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -696,6 +696,36 @@ impl Host {
         self.telegram.send_async(msg);
     }
 
+    /// `host|snapshot`: the whole game window to `debug/frames/*_snapshot/`.
+    fn snapshot(&self) {
+        let title = self.window_title();
+        let Some(img) = crate::feed::Eyes::open(&title).and_then(|mut e| e.window_img()) else {
+            self.bus
+                .emit("error", &format!("Save window: can't capture \"{title}\""));
+            return;
+        };
+        let viz = self.bot_viz();
+        let meta = json!({
+            "window": title,
+            "size": [img.width, img.height],
+            "map": self.identity.entry().map(|e| e.name),
+            "bot_state": viz.as_ref().map(|v| v.state.clone()),
+            "hazard": viz.and_then(|v| v.hazard),
+        });
+        match crate::evidence::snapshot(Path::new("debug/frames"), &img, &meta) {
+            Ok(dir) => self.bus.emit(
+                "notify",
+                &format!(
+                    "Window saved ({}x{}) → {}",
+                    img.width,
+                    img.height,
+                    dir.display()
+                ),
+            ),
+            Err(e) => self.bus.emit("error", &format!("Save window failed: {e}")),
+        }
+    }
+
     // -- Commands ---------------------------------------------------------------------
 
     /// Run one dashboard command; false when it isn't one.
@@ -705,6 +735,7 @@ impl Host {
             "events|history" => self.send_history(),
             "config|get" => self.send_config(),
             "host|state" => self.send_host_state(),
+            "host|snapshot" => self.snapshot(),
             _ if msg.starts_with("host|serial|") => self.connect_serial(&arg(2)),
             _ if msg.starts_with("host|window|") => self.set_window(&arg(2)),
             _ if msg.starts_with("dash|fps|") => self.set_fps(&arg(2)),

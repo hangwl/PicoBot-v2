@@ -109,11 +109,17 @@ glyph gap and facing) and when it gives up (`failed`, with why) —
 `frame.png`, `overlay.png` and `meta.json` with the rune's box. They are
 the evidence for the rune glyph's real size and the side-by-side rule.
 
+**Window snapshots**: the Control page's **Save window** saves the whole
+game window as it is to `debug/frames/<utc-stamp>_snapshot/window.png`
+(lossless, with a `meta.json`; newest 100 kept) — the source of templates
+for UI detection such as the lie detector.
+
 **Rune-solve recordings** (the dataset for solving runes): while the bot
 is paused at a rune, the `RuneRecorder` thread (`solves.rs`, own grabber,
 8 fps) keeps 2s of game-window frames; the first dashboard key starts a
 recording. It ends when the bot resumes farming (`solved`), stops or
-pauses for something else (`interrupted`), or after 8s without a key or
+pauses for something else for 1.5s (`interrupted` — shorter is the
+reaction delay on the way back to farming), or after 8s without a key or
 30s in all (`unsolved`), and is saved to
 `debug/frames/<utc-stamp>_runesolve/`:
 
@@ -123,7 +129,10 @@ pauses for something else (`interrupted`), or after 8s without a key or
   lossless: the puzzle as it was read, labelled by the key pressed;
 - `keys.json` — every dashboard key event (down/up), times relative to
   the first key;
-- `meta.json` — outcome, the arrow sequence, frame count, window size.
+- `meta.json` — outcome, the arrow sequence, `attempts` (the arrows after
+  each interact press — a wrong arrow ends an attempt, so only the last
+  attempt of a `solved` recording is certainly right), frame count,
+  window size.
 
 Newest 30 kept; `record_rune_solves` turns it off. Only `solved`
 recordings make reliable labels.

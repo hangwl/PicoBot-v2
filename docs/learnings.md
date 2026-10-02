@@ -242,6 +242,24 @@ A whole-codebase pass before the Rust port found, among others:
   near an edge it could carry the character off. It now needs a jump's
   worth of platform ahead, else it walks.
 
+## Rune arrows (2026-10-03)
+
+- **The puzzle**: "Tap the arrow keys in the correct order to activate
+  the rune" over a strip of four arrows near the top of the window
+  (around y 190-250 of 1366x768). The strip and the arrows' x positions
+  move between runes, so slots can't be fixed.
+- **The arrows read by colour**: each is a solid arrow shaded green at
+  the tail through yellow to orange-red at the tip. Strongly coloured
+  pixels with hue 12-160°, grouped into blobs, give the four largest
+  blobs as the arrows; tip-hue (< 45°) centroid minus tail-hue (> 95°)
+  centroid is the direction. A prototype read all 7 attempts in the
+  first 5 recordings; the two that disagreed with the keys pressed were
+  wrong presses (the retries that followed confirm it). Fixed RGB buckets
+  first read only 1 of 7 — mid-tones like `99ff11` fell between them.
+- **Recordings mislabelled solves**: leaving PAUSE passes through a
+  reaction delay published as a bare PAUSE, which the recorder took for
+  an interruption; it now waits 1.5s before calling it that.
+
 ## Rope hugs and the top rim (2026-10-01)
 
 - **Down jumps onto a rope top**: a down jump's takeoff columns (the

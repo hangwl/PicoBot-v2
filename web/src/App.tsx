@@ -6,16 +6,13 @@ import {
   NavBar,
   Pad,
   RunButton,
-  StatusList,
   TABS,
   TopBar,
   Viewer,
-  botStatus,
   tabOf,
 } from "./live";
 import { type AppState, connect, useApp } from "./protocol";
 import { Setup } from "./setup";
-import { Fold } from "./ui";
 
 const WIDE = "(min-width: 900px)";
 
@@ -47,7 +44,6 @@ function Control({ s, wide }: { s: AppState; wide: boolean }) {
       {!wide && <HazardBanner s={s} />}
       {!wide && <Viewer s={s} compact />}
       <Pad s={s} />
-      <Fold title="Status" sub={botStatus(s)[0]}><StatusList s={s} /></Fold>
       {!wide && <RunButton s={s} />}
     </section>
   );
