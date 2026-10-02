@@ -39,7 +39,7 @@ and follows the same view.
 | `patrol|temp|<v>` | set the weighted-roulette temperature |
 | `skills|set\|{json}` (`name, key, kind, cooldown`, attacks also `stance` (ground/air/any) and `weight`, summons also `charges, duration`) / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
 | `host|snapshot` | save the whole game window, lossless, to `debug/frames/<stamp>_snapshot/` (`window.png`, `meta.json`: window, size, map, bot state, hazard); answered by a `notify` (the folder) or an `error` |
-| `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`, `record_rune_solves`: bool), `rune_action` (`approach`\|`pause`), `allowed_other_players` (≥ 0), `other_player_min_px` (≥ 1) and `heartbeat_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
+| `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`, `record_rune_solves`: bool), `rune_action` (`solve`\|`approach`\|`pause`), `rune_key` (a key name), `allowed_other_players` (≥ 0), `other_player_min_px` (≥ 1) and `heartbeat_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
 | `attacks|set|{json}` | `move_attack_chance`, `ground_attack_chance`, `weave_double_chance` (0–1) and `target_attacks_per_min` (≥ 0); saved to `config.json`, then re-sends `config` |
 | `notify|test` | send one Telegram test alert; the host answers with a `notify` (sent) or `error` event |
 | `movekeys|set|{json}` | movement keybinds (jump/rope-lift/flash) + nav radius |

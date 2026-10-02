@@ -10,6 +10,7 @@ pub mod measure;
 pub mod navigator;
 pub mod patrol;
 pub mod session;
+pub mod solve;
 pub mod watchdog;
 
 pub use body::{Body, BotState, Dir, Keys, LegViz, PatrolStatus, Travel, Viz, Window};

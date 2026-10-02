@@ -223,6 +223,7 @@ export interface AppState {
   stopPlayers: boolean;
   stopRune: boolean;
   runeAction: string;
+  runeKey: string;
   recordSolves: boolean;
   stopMap: boolean;
   heartbeat: number;
@@ -293,7 +294,8 @@ const initial: AppState = {
   session: null,
   stopPlayers: true,
   stopRune: true,
-  runeAction: "approach",
+  runeAction: "solve",
+  runeKey: "y",
   recordSolves: true,
   stopMap: true,
   heartbeat: 30,
@@ -632,7 +634,8 @@ function onEvent(p: Record<string, any> & { event: string }) {
         fps: (c.view_fps as number) ?? state.fps,
         stopPlayers: c.stop_when_players_appear !== false,
         stopRune: c.stop_when_rune_appears !== false,
-        runeAction: (c.rune_action as string) ?? "approach",
+        runeAction: (c.rune_action as string) ?? "solve",
+        runeKey: (c.rune_key as string) ?? "y",
         recordSolves: c.record_rune_solves !== false,
         stopMap: c.stop_when_map_unrecognized !== false,
         heartbeat: (c.heartbeat_minutes as number) ?? 30,

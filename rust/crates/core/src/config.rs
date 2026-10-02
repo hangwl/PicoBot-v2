@@ -216,6 +216,9 @@ impl PatrolPolicy {
 /// What the bot does when a rune appears (with `stop_when_rune_appears`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuneAction {
+    /// Stand on it and solve it (read the arrows, answer, verify by
+    /// stepping off; retry after the rune's lock); pause if that fails.
+    Solve,
     /// Walk to a spot beside it, then pause for the solve.
     Approach,
     /// Pause where it stands.
@@ -225,6 +228,7 @@ pub enum RuneAction {
 impl RuneAction {
     pub fn as_str(self) -> &'static str {
         match self {
+            RuneAction::Solve => "solve",
             RuneAction::Approach => "approach",
             RuneAction::Pause => "pause",
         }
@@ -232,6 +236,7 @@ impl RuneAction {
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "solve" => Some(RuneAction::Solve),
             "approach" => Some(RuneAction::Approach),
             "pause" => Some(RuneAction::Pause),
             _ => None,
@@ -250,6 +255,8 @@ pub struct BotConfig {
     pub other_player_min_px: i64,
     pub stop_when_rune_appears: bool,
     pub rune_action: RuneAction,
+    /// The key that activates a rune.
+    pub rune_key: String,
     /// Record dashboard rune solves (`debug/frames/*_runesolve/`).
     pub record_rune_solves: bool,
     pub stop_when_map_unrecognized: bool,
@@ -334,7 +341,8 @@ impl Default for BotConfig {
             allowed_other_players: 0,
             other_player_min_px: crate::minimap::MARKER_MIN_PX as i64,
             stop_when_rune_appears: true,
-            rune_action: RuneAction::Approach,
+            rune_action: RuneAction::Solve,
+            rune_key: "y".into(),
             record_rune_solves: true,
             stop_when_map_unrecognized: true,
             pause_on_lie_detector: false,
@@ -523,6 +531,12 @@ impl BotConfig {
         if let Some(a) = get("rune_action").and_then(|v| RuneAction::parse(&as_string(v))) {
             cfg.rune_action = a;
         }
+        if let Some(k) = get("rune_key")
+            .map(as_string)
+            .filter(|k| !k.trim().is_empty())
+        {
+            cfg.rune_key = k.trim().to_lowercase();
+        }
         if let Some(v) = get("patrol_policy") {
             cfg.patrol_policy = if as_string(v) == "greedy" {
                 PatrolPolicy::Greedy
@@ -684,6 +698,7 @@ impl BotConfig {
             "other_player_min_px": self.other_player_min_px,
             "stop_when_rune_appears": self.stop_when_rune_appears,
             "rune_action": self.rune_action.as_str(),
+            "rune_key": self.rune_key,
             "record_rune_solves": self.record_rune_solves,
             "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,

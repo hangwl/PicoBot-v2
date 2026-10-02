@@ -4,12 +4,14 @@
 //! and the all-clear resumes it. Each state checks the environmental safety
 //! conditions (focus, hazards) before it runs a tick.
 //!
-//! A rune is a goal, not a hazard: RUNE detours to stand beside it, then
-//! holds in PAUSE until it's gone (`rune_action: pause` holds at once).
+//! A rune is a goal, not a hazard: RUNE detours to it and (`rune_action:
+//! solve`) solves it standing on it, or (`approach`) stands beside it and
+//! holds in PAUSE until it's gone; `pause` holds at once. A solve that
+//! gives up holds too.
 
 use serde_json::json;
 
-use super::approach::{Approach, RuneApproach};
+use super::approach::{Approach, RuneApproach, Stand};
 use super::body::Body;
 use super::grind::{
     apply_pending_skills, begin_grind, begin_travel, cast_at_anchor, cast_buffs, grind_once,
@@ -17,6 +19,7 @@ use super::grind::{
 };
 use super::patrol::Patrol;
 use super::session::Session;
+use super::solve::{RuneSolver, Solve};
 use super::watchdog::Watchdog;
 use crate::config::RuneAction;
 use crate::rune::Rune;
@@ -58,6 +61,7 @@ pub struct Machine {
     pub patrol: Patrol,
     watchdog: Watchdog,
     approach: RuneApproach,
+    solver: RuneSolver,
     /// Paused for the rune (beside it, or where it was seen) until it's gone.
     rune_hold: bool,
 }
@@ -71,6 +75,7 @@ impl Default for Machine {
             patrol: Patrol::default(),
             watchdog: Watchdog::default(),
             approach: RuneApproach::default(),
+            solver: RuneSolver::default(),
             rune_hold: false,
         }
     }
@@ -197,7 +202,13 @@ impl Machine {
                     return Next::Go(s);
                 }
                 match rune_now(body) {
-                    None => Next::Go(State::Grind),
+                    None => {
+                        if self.solver.active() {
+                            let n = self.solver.attempts();
+                            body.log(&format!("Rune solved (attempt {n})"));
+                        }
+                        Next::Go(State::Grind)
+                    }
                     Some(_) if self.rune_hold => Next::Hold(State::Grind),
                     Some(_) => Next::Stay,
                 }
@@ -221,7 +232,7 @@ impl Machine {
     /// A rune showed up while farming: detour to it, or hold here.
     fn on_rune<B: Body + ?Sized>(&mut self, body: &mut B) -> Next {
         match body.config().rune_action {
-            RuneAction::Approach => Next::Go(State::Rune),
+            RuneAction::Solve | RuneAction::Approach => Next::Go(State::Rune),
             RuneAction::Pause => {
                 self.rune_hold = true;
                 body.notify("Rune detected — pausing");
@@ -270,7 +281,12 @@ impl Machine {
                 self.travel_done = !begin_travel(body);
             }
             State::Rune => {
+                self.approach.stand = match body.config().rune_action {
+                    RuneAction::Solve => Stand::On,
+                    _ => Stand::Beside,
+                };
                 self.approach.reset();
+                self.solver.reset();
                 self.patrol.detour(); // the patrol resumes from wherever this ends
                 body.log("RUNE: heading to the rune");
             }
@@ -321,8 +337,19 @@ impl Machine {
         let Some(r) = body.state_ref().rune.rune else {
             return;
         };
+        if self.solver.active() {
+            if let Solve::GaveUp(why) = self.solver.tick(body, r, &mut self.approach) {
+                self.rune_hold = true;
+                body.notify(&format!("Rune: {why} — pausing"));
+            }
+            return;
+        }
         match self.approach.tick(body, r) {
             Approach::Moving => {}
+            Approach::Arrived if self.approach.stand == Stand::On => {
+                let now = body.now();
+                self.solver.begin(now);
+            }
             Approach::Arrived => {
                 self.rune_hold = true;
                 body.notify("Rune reached — standing beside it, pausing to solve");

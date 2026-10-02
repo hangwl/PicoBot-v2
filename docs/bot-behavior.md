@@ -411,7 +411,25 @@ stub — keep it off until template images exist.
 With `stop_when_rune_appears` on, a rune marker on the minimap
 interrupts farming:
 
-- `rune_action: approach` (default) — **RUNE** detours to a spot beside
+- `rune_action: solve` (default) — **RUNE** detours onto the rune (the
+  player's glyph centred over it, within 1px) and solves it:
+  1. **Activate**: after a short settle, press `rune_key` (default `y`).
+  2. **Read**: poll the game window (every 0.1s, up to 2.5s) until
+     `rune_arrows::read_arrows` reads four clean arrows. A puzzle that
+     never reads counts as a failed try; two of those give up.
+  3. **Answer** like a person: ~0.4-1.4s to take in the puzzle, then the
+     four arrows with uneven ~0.17-0.7s gaps (log-normal, tempo-scaled).
+     Keys stop at once if the game window loses focus.
+  4. **Step off to verify**: tap toward the side of the platform with more
+     room until the dots no longer overlap — standing on the rune hides
+     it, so only stepping off shows whether it's gone. A rune that shows
+     again failed; one that stays gone (the tracker's 5 reads) was solved
+     and farming resumes, the patrol re-routing from there.
+  5. **Failed**: the rune is locked for 3s. The bot waits that out plus a
+     human margin with small wiggles (short taps either way, human
+     pauses), walks back on, and tries again — at most 3 tries, then it
+     pauses with an alert.
+- `rune_action: approach` — **RUNE** detours to a spot beside
   the rune and **pauses** there for the solve (dashboard Control page).
   The spot is on the rune's platform (the drawn row up to 12px under its
   marker), on whichever side is cheaper to reach, with the player's glyph

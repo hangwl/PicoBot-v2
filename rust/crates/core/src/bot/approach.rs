@@ -1,10 +1,10 @@
-//! The detour to a rune: route to a spot beside it and stand there
-//! touching it (`rune::TARGET_GAP`; on it counts too), facing it.
+//! The detour to a rune: route to it, then stand beside it — touching it
+//! (`rune::TARGET_GAP`; on it counts too), facing it — or on it
+//! ([`Stand::On`], for solving: the glyph centred over the rune).
 //!
 //! Routing is the navigator's, one step per tick from the player's actual
 //! position; on the rune's platform the bot places itself precisely (tap
-//! nudges when a tap table is measured) and turns toward the rune. The
-//! state machine pauses on arrival or failure.
+//! nudges when a tap table is measured).
 
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use serde_json::json;
 use super::body::{Body, Dir, Travel};
 use super::grind::blind_wait;
 use super::navigator::{Navigator, StepStatus};
-use crate::rune::{at_rune, gap, platform_under, slot_x, Rune, TARGET_GAP};
+use crate::rune::{at_rune, gap, on_rune, on_x, platform_under, slot_x, Rune, TARGET_GAP};
 use crate::timing::human_between;
 
 /// The whole detour may take this long (s).
@@ -30,8 +30,19 @@ pub enum Approach {
     Failed(String),
 }
 
+/// Where to stand at the rune.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Stand {
+    /// Touching it, facing it: both dots show.
+    #[default]
+    Beside,
+    /// Centred on it (its dot hidden under the player's).
+    On,
+}
+
 #[derive(Default)]
 pub struct RuneApproach {
+    pub stand: Stand,
     nav: Option<Navigator>,
     started: Option<f64>,
     misses: u32,
@@ -39,8 +50,18 @@ pub struct RuneApproach {
 }
 
 impl RuneApproach {
+    /// Start over (keeping where to stand).
     pub fn reset(&mut self) {
+        let stand = self.stand;
         *self = RuneApproach::default();
+        self.stand = stand;
+    }
+
+    fn there(&self, x: i32, rune: Rune) -> bool {
+        match self.stand {
+            Stand::Beside => at_rune(x, rune.bbox),
+            Stand::On => on_rune(x, rune.bbox),
+        }
     }
 
     /// One step toward `rune`.
@@ -56,11 +77,16 @@ impl RuneApproach {
             return Approach::Failed("it isn't over a drawn platform".into());
         };
         let p = graph.platforms[plat];
-        let slots: Vec<f64> = [true, false]
-            .into_iter()
-            .map(|left| slot_x(rune.bbox, left, TARGET_GAP) as f64)
-            .filter(|x| p.spans(*x, 0.0))
-            .collect();
+        let slots: Vec<f64> = match self.stand {
+            Stand::Beside => [true, false]
+                .into_iter()
+                .map(|left| slot_x(rune.bbox, left, TARGET_GAP) as f64)
+                .collect(),
+            Stand::On => vec![on_x(rune.bbox) as f64],
+        }
+        .into_iter()
+        .filter(|x| p.spans(*x, 0.0))
+        .collect();
         if slots.is_empty() {
             return Approach::Failed("no room beside it".into());
         }
@@ -117,7 +143,7 @@ impl RuneApproach {
         let Some(pos) = body.pos() else {
             return Approach::Moving;
         };
-        if !at_rune(pos.0 as i32, rune.bbox) {
+        if !self.there(pos.0 as i32, rune) {
             let near = body.config().nav_threshold_px as f64;
             if (pos.0 - x).abs() > 2.0 * body.config().walk_band_px {
                 // Far along the platform: hop most of the way, as anywhere.
@@ -131,13 +157,15 @@ impl RuneApproach {
                 body.move_to_point(x, y, Some(1.0), Travel::Walk, true);
             }
         }
-        // A short tap toward the rune turns the character to face it.
         let toward = Dir::toward(rune.center().0 - x);
-        let hold = human_between(0.05, 0.04, 0.07, 0.2);
-        body.tap(toward, hold);
+        if self.stand == Stand::Beside {
+            // A short tap toward the rune turns the character to face it.
+            let hold = human_between(0.05, 0.04, 0.07, 0.2);
+            body.tap(toward, hold);
+        }
         body.sleep(human_between(0.15, 0.1, 0.25, 0.3));
         match body.pos() {
-            Some(p) if at_rune(p.0 as i32, rune.bbox) => {
+            Some(p) if self.there(p.0 as i32, rune) => {
                 let g = gap(p.0 as i32, rune.bbox);
                 body.rune_event(
                     "arrived",
