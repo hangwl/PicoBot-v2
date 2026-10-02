@@ -21,6 +21,7 @@ use crate::maps::MapEntry;
 use crate::navgraph::{Direction, GraphCache, GraphOptions, NavGraph};
 use crate::reach::{base_reach, Move, ReachModel};
 use crate::rotation::{resolve_coord, Face, Rotation};
+use crate::rune::{BoxPx, RuneTracker};
 use crate::skills::{Skill, SkillBook, Stance};
 use crate::summons::SummonTracker;
 use crate::timing::{human_between, human_hold, key_gap, release_lag};
@@ -193,6 +194,8 @@ pub struct BotState {
     pub route: Vec<usize>,
     pub checkpoint: Option<(usize, f64)>,
     pub session: Session,
+    /// The rune on the current map, remembered while the player covers it.
+    pub rune: RuneTracker,
     log_throttle: std::collections::HashMap<&'static str, f64>,
 }
 
@@ -223,6 +226,7 @@ impl BotState {
             route: Vec::new(),
             checkpoint: None,
             session: Session::default(),
+            rune: RuneTracker::default(),
             log_throttle: Default::default(),
         }
     }
@@ -275,6 +279,13 @@ pub trait Body {
     /// The player stands off every drawn platform at `pos`; `info` is what
     /// the patrol knows (the host saves it as evidence).
     fn off_platform(&mut self, _pos: (f64, f64), _info: serde_json::Value) {}
+    /// The rune's box in `img`, if one shows (the host overrides).
+    fn locate_rune(&mut self, _img: &Image) -> Option<BoxPx> {
+        None
+    }
+    /// A rune milestone (`seen`, `arrived`, `failed`) with what the bot
+    /// knew (the host saves it as evidence).
+    fn rune_event(&mut self, _event: &str, _info: serde_json::Value) {}
     /// Persist a learned rope on the current map.
     fn save_map(&mut self, _entry: MapEntry) {}
     /// Anchor statistics: visit / miss / skip.

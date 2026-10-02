@@ -400,6 +400,7 @@ impl Host {
             "stop_when_players_appear",
             "stop_when_rune_appears",
             "stop_when_map_unrecognized",
+            "record_rune_solves",
         ];
         let mut edits: Vec<(String, Value)> = Vec::new();
         for (k, v) in &want {
@@ -411,6 +412,11 @@ impl Host {
                     edits.push((k.clone(), v.clone()))
                 }
                 (k, Value::Bool(_)) if bools.contains(&k) => edits.push((k.into(), v.clone())),
+                ("rune_action", Value::String(a))
+                    if picobot_core::config::RuneAction::parse(a).is_some() =>
+                {
+                    edits.push((k.clone(), v.clone()))
+                }
                 ("heartbeat_minutes", v) if v.as_f64().is_some_and(|m| m >= 0.0) => {
                     edits.push((k.clone(), v.clone()))
                 }

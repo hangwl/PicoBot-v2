@@ -57,6 +57,12 @@ impl Patrol {
         self.pace = pace;
     }
 
+    /// The player is being moved off the plan (a rune detour): re-route
+    /// the current segment from wherever it ends.
+    pub fn detour(&mut self) {
+        self.resplice = true;
+    }
+
     /// Real seconds per second of planned route cost (1 until learned).
     pub fn pace(&self) -> f64 {
         if self.pace > 0.0 {

@@ -87,6 +87,12 @@ what was tried and what was learned in `docs/learnings.md` instead.
   loop, and a rope-grab flash opens none (an attack mid-air costs the
   grab). Skills carry a `stance` (ground|air|any) and `weight`; a
   `target_attacks_per_min` steers the odds toward a rate.
+- **A rune is a goal, not a hazard** (`stop_when_rune_appears`,
+  `rune_action`): the only planned detour. RUNE routes beside the rune
+  (glyphs touching, `rune::TARGET_GAP`, or on it; facing it), then PAUSE holds
+  until it's gone. The rune is remembered (`RuneTracker`): the player's dot
+  covers it, so a rune that vanishes under the player is still there. It
+  is never a host hazard — movement must not abort on it.
 - **Summons**: one live summon per anchor (any kind), cast only while
   standing on a platform (two stable reads, on a drawn line), a moving
   character gets up to 1s to settle and the route is never touched (a
@@ -150,7 +156,8 @@ Rust host (`rust/crates/`):
 
 | Area | Files |
 |---|---|
-| Bot loop / FSM | `core/src/bot/machine.rs` (GRIND/TRAVEL/PAUSE), `bot/grind.rs` (arrival skills, summons, buffs, weave), `bot/body.rs` (`Body` trait + movement primitives) |
+| Bot loop / FSM | `core/src/bot/machine.rs` (GRIND/TRAVEL/RUNE/PAUSE), `bot/grind.rs` (arrival skills, summons, buffs, weave), `bot/body.rs` (`Body` trait + movement primitives) |
+| Runes | `core/src/rune.rs` (`RuneTracker`, slots beside a rune, gap rule), `bot/approach.rs` (the detour), `minimap.rs` `rune_box`; `host/src/solves.rs` (`RuneRecorder` thread: dashboard solves → `debug/frames/*_runesolve/`, the arrow dataset) |
 | Pathfinding | `core/src/navgraph.rs` (graph + Dijkstra), `bot/navigator.rs` (execution, landing rule), `reach.rs` (learned reach), `planner.rs` (loop order), `bot/patrol.rs` (continuous loop, rope learning) |
 | Map-change monitor + identity | `host/src/feed.rs` (`MapMonitor` thread), `core/src/minimap.rs` (blackout, panel, dot), `core/src/identity.rs` (pin + voted title reads) |
 | Titles | `core/src/title.rs` (band segmentation, crop), `core/src/fuzzy.rs` (`title_score`), `io/src/ocr.rs` (recogniser) |

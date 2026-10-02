@@ -22,6 +22,7 @@ pub mod planner;
 pub mod platform_fit;
 pub mod reach;
 pub mod rotation;
+pub mod rune;
 pub mod skills;
 pub mod summons;
 pub mod taps;

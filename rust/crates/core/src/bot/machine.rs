@@ -1,9 +1,15 @@
-//! The GRIND / TRAVEL / PAUSE state machine.
+//! The GRIND / TRAVEL / RUNE / PAUSE state machine.
 //!
 //! PAUSE is an interruption: entering it remembers the interrupted state,
 //! and the all-clear resumes it. Each state checks the environmental safety
 //! conditions (focus, hazards) before it runs a tick.
+//!
+//! A rune is a goal, not a hazard: RUNE detours to stand beside it, then
+//! holds in PAUSE until it's gone (`rune_action: pause` holds at once).
 
+use serde_json::json;
+
+use super::approach::{Approach, RuneApproach};
 use super::body::Body;
 use super::grind::{
     apply_pending_skills, begin_grind, begin_travel, cast_at_anchor, cast_buffs, grind_once,
@@ -12,6 +18,8 @@ use super::grind::{
 use super::patrol::Patrol;
 use super::session::Session;
 use super::watchdog::Watchdog;
+use crate::config::RuneAction;
+use crate::rune::Rune;
 use crate::skills::SkillKind;
 use crate::timing::human_reaction;
 
@@ -19,6 +27,7 @@ use crate::timing::human_reaction;
 pub enum State {
     Grind,
     Travel,
+    Rune,
     Pause,
 }
 
@@ -27,6 +36,7 @@ impl State {
         match self {
             State::Grind => "GRIND",
             State::Travel => "TRAVEL",
+            State::Rune => "RUNE",
             State::Pause => "PAUSE",
         }
     }
@@ -35,6 +45,8 @@ impl State {
 enum Next {
     Stay,
     Go(State),
+    /// Pause for the rune, then carry on with the given state.
+    Hold(State),
     Resume,
 }
 
@@ -45,6 +57,9 @@ pub struct Machine {
     travel_done: bool,
     pub patrol: Patrol,
     watchdog: Watchdog,
+    approach: RuneApproach,
+    /// Paused for the rune (beside it, or where it was seen) until it's gone.
+    rune_hold: bool,
 }
 
 impl Default for Machine {
@@ -55,8 +70,42 @@ impl Default for Machine {
             travel_done: false,
             patrol: Patrol::default(),
             watchdog: Watchdog::default(),
+            approach: RuneApproach::default(),
+            rune_hold: false,
         }
     }
+}
+
+/// The rune on the map, when runes matter: this frame's sighting folded
+/// into the tracker (a rune under the player's dot is still there).
+fn rune_now<B: Body + ?Sized>(body: &mut B) -> Option<Rune> {
+    if !body.config().stop_when_rune_appears {
+        body.state().rune.clear();
+        return None;
+    }
+    let Some(img) = body.frame() else {
+        return body.state_ref().rune.rune;
+    };
+    let seen = body.locate_rune(&img);
+    let had = body.state_ref().rune.rune;
+    // The player only matters while a remembered rune doesn't show.
+    let player = match (seen, had) {
+        (None, Some(_)) => body.locate_player(&img),
+        _ => None,
+    };
+    let now = body.now();
+    let present = body.state().rune.observe(seen, player, now);
+    let rune = body.state_ref().rune.rune.filter(|_| present);
+    match (had, rune) {
+        (None, Some(r)) => {
+            let (x, y) = r.center();
+            body.log(&format!("Rune spotted at ({x:.0}, {y:.0})"));
+            body.rune_event("seen", json!({ "rune": r.bbox, "player": player }));
+        }
+        (Some(_), None) => body.log("Rune gone"),
+        _ => {}
+    }
+    rune
 }
 
 /// Why the bot should halt, if anything: None when clear. `notify` sends a
@@ -120,6 +169,9 @@ impl Machine {
                 if let Some(s) = safety(body, true) {
                     return Next::Go(s);
                 }
+                if rune_now(body).is_some() {
+                    return self.on_rune(body);
+                }
                 let active = !body.rotation().anchors.is_empty();
                 if active && body.state_ref().travel_target.is_some() {
                     return Next::Go(State::Travel);
@@ -130,18 +182,49 @@ impl Machine {
                 if let Some(s) = safety(body, true) {
                     return Next::Go(s);
                 }
+                if rune_now(body).is_some() {
+                    return self.on_rune(body);
+                }
                 if self.travel_done {
                     Next::Go(State::Grind)
                 } else {
                     Next::Stay
                 }
             }
+            State::Rune => {
+                if let Some(s) = safety(body, true) {
+                    return Next::Go(s);
+                }
+                match rune_now(body) {
+                    None => Next::Go(State::Grind),
+                    Some(_) if self.rune_hold => Next::Hold(State::Grind),
+                    Some(_) => Next::Stay,
+                }
+            }
             State::Pause => {
                 if safety(body, false).is_some() || !body.focused() {
-                    Next::Stay
-                } else {
-                    Next::Resume
+                    return Next::Stay;
                 }
+                if self.rune_hold {
+                    if rune_now(body).is_some() {
+                        body.state().viz.hazard = Some("rune".into());
+                        return Next::Stay;
+                    }
+                    self.rune_hold = false;
+                }
+                Next::Resume
+            }
+        }
+    }
+
+    /// A rune showed up while farming: detour to it, or hold here.
+    fn on_rune<B: Body + ?Sized>(&mut self, body: &mut B) -> Next {
+        match body.config().rune_action {
+            RuneAction::Approach => Next::Go(State::Rune),
+            RuneAction::Pause => {
+                self.rune_hold = true;
+                body.notify("Rune detected — pausing");
+                Next::Hold(self.state)
             }
         }
     }
@@ -163,6 +246,11 @@ impl Machine {
                 }
                 s
             }
+            Next::Hold(after) => {
+                self.paused_from = Some(after);
+                body.state().viz.hazard = Some("rune".into());
+                State::Pause
+            }
         };
         self.exit(body);
         self.state = next;
@@ -179,6 +267,11 @@ impl Machine {
             }
             State::Travel => {
                 self.travel_done = !begin_travel(body);
+            }
+            State::Rune => {
+                self.approach.reset();
+                self.patrol.detour(); // the patrol resumes from wherever this ends
+                body.log("RUNE: heading to the rune");
             }
             State::Pause => {
                 let now = body.now();
@@ -215,8 +308,29 @@ impl Machine {
                 run_travel(body);
                 self.travel_done = true;
             }
+            State::Rune => self.rune_tick(body),
             State::Pause => {
                 body.sleep(1.0);
+            }
+        }
+    }
+
+    /// One step of the detour; arriving or failing holds for the rune.
+    fn rune_tick<B: Body + ?Sized>(&mut self, body: &mut B) {
+        let Some(r) = body.state_ref().rune.rune else {
+            return;
+        };
+        match self.approach.tick(body, r) {
+            Approach::Moving => {}
+            Approach::Arrived => {
+                self.rune_hold = true;
+                body.notify("Rune reached — standing beside it, pausing to solve");
+            }
+            Approach::Failed(why) => {
+                self.rune_hold = true;
+                let (x, y) = r.center();
+                body.rune_event("failed", json!({ "rune": r.bbox, "why": why }));
+                body.notify(&format!("Rune at ({x:.0}, {y:.0}): {why} — pausing"));
             }
         }
     }

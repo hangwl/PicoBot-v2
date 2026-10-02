@@ -213,6 +213,32 @@ impl PatrolPolicy {
     }
 }
 
+/// What the bot does when a rune appears (with `stop_when_rune_appears`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuneAction {
+    /// Walk to a spot beside it, then pause for the solve.
+    Approach,
+    /// Pause where it stands.
+    Pause,
+}
+
+impl RuneAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RuneAction::Approach => "approach",
+            RuneAction::Pause => "pause",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "approach" => Some(RuneAction::Approach),
+            "pause" => Some(RuneAction::Pause),
+            _ => None,
+        }
+    }
+}
+
 /// Tuning knobs for the bot, from `config.json["bot"]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BotConfig {
@@ -223,6 +249,9 @@ pub struct BotConfig {
     /// Smallest marker (px) that counts as another player.
     pub other_player_min_px: i64,
     pub stop_when_rune_appears: bool,
+    pub rune_action: RuneAction,
+    /// Record dashboard rune solves (`debug/frames/*_runesolve/`).
+    pub record_rune_solves: bool,
     pub stop_when_map_unrecognized: bool,
     pub pause_on_lie_detector: bool,
     // Keys
@@ -305,6 +334,8 @@ impl Default for BotConfig {
             allowed_other_players: 0,
             other_player_min_px: crate::minimap::MARKER_MIN_PX as i64,
             stop_when_rune_appears: true,
+            rune_action: RuneAction::Approach,
+            record_rune_solves: true,
             stop_when_map_unrecognized: true,
             pause_on_lie_detector: false,
             attack_keys: vec!["a".into()],
@@ -432,6 +463,7 @@ impl BotConfig {
                 &mut cfg.stop_when_players_appear,
             ),
             ("stop_when_rune_appears", &mut cfg.stop_when_rune_appears),
+            ("record_rune_solves", &mut cfg.record_rune_solves),
             (
                 "stop_when_map_unrecognized",
                 &mut cfg.stop_when_map_unrecognized,
@@ -487,6 +519,9 @@ impl BotConfig {
             if let Some(v) = i64_of(name)? {
                 *slot = v;
             }
+        }
+        if let Some(a) = get("rune_action").and_then(|v| RuneAction::parse(&as_string(v))) {
+            cfg.rune_action = a;
         }
         if let Some(v) = get("patrol_policy") {
             cfg.patrol_policy = if as_string(v) == "greedy" {
@@ -648,6 +683,8 @@ impl BotConfig {
             "allowed_other_players": self.allowed_other_players,
             "other_player_min_px": self.other_player_min_px,
             "stop_when_rune_appears": self.stop_when_rune_appears,
+            "rune_action": self.rune_action.as_str(),
+            "record_rune_solves": self.record_rune_solves,
             "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,
             "attack_keys": self.attack_keys,

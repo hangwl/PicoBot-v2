@@ -31,6 +31,7 @@ pub fn sync_map<B: Body + ?Sized>(body: &mut B) -> bool {
     st.arrive_pending.clear();
     st.bans.clear();
     st.roam_origin = None;
+    st.rune.clear();
     st.weave_dir = None;
     st.weave_bounds = None;
     st.route.clear();

@@ -400,11 +400,38 @@ below, so the lowest drawn platform is the map's bottom.
 ## Safety
 
 Pauses the bot (and fires a Telegram alert if configured) on: window
-focus loss, rune marker on the minimap, more other players than
+focus loss, more other players than
 `allowed_other_players` (the alert says how many), a map transfer
-(loading blackout) mid-leg, and a map no saved entry matches. Solve rune checks via the dashboard's
-remote input pad. `pause_on_lie_detector` is a documented stub — keep it
-off until template images exist.
+(loading blackout) mid-leg, and a map no saved entry matches. A rune is
+handled separately (below). `pause_on_lie_detector` is a documented
+stub — keep it off until template images exist.
+
+### Runes
+
+With `stop_when_rune_appears` on, a rune marker on the minimap
+interrupts farming:
+
+- `rune_action: approach` (default) — **RUNE** detours to a spot beside
+  the rune and **pauses** there for the solve (dashboard Control page).
+  The spot is on the rune's platform (the drawn row up to 12px under its
+  marker), on whichever side is cheaper to reach, with the player's glyph
+  touching the rune's (`TARGET_GAP` 0px). The
+  route is the navigator's (flash hops, attack windows, one leg per
+  tick); on the rune's platform the bot places itself (tap nudges when a
+  tap table is measured, else a precise walk), then a short tap toward
+  the rune turns it to face it. Arrival is checked on the minimap: the
+  glyphs must touch (0px gap) or overlap — standing on it counts.
+- `rune_action: pause` — pauses where it stands.
+- **Fallback**: no drawn platform under the rune, no room beside it, no
+  route, 3 missed landings or 60s on the way — the bot pauses with an
+  alert naming why.
+
+The rune is **remembered**, not re-read per frame: the player's dot is
+drawn over the rune's, so standing on it hides it. A rune that vanishes
+while the player's glyph covers it is still there; it counts as gone
+after 5 reads without it with the player clearly off it (or once it has
+stayed covered 30s). Then the bot resumes farming, and the patrol
+re-routes from wherever the detour ended. A map change forgets the rune.
 
 Telegram hears about: a hazard pause, every stop (with its reason and
 the run's summary), a failed start, a crash (caught; keys released), a

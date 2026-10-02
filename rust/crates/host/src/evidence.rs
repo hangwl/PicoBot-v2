@@ -4,7 +4,8 @@
 //!
 //! - `_dotlost` — the player dot couldn't be read;
 //! - `_offplatform` — the player stood off every drawn platform (with an
-//!   `overlay.png` of the drawn geometry and the last leg).
+//!   `overlay.png` of the drawn geometry and the last leg);
+//! - `_rune` — a rune was seen, reached, or given up on (with an overlay).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,10 @@ impl Evidence {
         Self::at(DIR, "_offplatform")
     }
 
+    pub fn rune() -> Self {
+        Self::at(DIR, "_rune")
+    }
+
     pub fn at(root: impl Into<PathBuf>, suffix: &'static str) -> Self {
         Evidence {
             root: root.into(),
@@ -60,7 +65,7 @@ impl Evidence {
             dir.join("meta.json"),
             serde_json::to_string_pretty(meta).unwrap_or_default(),
         );
-        prune(&self.root, self.suffix);
+        prune(&self.root, self.suffix, KEEP);
     }
 }
 
@@ -105,7 +110,7 @@ pub fn pixel_stats(img: &Image, player: [u8; 3]) -> Value {
     })
 }
 
-fn write_png(path: &Path, img: &Image) -> std::io::Result<()> {
+pub(crate) fn write_png(path: &Path, img: &Image) -> std::io::Result<()> {
     let mut rgb = Vec::with_capacity(img.width * img.height * 3);
     for y in 0..img.height {
         for x in 0..img.width {
@@ -121,8 +126,8 @@ fn write_png(path: &Path, img: &Image) -> std::io::Result<()> {
     w.write_image_data(&rgb).map_err(std::io::Error::other)
 }
 
-/// Drop the oldest `suffix` captures beyond `KEEP`.
-fn prune(root: &Path, suffix: &str) {
+/// Drop the oldest `suffix` captures beyond the newest `keep`.
+pub(crate) fn prune(root: &Path, suffix: &str, keep: usize) {
     let Ok(rd) = fs::read_dir(root) else { return };
     let mut dirs: Vec<PathBuf> = rd
         .flatten()
@@ -134,14 +139,14 @@ fn prune(root: &Path, suffix: &str) {
         })
         .collect();
     dirs.sort();
-    let extra = dirs.len().saturating_sub(KEEP);
+    let extra = dirs.len().saturating_sub(keep);
     for d in &dirs[..extra] {
         let _ = fs::remove_dir_all(d);
     }
 }
 
 /// `YYYYMMDD-HHMMSS-mmm` (UTC), so names sort by time.
-fn stamp() -> String {
+pub(crate) fn stamp() -> String {
     let d = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
@@ -217,7 +222,7 @@ mod tests {
         }
         fs::create_dir_all(root.join("other_ocr")).unwrap();
         fs::create_dir_all(root.join("1_offplatform")).unwrap();
-        prune(&root, "_dotlost");
+        prune(&root, "_dotlost", KEEP);
         assert_eq!(fs::read_dir(&root).unwrap().count(), KEEP + 2);
         assert!(!root.join("20260000_dotlost").exists());
         let _ = fs::remove_dir_all(&root);

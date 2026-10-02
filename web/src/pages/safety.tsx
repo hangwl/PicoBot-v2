@@ -3,8 +3,8 @@ import { type AppState, send } from "../protocol";
 import { Field, NumberField, Reply, Section, useReply } from "../ui";
 
 const TOGGLES: [key: string, on: (s: AppState) => boolean, label: string, hint: string][] = [
-  ["stop_when_rune_appears", (s) => s.stopRune, "Pause on a rune",
-    "The rune marker appears on the minimap."],
+  ["stop_when_rune_appears", (s) => s.stopRune, "Stop for a rune",
+    "The rune marker appears on the minimap. What the bot does is set below."],
   ["stop_when_players_appear", (s) => s.stopPlayers, "Pause when other players appear",
     "Another player's dot is on the minimap (more than the number allowed below)."],
   ["stop_when_map_unrecognized", (s) => s.stopMap, "Pause on an unrecognized map",
@@ -25,6 +25,19 @@ export function SafetyPage({ s }: { s: AppState }) {
                    onChange={(e) => save({ [key]: (e.target as HTMLInputElement).checked })} />
           </Field>
         ))}
+        <Field label="On a rune"
+               hint="Walk over: the bot heads to a spot beside the rune (both dots showing, facing it), then pauses for the solve. Pause here: it stops where it is. Either way it carries on once the rune is gone.">
+          <select value={s.runeAction} disabled={!s.stopRune}
+                  onChange={(e) => save({ rune_action: (e.target as HTMLSelectElement).value })}>
+            <option value="approach">Walk over, then pause</option>
+            <option value="pause">Pause here</option>
+          </select>
+        </Field>
+        <Field label="Record rune solves"
+               hint="While paused at a rune, the keys you press here and the game window around them are saved to debug/frames/*_runesolve (newest 30, a few MB each) — the dataset for solving runes automatically later.">
+          <input type="checkbox" checked={s.recordSolves}
+                 onChange={(e) => save({ record_rune_solves: (e.target as HTMLInputElement).checked })} />
+        </Field>
       </Section>
       <Section title="Other players"
                hint="Every change in the count is logged as a warning. The bot pauses only when more than this many are on the minimap.">

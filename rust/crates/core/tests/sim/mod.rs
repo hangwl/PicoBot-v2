@@ -115,6 +115,10 @@ pub struct Sim {
     pub stop_on: Option<String>,
     /// Off-platform reports: (position, what the patrol knew).
     pub off: Vec<((f64, f64), serde_json::Value)>,
+    /// A rune's box on the minimap; the player's glyph hides it.
+    pub rune: Option<(i32, i32, i32, i32)>,
+    /// Rune milestones reported: (event, info).
+    pub rune_events: Vec<(String, serde_json::Value)>,
 }
 
 impl Sim {
@@ -171,6 +175,8 @@ impl Sim {
             stop: Arc::default(),
             stop_on: None,
             off: Vec::new(),
+            rune: None,
+            rune_events: Vec::new(),
         }
     }
 
@@ -426,6 +432,15 @@ impl Body for Sim {
     }
     fn off_platform(&mut self, pos: (f64, f64), info: serde_json::Value) {
         self.off.push((pos, info));
+    }
+    fn locate_rune(&mut self, _img: &Image) -> Option<(i32, i32, i32, i32)> {
+        let r = self.rune?;
+        let (x, y) = (self.pos.0.round() as i32, self.pos.1.round() as i32);
+        let covered = x - 3 <= r.2 && r.0 <= x + 2 && y - 5 <= r.3 && r.1 <= y;
+        (!covered).then_some(r)
+    }
+    fn rune_event(&mut self, event: &str, info: serde_json::Value) {
+        self.rune_events.push((event.into(), info));
     }
     fn probe_rope(&mut self) -> Option<bool> {
         self.probe

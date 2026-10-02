@@ -23,7 +23,8 @@ export function attackSub(s: AppState): string {
 }
 
 export function safetySub(s: AppState): string {
-  const on = [s.stopRune && "rune", s.stopPlayers && "players", s.stopMap && "unknown map"]
+  const rune = s.runeAction === "approach" ? "walks to runes" : "rune";
+  const on = [s.stopRune && rune, s.stopPlayers && "players", s.stopMap && "unknown map"]
     .filter(Boolean);
   return on.length ? `pauses on ${on.join(", ")}` : "no automatic pauses";
 }
