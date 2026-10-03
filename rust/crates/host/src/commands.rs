@@ -95,6 +95,10 @@ impl Host {
             _ if msg.starts_with("attacks|set|") => self.attacks_set(&arg(2)),
             _ if msg.starts_with("layout|erase|") => self.layout_erase(msg),
             _ if msg.starts_with("patrol|temp|") => self.patrol_set(None, Some(&arg(2))),
+            _ if msg.starts_with("patrol|mode|") => self.patrol_mode_set(arg(2).trim()),
+            _ if msg.starts_with("patrol|reach|") => {
+                self.plan_cost_set("sweep_reach_px", &arg(2), 0.0, 200.0)
+            }
             _ if msg.starts_with("patrol|rope_penalty|") => {
                 self.plan_cost_set("rope_penalty", &arg(2), 0.0, 600.0)
             }
@@ -348,6 +352,26 @@ impl Host {
             return;
         }
         self.bus.emit("bot", &format!("{key}: {v}"));
+        self.send_config();
+    }
+
+    /// `patrol|mode|sweep|anchors`: sweep each anchor's platform, or pass
+    /// through the anchor points.
+    fn patrol_mode_set(&self, mode: &str) {
+        if picobot_core::config::PatrolMode::parse(mode).is_none() {
+            self.bus.emit(
+                "error",
+                &format!("patrol mode must be sweep or anchors, not {mode:?}"),
+            );
+            return;
+        }
+        if let Err(e) = self.commit_bot(|bot| {
+            bot.insert("patrol_mode".into(), mode.into());
+        }) {
+            self.bus.emit("error", &e);
+            return;
+        }
+        self.bus.emit("bot", &format!("patrol_mode: {mode}"));
         self.send_config();
     }
 

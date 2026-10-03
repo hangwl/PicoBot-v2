@@ -80,7 +80,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Always on the move, strictly on plan**: the patrol executes a
   pre-planned anchor loop leg by leg; the next loop is planned before the
   current one ends, and with no planned path the bot halts (break) rather
-  than improvise. Anchors are pure pass-through waypoints (no linger).
+  than improvise. Anchors are pure pass-through waypoints (no linger);
+  with `patrol_mode: sweep` (default) each anchor's **platform is swept**
+  instead — from the nearer end to `sweep_reach_px` short of the far end,
+  on flash hops with attack windows, one sweep per platform; loop order
+  weighs only the approach (every sweep is made once a loop).
   No wander state, dwell timers, breathers, or stationary attack loops.
   Attacks are cast only in **windows** — after a flash triggers (air) or
   after a landing (ground, `ground_attack_chance`) — never in a stationary

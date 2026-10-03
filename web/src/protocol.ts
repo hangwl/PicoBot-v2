@@ -223,6 +223,8 @@ export interface AppState {
   stopPlayers: boolean;
   stopRune: boolean;
   runeAction: string;
+  patrolMode: string;
+  sweepReach: number;
   runeKey: string;
   recordSolves: boolean;
   stopMap: boolean;
@@ -295,6 +297,8 @@ const initial: AppState = {
   stopPlayers: true,
   stopRune: true,
   runeAction: "solve",
+  patrolMode: "sweep",
+  sweepReach: 12,
   runeKey: "y",
   recordSolves: true,
   stopMap: true,
@@ -635,6 +639,8 @@ function onEvent(p: Record<string, any> & { event: string }) {
         stopPlayers: c.stop_when_players_appear !== false,
         stopRune: c.stop_when_rune_appears !== false,
         runeAction: (c.rune_action as string) ?? "solve",
+        patrolMode: (c.patrol_mode as string) ?? "sweep",
+        sweepReach: (c.sweep_reach_px as number) ?? 12,
         runeKey: (c.rune_key as string) ?? "y",
         recordSolves: c.record_rune_solves !== false,
         stopMap: c.stop_when_map_unrecognized !== false,

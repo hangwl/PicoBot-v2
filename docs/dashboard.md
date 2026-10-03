@@ -93,7 +93,8 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     Every class also gets **Walk taps** (tap lengths, pace), and flash
     classes **Skill effects** (what each attack does to a flash in the air and to you on the ground;
     shown in the Skills fold too).
-  - **Tuning** — three folds. **Patrol**: loop order + temperature, and per-anchor **stats**
+  - **Tuning** — three folds. **Patrol**: what to do at each anchor (sweep its platform, or pass
+    through) and the attack reach, loop order + temperature, and per-anchor **stats**
     (visits, misses, skips by reason; Reset).
     **Attacks**: how often a move and a landing carry attacks, the
     second-attack chance and a target attacks-per-minute; the running
