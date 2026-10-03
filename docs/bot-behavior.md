@@ -49,8 +49,9 @@ loop:
 - **Platform sweeps** (`patrol_mode: sweep`, the default): an anchor marks
   a spawn platform, and the loop **sweeps** it rather than visiting the
   point. A sweep goes to whichever end of the platform is cheaper to
-  reach, then crosses from `3`px inside that end to `sweep_reach_px`
-  (default 12) short of the other — on flash hops with an attack window
+  reach, then crosses from 8px inside that end to `sweep_reach_px`
+  (default 12, at least 8) short of the other — never nearer an edge than
+  8px, since a walk slides a few px past where it lets go — on flash hops with an attack window
   each, so the last attack, facing the far end, covers it. Several
   anchors on one platform make one sweep (the first anchor's; the others
   aren't targets). A platform too short for that is visited at its
@@ -109,7 +110,7 @@ below) with every move whose **reach** covers the gap:
 | `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps |
 | `up_flash` | jump, then Up + jump mid-air | platform directly above |
 | `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
-| `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column — only where no proven jump, flash or up flash reaches that platform (those come first); still used to skip a tier no single jump reaches |
+| `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column — only where no proven jump, flash or up flash reaches that platform (those come first); still used to skip a tier no single jump reaches. Costs `rope_lift_cost` (1.5s: its wind-up alone is ~1.2s), so a route doesn't lift to a higher tier just to drop back down |
 | `down_jump` / `drop` | down + jump; walk off an end | lower platforms; a down jump takes off more than `rope_clear_px` (8px) from any learned rope hanging off its platform — Down on a rope's top grabs the rope instead |
 | `climb_up` | a **moving grab**: Up held ~0.15–0.25s before takeoff, then a hop toward the rope from 6px beside it (or a flash jump off a platform end up to 20px out, flash kits) — then climb and mount the top platform. Straight-up only when the platform is too narrow to step aside | boards from any platform within jump reach below the rope's bottom end, which stays ≥5px above the platform under it |
 | `climb_down` | grab at the top (hold down), descend past the rope's bottom end, land below | lands on the nearest platform under the rope's end |

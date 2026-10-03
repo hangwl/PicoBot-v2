@@ -120,8 +120,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
   **Jumps beat rope lift**: a platform a proven jump-type move (jump,
   flash, double flash, up flash, up-side flash) reaches gets no rope-lift
   edge (`GraphOptions::prefer_jumps`); rope lift is for rises nothing
-  else reaches (or only unproven reach covers), grabs the **highest**
-  platform within `nav_rope_lift_px`, and fires without a precise stop.
+  else reaches (or only unproven reach covers), costs
+  `GraphOptions::rope_lift_cost` (1.5s — never lift up to drop down),
+  grabs the **highest** platform within `nav_rope_lift_px`, and fires
+  without a precise stop. Sweeps keep 8px inside platform ends.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Landings are scored tolerantly (platform span + row slack) — a

@@ -391,7 +391,8 @@ mod tests {
     }
 
     /// Two ledges 15px up, too far apart to cross: each is a rise from the
-    /// floor, by rope lift (cheapest, with jumps not preferred) or up flash.
+    /// floor, by rope lift (cheapest, priced as the Python host did, with
+    /// jumps not preferred) or up flash.
     fn two_rises(cooldowns: &[Cooldown]) -> (Vec<PlanSegment>, Vec<(usize, SkipReason)>) {
         let g = NavGraph::new(
             &[
@@ -403,6 +404,7 @@ mod tests {
             &ReachModel::new(base_reach(&BotConfig::default()), None),
             GraphOptions {
                 prefer_jumps: false,
+                rope_lift_cost: 0.5,
                 ..GraphOptions::default()
             },
         );

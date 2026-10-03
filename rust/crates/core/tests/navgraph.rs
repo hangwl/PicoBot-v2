@@ -116,9 +116,11 @@ fn a_platform_a_jump_reaches_gets_no_rope_lift() {
         kinds(&g.route((10.0, 100.0), (80.0, 84.0), &[]).unwrap()),
         ["up_flash"]
     );
-    // Not preferring jumps, the cheaper rope lift is used while ready.
+    // Not preferring jumps, and priced as cheaply as it used to be, the
+    // rope lift is used while ready.
     let opts = GraphOptions {
         prefer_jumps: false,
+        rope_lift_cost: 0.5,
         ..GraphOptions::default()
     };
     let g = NavGraph::new(&[FLOOR, MID], &[], &reach(), opts);
