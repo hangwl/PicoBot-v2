@@ -140,16 +140,78 @@ fn on_drawn_line<B: Body + ?Sized>(body: &mut B, pos: (f64, f64)) -> bool {
         })
 }
 
-/// At a checkpoint: listed non-summon skills fire when ready; then one
-/// summon — only if the anchor has none live, one allowed here has a
-/// charge, and the character stands on a platform. The fullest skill
-/// (most charges banked) goes first.
+/// Why a ground cast was held, for the log.
+fn footing_note(f: Footing) -> String {
+    match f {
+        Footing::Standing => "standing".into(),
+        Footing::Moving => format!("still moving after {SUMMON_SETTLE_S:.0}s"),
+        Footing::OffLine((x, y)) => {
+            format!("not on a drawn platform at ({x:.0}, {y:.0}) — check Platform fit")
+        }
+        Footing::Blind => "player dot not visible".into(),
+    }
+}
+
+/// Between buffs: the cast animation finishes before the next key.
+fn buff_gap<B: Body + ?Sized>(body: &mut B) {
+    body.sleep_between(0.6, 0.45, 0.9);
+}
+
+/// Cast `buffs` (ground casts), standing.
+fn cast_buffs<B: Body + ?Sized>(body: &mut B, buffs: &[Skill]) {
+    for buff in buffs {
+        if !body.should_continue() {
+            break;
+        }
+        if body.use_skill(buff) {
+            buff_gap(body);
+        }
+    }
+}
+
+/// Away from checkpoints (a single anchor, or none): the due buffs, once
+/// the character stands on a platform.
+pub fn cast_buffs_standing<B: Body + ?Sized>(body: &mut B) {
+    let now = body.now();
+    let buffs = body.state().skills.due_buffs(now);
+    if buffs.is_empty() {
+        return;
+    }
+    match settle_on_platform(body, SUMMON_SETTLE_S) {
+        Footing::Standing => cast_buffs(body, &buffs),
+        f => body.log_every(
+            "buffs_held",
+            5.0,
+            &format!("Buffs held: {} — retried shortly", footing_note(f)),
+        ),
+    }
+}
+
+/// At a checkpoint, standing on its platform: due buffs first (ground
+/// casts, the priority), then the anchor's listed non-summon skills when
+/// ready, then one summon — only if the anchor has none live, one allowed
+/// here has a charge. The fullest summon (most charges banked) goes first.
 pub fn cast_at_anchor<B: Body + ?Sized>(body: &mut B, rot: &Rotation, idx: usize) {
     let Some(anchor) = rot.anchors.get(idx) else {
         return; // removed since the arrival
     };
     let allowed = anchor_skills(body, anchor);
     let name = anchor.name.clone();
+    let now = body.now();
+    let buffs = body.state().skills.due_buffs(now);
+    let mut footing = None;
+    if !buffs.is_empty() {
+        let f = settle_on_platform(body, SUMMON_SETTLE_S);
+        footing = Some(f);
+        if f == Footing::Standing {
+            cast_buffs(body, &buffs);
+        } else {
+            body.log(&format!(
+                "Buffs held at {name}: {} — next checkpoint",
+                footing_note(f)
+            ));
+        }
+    }
     for s in allowed.iter().filter(|s| s.kind != SkillKind::Summon) {
         let now = body.now();
         if body.state().skills.ready(&s.name, now) {
@@ -165,7 +227,11 @@ pub fn cast_at_anchor<B: Body + ?Sized>(body: &mut B, rot: &Rotation, idx: usize
     if summons.is_empty() || !body.state().summons.anchor_free(&name, now) {
         return;
     }
-    match settle_on_platform(body, SUMMON_SETTLE_S) {
+    let footing = match footing {
+        Some(Footing::Standing) => Footing::Standing,
+        _ => settle_on_platform(body, SUMMON_SETTLE_S),
+    };
+    match footing {
         Footing::Standing => {}
         Footing::Moving => {
             body.log(&format!(
@@ -237,20 +303,6 @@ pub fn publish_summons<B: Body + ?Sized>(body: &mut B) {
         .collect();
     st.viz.summons = placed;
     st.viz.summon_charges = charges;
-}
-
-/// Fire the buffs that are due.
-pub fn cast_buffs<B: Body + ?Sized>(body: &mut B) {
-    let now = body.now();
-    let buffs = body.state().skills.due_buffs(now);
-    for buff in buffs {
-        if !body.should_continue() {
-            break;
-        }
-        if body.use_skill(&buff) {
-            body.sleep_between(0.3, 0.2, 0.45);
-        }
-    }
 }
 
 /// Both points are on drawn platforms, but different ones.
@@ -370,7 +422,7 @@ pub fn grind_once<B: Body + ?Sized>(body: &mut B) {
     if !body.focused() || !body.should_continue() {
         return;
     }
-    cast_buffs(body);
+    cast_buffs_standing(body);
     if body.state().roam_origin.is_none() {
         body.state().roam_origin = body.pos();
     }

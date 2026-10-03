@@ -245,6 +245,8 @@ struct Charges {
 pub struct SkillBook {
     skills: Vec<Skill>,
     charges: std::collections::HashMap<String, Charges>,
+    /// When each skill was last cast (a buff lasts its `duration` from then).
+    cast_at: std::collections::HashMap<String, f64>,
 }
 
 impl SkillBook {
@@ -252,6 +254,7 @@ impl SkillBook {
         SkillBook {
             skills,
             charges: Default::default(),
+            cast_at: Default::default(),
         }
     }
 
@@ -298,6 +301,11 @@ impl SkillBook {
                         next: state.next,
                     },
                 );
+            }
+        }
+        for (name, t) in &other.cast_at {
+            if self.contains(name) {
+                self.cast_at.insert(name.clone(), *t);
             }
         }
         self
@@ -357,6 +365,7 @@ impl SkillBook {
 
     pub fn mark_used(&mut self, name: &str, now: f64) {
         let Some(i) = self.index(name) else { return };
+        self.cast_at.insert(name.to_owned(), now);
         let cooldown = self.skills[i].cooldown;
         if cooldown <= 0.0 {
             return;
@@ -392,8 +401,20 @@ impl SkillBook {
         self.ready_of(&[SkillKind::Attack, SkillKind::Movement], now)
     }
 
+    /// Buffs to cast: off cooldown and worn off (a buff with a `duration`
+    /// lasts that long from its last cast).
     pub fn due_buffs(&mut self, now: f64) -> Vec<Skill> {
-        self.ready_of(&[SkillKind::Buff], now)
+        let ready = self.ready_of(&[SkillKind::Buff], now);
+        ready
+            .into_iter()
+            .filter(|s| {
+                s.duration <= 0.0
+                    || self
+                        .cast_at
+                        .get(&s.name)
+                        .is_none_or(|t| now - t >= s.duration)
+            })
+            .collect()
     }
 }
 
@@ -401,6 +422,35 @@ impl SkillBook {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_buff_is_due_once_off_cooldown_and_worn_off() {
+        let buff = |name: &str, cooldown: f64, duration: f64| Skill {
+            kind: SkillKind::Buff,
+            cooldown,
+            duration,
+            ..Skill::new(name, "b")
+        };
+        let mut book = SkillBook::new(vec![
+            buff("lasting", 0.0, 180.0), // no cooldown: lasts its duration
+            buff("long", 30.0, 120.0),   // outlasts its cooldown
+            buff("plain", 60.0, 0.0),    // cooldown only
+        ]);
+        let names = |v: Vec<Skill>| v.into_iter().map(|s| s.name).collect::<Vec<_>>();
+        assert_eq!(names(book.due_buffs(0.0)), ["lasting", "long", "plain"]);
+        for n in ["lasting", "long", "plain"] {
+            book.mark_used(n, 0.0);
+        }
+        assert!(book.due_buffs(10.0).is_empty()); // not every tick
+        assert!(book.due_buffs(59.0).is_empty()); // "long" is off cooldown, still up
+        assert_eq!(names(book.due_buffs(60.0)), ["plain"]);
+        assert_eq!(names(book.due_buffs(120.0)), ["long", "plain"]);
+        assert_eq!(names(book.due_buffs(180.0)), ["lasting", "long", "plain"]);
+        // Carried into a new book (a skill edit) with the clock intact.
+        let carried = SkillBook::new(vec![buff("lasting", 0.0, 180.0)]).carry_from(&book);
+        let mut carried = carried;
+        assert!(carried.due_buffs(100.0).is_empty());
+    }
 
     #[test]
     fn round_trip_leaves_defaults_out() {
