@@ -112,9 +112,12 @@ what was tried and what was learned in `docs/learnings.md` instead.
   `ROPE_TOP_OVERSHOOT` above its platform (older tops up to
   `ROPE_TOP_SLACK` under are lifted when the graph is built).
 - **No wall zones**: drawn platform ends are the boundaries — travel
-  room, weave bounds and graph edges all stop at the drawn span. Rope
-  lift is preferred for rises when ready and grabs the **highest**
-  platform within `nav_rope_lift_px`, firing without a precise stop.
+  room, weave bounds and graph edges all stop at the drawn span.
+  **Jumps beat rope lift**: a platform a proven jump-type move (jump,
+  flash, double flash, up flash, up-side flash) reaches gets no rope-lift
+  edge (`GraphOptions::prefer_jumps`); rope lift is for rises nothing
+  else reaches (or only unproven reach covers), grabs the **highest**
+  platform within `nav_rope_lift_px`, and fires without a precise stop.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Landings are scored tolerantly (platform span + row slack) — a

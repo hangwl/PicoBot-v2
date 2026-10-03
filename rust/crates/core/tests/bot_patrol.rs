@@ -498,9 +498,22 @@ fn rope_legs(p: &Patrol) -> usize {
 fn an_unbound_rope_lift_is_never_planned() {
     let plats = [FLOOR, [20.0, 85.0, 60.0, 85.0], [140.0, 85.0, 180.0, 85.0]];
     let anchors = [(40.0, 85.0), (160.0, 85.0)];
-    let mut b = Sim::patrol(&plats, (100.0, 100.0), &anchors);
+    // The up flash only covers these 15px rises on unproven reach (12px
+    // known, 1.3x exploration), so rope lift stays the way up.
+    let unproven_up = || {
+        let mut m = reach_with(&[(
+            Move::UpFlash,
+            Reach {
+                dx: 6.0,
+                rise: 12.0,
+            },
+        )]);
+        m.explore = 1.3;
+        m
+    };
+    let mut b = Sim::patrol(&plats, (100.0, 100.0), &anchors).with_reach(unproven_up());
     p_tick_count(&mut b, 1, |p| assert!(rope_legs(p) > 0)); // bound: preferred
-    let mut b = Sim::patrol(&plats, (100.0, 100.0), &anchors);
+    let mut b = Sim::patrol(&plats, (100.0, 100.0), &anchors).with_reach(unproven_up());
     b.rope = 0.0; // no key: never ready
     let mut p = Patrol::default();
     ticks(&mut p, &mut b, 16);

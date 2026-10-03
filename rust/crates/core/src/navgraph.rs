@@ -201,6 +201,8 @@ pub struct GraphOptions {
     pub allow_teleport: bool,
     /// How far a down jump's takeoff keeps from a rope off its platform.
     pub rope_clear_px: f64,
+    /// No rope lift between two platforms a proven jump-type move links.
+    pub prefer_jumps: bool,
 }
 
 impl Default for GraphOptions {
@@ -217,6 +219,7 @@ impl Default for GraphOptions {
             allow_double_flash: true,
             allow_teleport: false,
             rope_clear_px: ROPE_CLEAR_PX,
+            prefer_jumps: true,
         }
     }
 }
@@ -238,6 +241,8 @@ pub struct NavGraph {
     nodes: Vec<(usize, f64)>,
     index: HashMap<(usize, i64), usize>,
     edges: Vec<Vec<Edge>>,
+    /// (from, to) platforms a proven jump-type move links.
+    jumps: std::collections::HashSet<(usize, usize)>,
 }
 
 impl NavGraph {
@@ -268,6 +273,7 @@ impl NavGraph {
             nodes: Vec::new(),
             index: HashMap::new(),
             edges: Vec::new(),
+            jumps: Default::default(),
         };
         g.build(reach);
         g
@@ -444,6 +450,17 @@ impl NavGraph {
         let cost = kind.cost() * if proven { 1.0 } else { EXPLORE_PENALTY };
         let (a, b) = (self.node(i, xa), self.node(j, xb));
         self.link(a, b, kind, cost);
+        let jump = matches!(
+            kind,
+            MoveKind::Jump
+                | MoveKind::Flash
+                | MoveKind::DoubleFlash
+                | MoveKind::UpFlash
+                | MoveKind::UpSideFlash
+        );
+        if jump && proven {
+            self.jumps.insert((i, j));
+        }
     }
 
     fn build(&mut self, reach: &ReachModel) {
@@ -570,6 +587,10 @@ impl NavGraph {
             .collect();
         for x in xs {
             if let Some((j, rise)) = self.highest_above(x, p.y_at(x), self.rope_max_px, Some(i)) {
+                // A proven jump or up flash gets there: no rope lift for it.
+                if self.opts.prefer_jumps && self.jumps.contains(&(i, j)) {
+                    continue;
+                }
                 self.mv(reach, i, x, j, x, MoveKind::RopeLift, 0.0, rise);
             }
         }

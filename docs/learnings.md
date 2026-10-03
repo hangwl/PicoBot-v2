@@ -242,6 +242,16 @@ A whole-codebase pass before the Rust port found, among others:
   near an edge it could carry the character off. It now needs a jump's
   worth of platform ahead, else it walks.
 
+## Jumps over rope lift (2026-10-03)
+
+- Rope lift was the cheapest rise (cost 0.5 against an up flash's 1.0),
+  so it was used even onto platforms an up flash or jump reaches. Now a
+  proven jump-type link between two platforms removes the rope-lift edge
+  between them; rope lift stays for rises nothing else reaches, and where
+  only unproven (exploratory) jump reach covers the rise — there it's the
+  safer move. The Python parity trace turns this off (`prefer_jumps:
+  false`); cooldown-planning tests that need rope lift as a choice do too.
+
 ## Rune arrows (2026-10-03)
 
 - **The puzzle**: "Tap the arrow keys in the correct order to activate
