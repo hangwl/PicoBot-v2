@@ -37,6 +37,7 @@ fn an_up_flash_that_reaches_beats_the_rope_lift() {
     // Not preferring jumps, the cheaper rope lift wins again.
     let mut b = Sim::new(&[FLOOR, MID], (60.0, 100.0));
     b.opts.prefer_jumps = false;
+    b.opts.rope_lift_cost = 0.5; // and priced as cheaply as it used to be
     assert!(nav(b.graph()).go(&mut b, (80.0, 84.0), 3, 40));
     assert_eq!(b.moves, ["rope_lift"]);
 }
@@ -183,6 +184,7 @@ fn rope_lift_fires_without_a_precise_stop() {
 fn a_rope_chain_replans_while_the_lift_cools() {
     let mut b = Sim::new(&[FLOOR, MID, TOP], (10.0, 100.0));
     b.opts.prefer_jumps = false; // rope lift for every rise, while ready
+    b.opts.rope_lift_cost = 0.5; // and priced as cheaply as it used to be
     assert!(nav(b.graph()).go(&mut b, (80.0, 66.0), 3, 40));
     assert_eq!(b.moves, ["rope_lift", "up_flash"]);
 }

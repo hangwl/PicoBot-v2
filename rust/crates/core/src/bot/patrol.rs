@@ -659,8 +659,10 @@ impl Patrol {
     }
 }
 
-/// A sweep starts this far (px) inside its platform's near end.
-const SWEEP_INSET: f64 = 3.0;
+/// A sweep stays this far (px) inside its platform's ends: a walk slides
+/// a few px past where it lets go, and a target nearer an edge than that
+/// ends up over it.
+const SWEEP_EDGE_PX: f64 = 8.0;
 
 /// Per anchor, the sweep of its platform — the first anchor on each
 /// platform gets it; the others are returned as `covered`. A sweep crosses
@@ -685,8 +687,9 @@ fn platform_sweeps(
             }
             let p = graph.platforms[plat];
             let pt = |x: f64| (x, p.y_at(x));
-            let (left, right) = (p.x0 + SWEEP_INSET, p.x1 - SWEEP_INSET);
-            let (stop_l, stop_r) = (p.x0 + reach, p.x1 - reach);
+            let (left, right) = (p.x0 + SWEEP_EDGE_PX, p.x1 - SWEEP_EDGE_PX);
+            let stop = reach.max(SWEEP_EDGE_PX);
+            let (stop_l, stop_r) = (p.x0 + stop, p.x1 - stop);
             if stop_r <= left {
                 let mid = pt((p.x0 + p.x1) / 2.0);
                 return Some([(mid, mid), (mid, mid)]);

@@ -242,6 +242,27 @@ A whole-codebase pass before the Rust port found, among others:
   near an edge it could carry the character off. It now needs a jump's
   worth of platform ahead, else it walks.
 
+## Sweeps on Odium Road to the Castle's Gate 2 (2026-10-03)
+
+- **Sweep ends at the edge**: entries were 3px inside a platform's end.
+  Off-platform captures on this map showed what a walk to a point 3px
+  from an edge does — the walk to x 66 on a platform ending at 69 stopped
+  at 71, over the edge (a walk slides a few px after letting go). Sweeps
+  made that every target; they now keep 8px inside both ends.
+- **Lifting up to come down**: rope lift was priced 0.5s, under an up
+  flash's 1.0, so from the floor the plan lifted to the top tier, walked,
+  and double-flashed down onto the middle-tier platform an up flash
+  reaches directly. Rope lift's wind-up alone is ~1.2s; priced 1.5s it
+  stops winning those detours, and still beats an unproven up flash.
+- **Weighted order costs loop time with sweeps**: over 40 seeds on this
+  map a loop took 14.3s on average (12.0-19.1) under `weighted`, 12.1s
+  (12.0-12.5) under `greedy` — every platform is swept once a loop anyway,
+  so variety in the order is paid for in travel.
+- **Map data**: on this map the top tier (drawn at y 42) is where the
+  feet read at y 45-48 — off the drawn line by more than its 2px slack,
+  so standing up there reads as off every platform, and up flashes
+  planned onto the middle tier land on the real top tier instead.
+
 ## Jumps over rope lift (2026-10-03)
 
 - Rope lift was the cheapest rise (cost 0.5 against an up flash's 1.0),

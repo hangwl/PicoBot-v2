@@ -204,6 +204,7 @@ fn navigation_graph_matches_python_on_random_maps() {
             allow_teleport: g["allow_teleport"].as_bool().unwrap(),
             rope_clear_px: 0.0,  // the Python host had no rope clearance
             prefer_jumps: false, // nor jumps over rope lift
+            rope_lift_cost: 0.5, // and priced rope lift at 0.5s
             ..Default::default()
         };
         let graph = NavGraph::new(&plats, &ropes, &m, opts);

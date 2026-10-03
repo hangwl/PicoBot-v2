@@ -568,15 +568,87 @@ fn sweep_mode_crosses_each_platform_end_to_end() {
         seen.push(b.pos);
     }
     let near = |x: f64, y: f64| seen.iter().any(|p| (p.0 - x).abs() <= 1.0 && p.1 == y);
-    // The floor (0..200): from just inside one end to 12px short of the other.
-    assert!(near(3.0, 100.0) || near(197.0, 100.0), "{seen:?}");
+    // The floor (0..200): from 8px inside one end to 12px short of the other.
+    assert!(near(8.0, 100.0) || near(192.0, 100.0), "{seen:?}");
     assert!(near(188.0, 100.0) || near(12.0, 100.0), "{seen:?}");
-    // MID (40..120): likewise.
-    assert!(near(43.0, 84.0) || near(117.0, 84.0), "{seen:?}");
+    // MID (40..120): likewise — starting where an up flash lands, within the
+    // walk tolerance (4px) of the entry.
+    let within = |x: f64, y: f64| seen.iter().any(|p| (p.0 - x).abs() <= 4.0 && p.1 == y);
+    assert!(within(48.0, 84.0) || within(112.0, 84.0), "{seen:?}");
     assert!(near(108.0, 84.0) || near(52.0, 84.0), "{seen:?}");
     // The second floor anchor is covered by the floor's sweep: never a target.
     assert!(p.plan.iter().all(|s| s.anchor != 1));
     assert!(arrivals(&b).iter().any(|a| a == "a0"));
     assert!(arrivals(&b).iter().any(|a| a == "a2"));
     assert!(!arrivals(&b).iter().any(|a| a == "a1"));
+}
+
+/// Odium Road to the Castle's Gate 2 (198x84 px): three tiers 13-14px
+/// apart, anchors on five of its seven platforms, and the class's learned
+/// reach (up flash 13px up — not tier 2 to tier 3).
+fn castle_gate() -> Sim {
+    let plats = [
+        [40.0, 42.0, 98.0, 42.0],
+        [106.0, 42.0, 134.0, 42.0],
+        [138.0, 42.0, 173.0, 42.0],
+        [36.0, 56.0, 69.0, 56.0],
+        [75.0, 56.0, 122.0, 56.0],
+        [129.0, 56.0, 164.0, 56.0],
+        [30.0, 69.0, 171.0, 69.0],
+    ];
+    let anchors = [
+        (53.0, 52.0),
+        (146.0, 52.0),
+        (79.0, 38.0),
+        (105.0, 65.0),
+        (168.0, 38.0),
+    ];
+    let r = |dx, rise| Reach { dx, rise };
+    let mut b = Sim::patrol(&plats, (100.0, 69.0), &anchors).with_reach(reach_with(&[
+        (Move::Flash, r(37.0, 4.0)),
+        (Move::DoubleFlash, r(48.0, 4.0)),
+        (Move::UpFlash, r(6.0, 13.0)),
+        (Move::UpSideFlash, r(17.0, 12.6)),
+        (Move::RopeLift, r(3.0, 90.0)),
+    ]));
+    b.cfg.patrol_mode = picobot_core::config::PatrolMode::Sweep;
+    b.cfg.sweep_reach_px = 12.0;
+    b
+}
+
+#[test]
+fn castle_gate_sweeps_keep_off_the_edges_and_never_climb_to_come_down() {
+    for seed in 0..20u64 {
+        let mut b = castle_gate();
+        b.state = picobot_core::bot::BotState::new(&b.cfg, b.state.reach.clone(), Some(seed));
+        let mut p = Patrol::default();
+        p.tick(&mut b);
+        assert_eq!(p.plan.len(), 5, "every anchored platform is swept");
+        let g = b.graph();
+        for s in &p.plan {
+            let (entry, exit) = s.sweep.expect("a sweep");
+            let plat = g.platforms[g.locate(entry.0, entry.1).unwrap()];
+            for x in [entry.0, exit.0] {
+                assert!(
+                    x - plat.x0 >= 8.0 - 1e-9 && plat.x1 - x >= 8.0 - 1e-9,
+                    "seed {seed}: {x} within 8px of [{}, {}]",
+                    plat.x0,
+                    plat.x1
+                );
+            }
+            // No rope lift up only to come back down before the sweep.
+            let legs = s.legs.as_ref().unwrap();
+            for (i, l) in legs.iter().enumerate() {
+                if l.kind != MoveKind::RopeLift {
+                    continue;
+                }
+                let lower_after = legs[i + 1..].iter().any(|m| m.y1 > l.y1 + 1.0);
+                assert!(
+                    !lower_after,
+                    "seed {seed}: lifted to {} then dropped: {legs:?}",
+                    l.y1
+                );
+            }
+        }
+    }
 }

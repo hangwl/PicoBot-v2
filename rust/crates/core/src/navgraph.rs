@@ -203,6 +203,8 @@ pub struct GraphOptions {
     pub rope_clear_px: f64,
     /// No rope lift between two platforms a proven jump-type move links.
     pub prefer_jumps: bool,
+    /// What a rope lift costs (s): its wind-up alone is ~1.2s.
+    pub rope_lift_cost: f64,
 }
 
 impl Default for GraphOptions {
@@ -220,6 +222,7 @@ impl Default for GraphOptions {
             allow_teleport: false,
             rope_clear_px: ROPE_CLEAR_PX,
             prefer_jumps: true,
+            rope_lift_cost: 1.5,
         }
     }
 }
@@ -447,7 +450,12 @@ impl NavGraph {
         let Some(proven) = reach.fits(m, dx, rise.max(0.0)) else {
             return;
         };
-        let cost = kind.cost() * if proven { 1.0 } else { EXPLORE_PENALTY };
+        let base = if kind == MoveKind::RopeLift {
+            self.opts.rope_lift_cost
+        } else {
+            kind.cost()
+        };
+        let cost = base * if proven { 1.0 } else { EXPLORE_PENALTY };
         let (a, b) = (self.node(i, xa), self.node(j, xb));
         self.link(a, b, kind, cost);
         let jump = matches!(
