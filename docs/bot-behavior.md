@@ -295,7 +295,15 @@ Registered skills have `key`, `kind`, `cooldown`:
   **measured** (Skill effects) so it can be kept off platform ends. Plain
   attacks aren't measured. Traversal keys (jump, flash, rope lift,
   teleport) are config keys, not skills.
-- `buff` — fires when ready, anywhere.
+- `buff` — a ground cast, given **priority at anchor checkpoints**:
+  arriving, the bot settles (two steady reads on a drawn line, up to 1s)
+  and casts every due buff first — ~0.45-0.9s apart so each cast's
+  animation finishes — then the anchor's `on_arrive` skills and summon.
+  Not standing (still moving, off the drawn lines, no dot) holds the
+  buffs for the next checkpoint. A buff is due once off cooldown *and*
+  worn off: with a `duration`, it lasts that long from its last cast.
+  With fewer than two anchors (no checkpoints) due buffs go out whenever
+  the character stands.
 - `summon` — placed at anchors (below). Allowed at an anchor that lists
   it in `on_arrive`, or at any anchor that lists none.
 

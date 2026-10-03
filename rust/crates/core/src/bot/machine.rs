@@ -14,8 +14,8 @@ use serde_json::json;
 use super::approach::{Approach, RuneApproach, Stand};
 use super::body::Body;
 use super::grind::{
-    apply_pending_skills, begin_grind, begin_travel, cast_at_anchor, cast_buffs, grind_once,
-    publish_summons, run_travel, sync_map, weave_attack,
+    apply_pending_skills, begin_grind, begin_travel, cast_at_anchor, cast_buffs_standing,
+    grind_once, publish_summons, run_travel, sync_map, weave_attack,
 };
 use super::patrol::Patrol;
 use super::session::Session;
@@ -381,10 +381,10 @@ impl Machine {
         {
             publish_summons(body);
         }
-        cast_buffs(body);
         if rot.anchors.len() >= 2 {
-            self.patrol.tick(body);
+            self.patrol.tick(body); // buffs go out at its checkpoints
         } else {
+            cast_buffs_standing(body); // no checkpoints to wait for
             weave_attack(body);
         }
     }

@@ -3,6 +3,7 @@
 mod sim;
 
 use picobot_core::bot::{Machine, State};
+use picobot_core::skills::{Skill, SkillBook, SkillKind};
 use sim::*;
 
 fn anchored() -> Sim {
@@ -142,4 +143,39 @@ fn a_map_change_forgets_the_old_maps_bans_and_origin() {
     assert!(b.state.bans.is_empty());
     assert!(b.state.arrive_pending.is_empty());
     assert!(b.state.roam_origin.is_none());
+}
+
+#[test]
+fn buffs_go_out_first_at_checkpoints_standing() {
+    let mut b = anchored();
+    b.state.skills = SkillBook::new(vec![
+        Skill {
+            kind: SkillKind::Buff,
+            cooldown: 1000.0,
+            ..Skill::new("haste", "h")
+        },
+        Skill {
+            kind: SkillKind::Summon,
+            cooldown: 1.0,
+            duration: 60.0,
+            ..Skill::new("orb", "o")
+        },
+    ]);
+    let mut m = Machine::default();
+    for _ in 0..8 {
+        m.execute(&mut b);
+    }
+    let at = |l: &str| b.logs.iter().position(|x| x == l);
+    let checkpoint = b
+        .logs
+        .iter()
+        .position(|l| l.starts_with("Checkpoint:"))
+        .expect("a checkpoint");
+    let haste = at("Skill: haste").expect("the buff was cast");
+    assert!(checkpoint < haste, "cast before any checkpoint");
+    if let Some(orb) = at("Skill: orb") {
+        assert!(haste < orb, "the buff goes before the summon");
+    }
+    let casts = b.logs.iter().filter(|l| *l == "Skill: haste").count();
+    assert_eq!(casts, 1, "cast once per cooldown");
 }
