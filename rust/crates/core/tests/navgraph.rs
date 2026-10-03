@@ -92,7 +92,9 @@ fn rope_lift_grabs_the_highest_platform_in_range() {
         .collect();
     rows.sort_by(f64::total_cmp);
     rows.dedup();
-    assert_eq!(rows, [66.0, 84.0]);
+    // Under TOP it grabs TOP (34px up — no jump reaches it); beside TOP the
+    // highest in range is MID, which an up flash reaches, so no rope lift.
+    assert_eq!(rows, [66.0]);
     assert_eq!(
         kinds(&g.route((10.0, 100.0), (80.0, 66.0), &[]).unwrap()),
         ["rope_lift"]
@@ -107,8 +109,19 @@ fn rope_lift_grabs_the_highest_platform_in_range() {
 }
 
 #[test]
-fn rope_lift_is_preferred_whenever_available() {
+fn a_platform_a_jump_reaches_gets_no_rope_lift() {
     let g = graph(&[FLOOR, MID], &reach());
+    assert!(transfers(&g, MoveKind::RopeLift).is_empty());
+    assert_eq!(
+        kinds(&g.route((10.0, 100.0), (80.0, 84.0), &[]).unwrap()),
+        ["up_flash"]
+    );
+    // Not preferring jumps, the cheaper rope lift is used while ready.
+    let opts = GraphOptions {
+        prefer_jumps: false,
+        ..GraphOptions::default()
+    };
+    let g = NavGraph::new(&[FLOOR, MID], &[], &reach(), opts);
     assert_eq!(
         kinds(&g.route((10.0, 100.0), (80.0, 84.0), &[]).unwrap()),
         ["rope_lift"]

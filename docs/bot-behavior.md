@@ -94,7 +94,7 @@ below) with every move whose **reach** covers the gap:
 | `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps |
 | `up_flash` | jump, then Up + jump mid-air | platform directly above |
 | `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
-| `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column; preferred while ready |
+| `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column — only where no proven jump, flash or up flash reaches that platform (those come first); still used to skip a tier no single jump reaches |
 | `down_jump` / `drop` | down + jump; walk off an end | lower platforms; a down jump takes off more than `rope_clear_px` (8px) from any learned rope hanging off its platform — Down on a rope's top grabs the rope instead |
 | `climb_up` | a **moving grab**: Up held ~0.15–0.25s before takeoff, then a hop toward the rope from 6px beside it (or a flash jump off a platform end up to 20px out, flash kits) — then climb and mount the top platform. Straight-up only when the platform is too narrow to step aside | boards from any platform within jump reach below the rope's bottom end, which stays ≥5px above the platform under it |
 | `climb_down` | grab at the top (hold down), descend past the rope's bottom end, land below | lands on the nearest platform under the rope's end |

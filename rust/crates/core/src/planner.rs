@@ -349,13 +349,21 @@ mod tests {
     }
 
     /// Two ledges 15px up, too far apart to cross: each is a rise from the
-    /// floor, by rope lift (cheapest) or up flash.
+    /// floor, by rope lift (cheapest, with jumps not preferred) or up flash.
     fn two_rises(cooldowns: &[Cooldown]) -> (Vec<PlanSegment>, Vec<(usize, SkipReason)>) {
-        let g = graph(&[
-            [0.0, 100.0, 200.0, 100.0],
-            [20.0, 85.0, 60.0, 85.0],
-            [140.0, 85.0, 180.0, 85.0],
-        ]);
+        let g = NavGraph::new(
+            &[
+                [0.0, 100.0, 200.0, 100.0],
+                [20.0, 85.0, 60.0, 85.0],
+                [140.0, 85.0, 180.0, 85.0],
+            ],
+            &[],
+            &ReachModel::new(base_reach(&BotConfig::default()), None),
+            GraphOptions {
+                prefer_jumps: false,
+                ..GraphOptions::default()
+            },
+        );
         let anchors = [(40.0, 85.0), (160.0, 85.0)];
         let banned = HashSet::new();
         let req = LoopRequest {

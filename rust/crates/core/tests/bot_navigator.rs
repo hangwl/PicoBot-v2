@@ -29,8 +29,14 @@ fn climbs_with_up_flashes() {
 }
 
 #[test]
-fn rope_lift_preferred_when_ready() {
+fn an_up_flash_that_reaches_beats_the_rope_lift() {
+    // MID is 16px up: the up flash (20px) reaches it, so no rope lift.
     let mut b = Sim::new(&[FLOOR, MID], (60.0, 100.0));
+    assert!(nav(b.graph()).go(&mut b, (80.0, 84.0), 3, 40));
+    assert_eq!(b.moves, ["up_flash"]);
+    // Not preferring jumps, the cheaper rope lift wins again.
+    let mut b = Sim::new(&[FLOOR, MID], (60.0, 100.0));
+    b.opts.prefer_jumps = false;
     assert!(nav(b.graph()).go(&mut b, (80.0, 84.0), 3, 40));
     assert_eq!(b.moves, ["rope_lift"]);
 }
@@ -176,6 +182,7 @@ fn rope_lift_fires_without_a_precise_stop() {
 #[test]
 fn a_rope_chain_replans_while_the_lift_cools() {
     let mut b = Sim::new(&[FLOOR, MID, TOP], (10.0, 100.0));
+    b.opts.prefer_jumps = false; // rope lift for every rise, while ready
     assert!(nav(b.graph()).go(&mut b, (80.0, 66.0), 3, 40));
     assert_eq!(b.moves, ["rope_lift", "up_flash"]);
 }
@@ -328,10 +335,10 @@ fn a_hop_takeoff_is_not_tapped_in_even_with_a_tap_table() {
 fn legs_are_counted_by_kind_in_the_session() {
     let mut b = Sim::new(&[FLOOR, MID], (60.0, 100.0));
     assert!(nav(b.graph()).go(&mut b, (80.0, 84.0), 3, 40));
-    assert_eq!(b.state.session.moves_line(), "rope_lift 1 · walk 1");
+    assert_eq!(b.state.session.moves_line(), "up_flash 1 · walk 1");
     assert!(b
         .state
         .session
         .summary(10.0)
-        .contains("moves: rope_lift 1 · walk 1"));
+        .contains("moves: up_flash 1 · walk 1"));
 }
