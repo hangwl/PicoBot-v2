@@ -142,6 +142,7 @@ impl Sim {
         cfg.walk_band_px = 8.0;
         cfg.up_jump_skill_key = Some("r".into());
         cfg.skills = Vec::new();
+        cfg.patrol_mode = picobot_core::config::PatrolMode::Anchors;
         let state = BotState::new(&cfg, reach_with(&[]), Some(0));
         Sim {
             cfg,

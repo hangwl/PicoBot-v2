@@ -1,5 +1,9 @@
 //! Patrol loop planning: order a map's anchors into one loop of legs.
 //!
+//! An anchor is visited as a point, or — given a [`Sweep`] — its platform
+//! is swept: the loop goes to whichever end is cheaper and crosses to the
+//! other, carrying on from there.
+//!
 //! Every reachable anchor is visited once per loop; the policy only picks
 //! the order. `Weighted` is a roulette with P(next) ∝ 1/cost^temp, so far
 //! anchors still get drawn; `Greedy` takes the cheapest next leg (costs
@@ -14,13 +18,21 @@ use crate::config::PatrolPolicy;
 use crate::navgraph::{Leg, MoveKind, NavGraph};
 
 /// One leg of the loop: to `anchor`, along planned `legs` — or, when
-/// `legs` is None, the hand-recorded leg from anchor `from`.
+/// `legs` is None, the hand-recorded leg from anchor `from`. A swept
+/// anchor's segment ends crossing its platform (`sweep`: entry, exit).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlanSegment {
     pub anchor: usize,
     pub legs: Option<Vec<Leg>>,
     pub from: Option<usize>,
+    pub sweep: Option<Way>,
 }
+
+/// (entry, exit) points of a platform crossing.
+pub type Way = ((f64, f64), (f64, f64));
+
+/// The two ways across a swept platform: left to right or right to left.
+pub type Sweep = [Way; 2];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipReason {
@@ -56,6 +68,9 @@ pub struct LoopRequest<'a> {
     pub cooldowns: &'a [Cooldown],
     /// Real seconds per second of route cost.
     pub pace: f64,
+    /// Per anchor, the platform sweep to make instead of visiting it (an
+    /// empty slice: no sweeps).
+    pub sweeps: &'a [Option<Sweep>],
 }
 
 /// A move with a cooldown.
@@ -155,20 +170,43 @@ pub fn plan_loop<R: Rng + ?Sized>(
 ) -> (Vec<PlanSegment>, Vec<(usize, SkipReason)>) {
     let g = req.graph;
     let here = g.locate(cur.0, cur.1);
+    let sweep_of = |i: usize| req.sweeps.get(i).copied().flatten();
     let mut remaining: Vec<usize> = (0..req.anchors.len())
         .filter(|i| !req.banned.contains(i))
-        .filter(|&i| {
-            let (ax, ay) = req.anchors[i];
-            !((ax - cur.0).abs() <= req.tol && g.locate(ax, ay) == here)
+        .filter(|&i| match sweep_of(i) {
+            // Just swept: the next loop starts elsewhere.
+            Some(_) => cur_i != Some(i),
+            None => {
+                let (ax, ay) = req.anchors[i];
+                !((ax - cur.0).abs() <= req.tol && g.locate(ax, ay) == here)
+            }
         })
         .collect();
     let mut clock = Clock::new(req.cooldowns, req.pace);
     let (mut segments, mut skipped) = (Vec::new(), Vec::new());
     while !remaining.is_empty() {
-        let mut routes: Vec<(usize, Vec<Leg>)> = Vec::new();
+        // (anchor, legs, the way swept, the cost of getting there). Order
+        // is by getting there: every sweep is made once a loop whatever the
+        // order, so its own length mustn't weigh on which comes next.
+        let mut routes: Vec<(usize, Vec<Leg>, Option<Way>, f64)> = Vec::new();
         for &i in &remaining {
-            match clock.route(g, cur, req.anchors[i]) {
-                Some(legs) => routes.push((i, legs)),
+            let found = match sweep_of(i) {
+                Some(ways) => ways
+                    .iter()
+                    .filter_map(|&(entry, exit)| {
+                        let mut legs = clock.route(g, cur, entry)?;
+                        let approach = cost_of(&legs);
+                        legs.extend(g.route(entry, exit, &[])?);
+                        Some((legs, Some((entry, exit)), approach))
+                    })
+                    .min_by(|a, b| a.2.total_cmp(&b.2)),
+                None => clock.route(g, cur, req.anchors[i]).map(|l| {
+                    let c = cost_of(&l);
+                    (l, None, c)
+                }),
+            };
+            match found {
+                Some((legs, way, approach)) => routes.push((i, legs, way, approach)),
                 None => {
                     let (ax, ay) = req.anchors[i];
                     let why = if g.locate(ax, ay).is_none() {
@@ -186,19 +224,15 @@ pub fn plan_loop<R: Rng + ?Sized>(
         if routes.is_empty() {
             break;
         }
-        let costs: Vec<(usize, f64)> = routes
-            .iter()
-            .map(|(i, legs)| (*i, legs.iter().map(|l| l.cost).sum()))
-            .collect();
+        let costs: Vec<(usize, f64)> = routes.iter().map(|r| (r.0, r.3)).collect();
         let next = pick_next(&costs, req.policy, req.temp, rng);
-        let (route, cost) = routes
+        let (route, cost, sweep) = routes
             .into_iter()
-            .zip(&costs)
-            .find(|((i, _), _)| *i == next)
-            .map(|((_, legs), (_, c))| (legs, *c))
+            .find(|r| r.0 == next)
+            .map(|(_, legs, way, c)| (legs, c, way))
             .expect("picked from the candidates");
         let legs = match cur_i {
-            Some(from) if (req.recorded)(from, next) => {
+            Some(from) if sweep.is_none() && (req.recorded)(from, next) => {
                 clock.idle(cost);
                 None
             }
@@ -212,12 +246,17 @@ pub fn plan_loop<R: Rng + ?Sized>(
             anchor: next,
             legs,
             from,
+            sweep,
         });
         remaining.retain(|&r| r != next);
-        cur = req.anchors[next];
+        cur = sweep.map_or(req.anchors[next], |(_, exit)| exit);
         cur_i = Some(next);
     }
     (segments, skipped)
+}
+
+fn cost_of(legs: &[Leg]) -> f64 {
+    legs.iter().map(|l| l.cost).sum()
 }
 
 /// The loop-order policy over `(anchor, route cost)` candidates.
@@ -312,6 +351,7 @@ mod tests {
             temp: 1.0,
             cooldowns: &[],
             pace: 1.0,
+            sweeps: &[],
         };
         let (plan, skipped) = plan_loop(&req, (100.0, 100.0), None, &mut StdRng::seed_from_u64(1));
         let mut visited: Vec<usize> = plan.iter().map(|s| s.anchor).collect();
@@ -336,6 +376,7 @@ mod tests {
             temp: 1.0,
             cooldowns: &[],
             pace: 1.0,
+            sweeps: &[],
         };
         let (plan, _) = plan_loop(&req, (20.0, 100.0), Some(0), &mut StdRng::seed_from_u64(2));
         assert_eq!(
@@ -343,7 +384,8 @@ mod tests {
             [PlanSegment {
                 anchor: 1,
                 legs: None,
-                from: Some(0)
+                from: Some(0),
+                sweep: None
             }]
         );
     }
@@ -376,6 +418,7 @@ mod tests {
             temp: 1.0,
             cooldowns,
             pace: 1.0,
+            sweeps: &[],
         };
         plan_loop(&req, (100.0, 100.0), None, &mut StdRng::seed_from_u64(3))
     }
@@ -425,6 +468,7 @@ mod tests {
                 temp: 1.0,
                 cooldowns: cds,
                 pace: 1.0,
+                sweeps: &[],
             };
             plan_loop(&req, (20.0, 100.0), None, &mut StdRng::seed_from_u64(4))
         };
@@ -453,5 +497,52 @@ mod tests {
         assert_eq!(after[0].ready_in, 0.0);
         let after = after_legs(&rope(f64::INFINITY, 3.0), &legs, 1.0);
         assert!(after[0].ready_in.is_infinite());
+    }
+
+    fn sweep_plan(cur: (f64, f64), cur_i: Option<usize>) -> Vec<PlanSegment> {
+        let g = graph(&[[0.0, 100.0, 200.0, 100.0], [20.0, 84.0, 60.0, 84.0]]);
+        let anchors = [(100.0, 100.0), (40.0, 84.0)];
+        let floor: Sweep = [
+            ((3.0, 100.0), (188.0, 100.0)),
+            ((197.0, 100.0), (12.0, 100.0)),
+        ];
+        let ledge: Sweep = [((23.0, 84.0), (48.0, 84.0)), ((57.0, 84.0), (32.0, 84.0))];
+        let sweeps = [Some(floor), Some(ledge)];
+        let banned = HashSet::new();
+        let req = LoopRequest {
+            graph: &g,
+            anchors: &anchors,
+            banned: &banned,
+            tol: 5.0,
+            recorded: &|_, _| false,
+            policy: PatrolPolicy::Greedy,
+            temp: 1.0,
+            cooldowns: &[],
+            pace: 1.0,
+            sweeps: &sweeps,
+        };
+        plan_loop(&req, cur, cur_i, &mut StdRng::seed_from_u64(5)).0
+    }
+
+    #[test]
+    fn a_sweep_crosses_from_the_nearer_end_and_the_loop_goes_on_from_its_exit() {
+        // On the floor's right end: sweep it right to left first (cheapest).
+        let plan = sweep_plan((195.0, 100.0), None);
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0].anchor, 0);
+        assert_eq!(plan[0].sweep, Some(((197.0, 100.0), (12.0, 100.0))));
+        let legs = plan[0].legs.as_ref().unwrap();
+        let last = legs.last().unwrap();
+        assert_eq!((last.kind, last.x1), (MoveKind::Walk, 12.0));
+        // The ledge is planned from the floor sweep's exit.
+        let next = plan[1].legs.as_ref().unwrap();
+        assert_eq!(next[0].x0, 12.0);
+        assert!(plan[1].sweep.is_some());
+    }
+
+    #[test]
+    fn the_platform_just_swept_is_not_swept_again_first() {
+        let plan = sweep_plan((12.0, 100.0), Some(0));
+        assert_eq!(plan.iter().map(|s| s.anchor).collect::<Vec<_>>(), [1]);
     }
 }

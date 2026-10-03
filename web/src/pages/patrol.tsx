@@ -1,4 +1,4 @@
-// Setup → Patrol: loop order and how each anchor is faring.
+// Setup → Patrol: what an anchor means, loop order, and how each anchor is faring.
 import { type AnchorStatRow, type AppState, send } from "../protocol";
 import { Field, NumberField, Reply, Section, useReply, val } from "../ui";
 
@@ -6,6 +6,18 @@ export function PatrolPage({ s }: { s: AppState }) {
   const [reply, act] = useReply(s);
   return (
     <div class="form">
+      <Field label="At each anchor"
+             hint="Sweep its platform: the bot crosses the whole platform the anchor stands on, from the nearer end to the far one, attacking on every hop — one sweep per platform, however many anchors are on it. Pass through: the bot visits the anchor's point.">
+        <select value={s.patrolMode} onChange={(e) => send(`patrol|mode|${val(e)}`)}>
+          <option value="sweep">Sweep its platform</option>
+          <option value="anchors">Pass through the anchor</option>
+        </select>
+      </Field>
+      <Field label="Attack reach (minimap px)"
+             hint="How far ahead one attack reaches. A sweep stops this far short of the platform's far end, facing it, so the last attack covers the end. Too large leaves the end unswept; too small walks further than needed.">
+        <NumberField value={s.sweepReach} min={0} max={200} step={1}
+                     onCommit={(v) => send(`patrol|reach|${v}`)} />
+      </Field>
       <Field label="Loop order"
              hint="Weighted picks cheaper legs more often; greedy always takes the cheapest.">
         <select value={s.policy} onChange={(e) => send(`patrol|policy|${val(e)}`)}>

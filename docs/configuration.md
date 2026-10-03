@@ -39,6 +39,8 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
     "nav_double_gap_px": 48,
     "rope_penalty": 5,
     "patrol_policy": "weighted",
+    "patrol_mode": "sweep",
+    "sweep_reach_px": 12,
     "patrol_weight_temp": 1.0,
     "nav_reach_file": "nav_reach.json",
     "anchor_float_px": 4,
@@ -103,6 +105,10 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
 - Vertical jumps that produce no progress twice in a row end the leg
   (x-aligned = arrived, misaligned = abort) — a target under the lowest
   platform can't loop the bot forever.
+- `patrol_mode` — `sweep` (default: sweep each anchor's platform end to
+  end, one sweep per platform) or `anchors` (pass through anchor points);
+  `sweep_reach_px` (default 12) is how far ahead one attack reaches on
+  the minimap — a sweep stops that short of the far end.
 - `patrol_policy` — loop ordering: `weighted` (roulette ∝ 1/cost, far
   anchors stay in the draw) or `greedy` (cheapest next, ±20% jitter).
   `patrol_weight_temp` tunes the roulette: lower → more uniform,

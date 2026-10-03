@@ -13,8 +13,9 @@ use std::sync::Arc;
 use super::body::{Body, Dir, PatrolStatus};
 use super::grind::{blind_wait, face_anchor, legacy_patrol_tick, run_leg};
 use super::navigator::{interrupted, legs_viz, LegStatus, Navigator};
+use crate::config::PatrolMode;
 use crate::navgraph::{Leg, MoveKind, NavGraph, ROPE_BOTTOM_GAP, ROPE_TOP_OVERSHOOT};
-use crate::planner::{after_legs, plan_loop, Cooldown, LoopRequest, PlanSegment};
+use crate::planner::{after_legs, plan_loop, Cooldown, LoopRequest, PlanSegment, Sweep};
 use crate::timing::human_reaction;
 
 #[derive(Default)]
@@ -461,10 +462,18 @@ impl Patrol {
         let anchors = body.anchors_px();
         let now = body.now();
         body.state().bans.retain(|_, t| *t > now);
-        let banned: HashSet<usize> = body.state().bans.keys().copied().collect();
+        let mut banned: HashSet<usize> = body.state().bans.keys().copied().collect();
         let recorded = |a: usize, b: usize| rot.legs.contains_key(&(a, b));
         let cfg = body.config().clone();
         let cooldowns = after_legs(&Patrol::cooldowns(body), ahead, self.pace());
+        let sweeps = match cfg.patrol_mode {
+            PatrolMode::Sweep => {
+                let (sweeps, covered) = platform_sweeps(graph, &anchors, cfg.sweep_reach_px);
+                banned.extend(covered); // their platform is swept for another anchor
+                sweeps
+            }
+            PatrolMode::Anchors => Vec::new(),
+        };
         let req = LoopRequest {
             graph,
             anchors: &anchors,
@@ -475,6 +484,7 @@ impl Patrol {
             temp: cfg.patrol_weight_temp,
             cooldowns: &cooldowns,
             pace: self.pace(),
+            sweeps: &sweeps,
         };
         let (segments, skipped) = plan_loop(&req, cur, cur_i, &mut body.state().rng);
         for (i, why) in skipped {
@@ -546,14 +556,26 @@ impl Patrol {
         if body.teleport_remaining() > 0.0 {
             exclude.push(MoveKind::Teleport);
         }
-        let goal = body.anchors_px()[idx];
-        let Some(legs) = graph.route(pos, goal, &exclude) else {
+        let sweep = self.plan.get(self.seg).and_then(|s| s.sweep);
+        let legs = match sweep {
+            // On the swept platform already: on to the exit.
+            Some((_, exit)) if graph.locate(pos.0, pos.1) == graph.locate(exit.0, exit.1) => {
+                graph.route(pos, exit, &exclude)
+            }
+            Some((entry, exit)) => graph.route(pos, entry, &exclude).and_then(|mut l| {
+                l.extend(graph.route(entry, exit, &exclude)?);
+                Some(l)
+            }),
+            None => graph.route(pos, body.anchors_px()[idx], &exclude),
+        };
+        let Some(legs) = legs else {
             return false;
         };
         self.plan[self.seg] = PlanSegment {
             anchor: idx,
             legs: Some(legs),
             from: None,
+            sweep,
         };
         self.leg_i = 0;
         self.publish(body);
@@ -635,4 +657,42 @@ impl Patrol {
             .collect();
         st.viz.plan = Some(plan);
     }
+}
+
+/// A sweep starts this far (px) inside its platform's near end.
+const SWEEP_INSET: f64 = 3.0;
+
+/// Per anchor, the sweep of its platform — the first anchor on each
+/// platform gets it; the others are returned as `covered`. A sweep crosses
+/// from just inside one end to `reach` short of the other (the last
+/// attack, facing that way, covers the rest); a platform too short for
+/// that is one point, its middle. Anchors off every platform get none.
+fn platform_sweeps(
+    graph: &NavGraph,
+    anchors: &[(f64, f64)],
+    reach: f64,
+) -> (Vec<Option<Sweep>>, Vec<usize>) {
+    let mut seen = HashSet::new();
+    let mut covered = Vec::new();
+    let sweeps = anchors
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, y))| {
+            let plat = graph.locate(x, y)?;
+            if !seen.insert(plat) {
+                covered.push(i);
+                return None;
+            }
+            let p = graph.platforms[plat];
+            let pt = |x: f64| (x, p.y_at(x));
+            let (left, right) = (p.x0 + SWEEP_INSET, p.x1 - SWEEP_INSET);
+            let (stop_l, stop_r) = (p.x0 + reach, p.x1 - reach);
+            if stop_r <= left {
+                let mid = pt((p.x0 + p.x1) / 2.0);
+                return Some([(mid, mid), (mid, mid)]);
+            }
+            Some([(pt(left), pt(stop_r)), (pt(right), pt(stop_l))])
+        })
+        .collect();
+    (sweeps, covered)
 }

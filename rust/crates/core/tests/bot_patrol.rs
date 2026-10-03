@@ -51,6 +51,7 @@ fn up_flash_plan() -> Vec<PlanSegment> {
         anchor: 1,
         legs: Some(vec![leg]),
         from: None,
+        sweep: None,
     }]
 }
 
@@ -450,6 +451,7 @@ fn a_recorded_leg_wins() {
         anchor: 1,
         legs: None,
         from: Some(0),
+        sweep: None,
     }];
     p.seg = 0;
     let before = b.slept;
@@ -547,4 +549,34 @@ fn the_pace_is_learned_from_segment_times_and_kept_across_a_reset() {
 fn a_new_patrol_starts_idle() {
     let b = Sim::patrol(&[FLOOR], (10.0, 100.0), &[(20.0, 100.0)]);
     assert!(b.state_ref().viz.patrol.is_none());
+}
+
+#[test]
+fn sweep_mode_crosses_each_platform_end_to_end() {
+    // Two anchors on the floor (one sweep) and one on MID.
+    let mut b = Sim::patrol(
+        &[FLOOR, MID],
+        (100.0, 100.0),
+        &[(30.0, 100.0), (170.0, 100.0), (80.0, 84.0)],
+    );
+    b.cfg.patrol_mode = picobot_core::config::PatrolMode::Sweep;
+    b.cfg.sweep_reach_px = 12.0;
+    let mut p = Patrol::default();
+    let mut seen: Vec<(f64, f64)> = Vec::new();
+    for _ in 0..30 {
+        p.tick(&mut b);
+        seen.push(b.pos);
+    }
+    let near = |x: f64, y: f64| seen.iter().any(|p| (p.0 - x).abs() <= 1.0 && p.1 == y);
+    // The floor (0..200): from just inside one end to 12px short of the other.
+    assert!(near(3.0, 100.0) || near(197.0, 100.0), "{seen:?}");
+    assert!(near(188.0, 100.0) || near(12.0, 100.0), "{seen:?}");
+    // MID (40..120): likewise.
+    assert!(near(43.0, 84.0) || near(117.0, 84.0), "{seen:?}");
+    assert!(near(108.0, 84.0) || near(52.0, 84.0), "{seen:?}");
+    // The second floor anchor is covered by the floor's sweep: never a target.
+    assert!(p.plan.iter().all(|s| s.anchor != 1));
+    assert!(arrivals(&b).iter().any(|a| a == "a0"));
+    assert!(arrivals(&b).iter().any(|a| a == "a2"));
+    assert!(!arrivals(&b).iter().any(|a| a == "a1"));
 }

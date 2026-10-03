@@ -213,6 +213,32 @@ impl PatrolPolicy {
     }
 }
 
+/// What the patrol does at an anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatrolMode {
+    /// Sweep the anchor's platform end to end (one sweep per platform).
+    Sweep,
+    /// Pass through the anchor's point.
+    Anchors,
+}
+
+impl PatrolMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PatrolMode::Sweep => "sweep",
+            PatrolMode::Anchors => "anchors",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "sweep" => Some(PatrolMode::Sweep),
+            "anchors" => Some(PatrolMode::Anchors),
+            _ => None,
+        }
+    }
+}
+
 /// What the bot does when a rune appears (with `stop_when_rune_appears`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuneAction {
@@ -286,6 +312,10 @@ pub struct BotConfig {
     pub walk_cost_factor: f64,
     pub patrol_policy: PatrolPolicy,
     pub patrol_weight_temp: f64,
+    pub patrol_mode: PatrolMode,
+    /// How far ahead (minimap px) one attack reaches: a sweep stops this
+    /// short of the platform's far end.
+    pub sweep_reach_px: f64,
     pub nav_reach_file: String,
     pub anchor_float_px: f64,
     pub flash_repress_seconds: f64,
@@ -367,6 +397,8 @@ impl Default for BotConfig {
             walk_cost_factor: 1.0,
             patrol_policy: PatrolPolicy::Weighted,
             patrol_weight_temp: 1.0,
+            patrol_mode: PatrolMode::Sweep,
+            sweep_reach_px: 12.0,
             nav_reach_file: "nav_reach.json".into(),
             anchor_float_px: 4.0,
             flash_repress_seconds: 0.15,
@@ -505,6 +537,7 @@ impl BotConfig {
             ("rope_penalty", &mut cfg.rope_penalty),
             ("walk_cost_factor", &mut cfg.walk_cost_factor),
             ("patrol_weight_temp", &mut cfg.patrol_weight_temp),
+            ("sweep_reach_px", &mut cfg.sweep_reach_px),
         ] {
             if let Some(v) = f64_of(name)? {
                 *slot = v;
@@ -536,6 +569,9 @@ impl BotConfig {
             .filter(|k| !k.trim().is_empty())
         {
             cfg.rune_key = k.trim().to_lowercase();
+        }
+        if let Some(m) = get("patrol_mode").and_then(|v| PatrolMode::parse(&as_string(v))) {
+            cfg.patrol_mode = m;
         }
         if let Some(v) = get("patrol_policy") {
             cfg.patrol_policy = if as_string(v) == "greedy" {
@@ -723,6 +759,8 @@ impl BotConfig {
             "walk_cost_factor": self.walk_cost_factor,
             "patrol_policy": self.patrol_policy.as_str(),
             "patrol_weight_temp": self.patrol_weight_temp,
+            "patrol_mode": self.patrol_mode.as_str(),
+            "sweep_reach_px": self.sweep_reach_px,
             "nav_reach_file": self.nav_reach_file,
             "anchor_float_px": self.anchor_float_px,
             "flash_repress_seconds": self.flash_repress_seconds,

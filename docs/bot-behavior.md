@@ -46,6 +46,21 @@ loop:
   anchor's non-summon `on_arrive` skills and places at most one summon
   (see Summons) in passing, then the bot moves on — no linger, no dwell
   timers.
+- **Platform sweeps** (`patrol_mode: sweep`, the default): an anchor marks
+  a spawn platform, and the loop **sweeps** it rather than visiting the
+  point. A sweep goes to whichever end of the platform is cheaper to
+  reach, then crosses from `3`px inside that end to `sweep_reach_px`
+  (default 12) short of the other — on flash hops with an attack window
+  each, so the last attack, facing the far end, covers it. Several
+  anchors on one platform make one sweep (the first anchor's; the others
+  aren't targets). A platform too short for that is visited at its
+  middle. The loop orders sweeps by the cost of getting to them only —
+  every sweep is made once a loop, so a long platform isn't put off for
+  its length — and goes on from each sweep's far end. Arrival skills,
+  buffs and the summon happen at the end of the sweep. A missed landing
+  re-routes to the sweep's entry, or straight on to its exit when already
+  on the platform. `patrol_mode: anchors` passes through anchor points as
+  before.
 - **Loop policy and temperature**: every reachable anchor is visited
   exactly once per loop; `patrol_weight_temp` only orders the loop.
   Higher temperature → nearer-first sweeps → shorter loops, so *every*

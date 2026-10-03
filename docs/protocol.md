@@ -35,6 +35,7 @@ and follows the same view.
 | `class|add|<name>\|{spec}` | create a profile (travel, air_attacks, double_flash, teleport_key, teleport_cooldown, skills) and apply it |
 | `class|caps|{json}` | edit the active profile's abilities (`double_flash`, `air_attacks`: bool); re-sends `class` and `config` |
 | `patrol|policy|<weighted\|greedy>` | set the loop-ordering policy |
+| `patrol|mode|sweep\|anchors` / `patrol|reach|<px>` | sweep each anchor's platform or pass through the points, and the attack reach a sweep stops short by (0–200 minimap px); saved to `config.json`, then re-sends `config` |
 | `patrol|rope_penalty|<s>` / `patrol|walk_factor|<x>` | planner costs: seconds added to every rope climb (0–600) and the multiplier on walking legs (0.1–10); saved to `config.json`, then re-sends `config` |
 | `patrol|temp|<v>` | set the weighted-roulette temperature |
 | `skills|set\|{json}` (`name, key, kind, cooldown`, attacks also `stance` (ground/air/any) and `weight`, summons also `charges, duration`) / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
