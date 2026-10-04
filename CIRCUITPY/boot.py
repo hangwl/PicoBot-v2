@@ -1,7 +1,7 @@
 """Runs once at power-up, before USB starts. Reset the board to apply.
 
-Normal boot: one data port (no REPL), no CIRCUITPY drive, keyboard (+ mouse)
-HID, and the USB identity from usb_ids.py when present.
+Normal boot: one data port (no REPL), no CIRCUITPY drive, no MIDI,
+keyboard (+ mouse) HID, and the USB identity from usb_ids.py when present.
 
 Maintenance boot: ground RECOVERY_PIN while plugging in (or resetting) and
 the board comes up stock - CIRCUITPY drive, REPL, default IDs - so code.py
@@ -13,6 +13,7 @@ import storage
 import supervisor
 import usb_cdc
 import usb_hid
+import usb_midi
 
 # Jumper this pin (GP15, physical pin 20) to any GND pin for maintenance.
 RECOVERY_PIN = board.GP15
@@ -40,6 +41,7 @@ if recovery_requested():
 else:
     usb_cdc.enable(console=False, data=True)
     usb_hid.enable(tuple(devices))
+    usb_midi.disable()
     storage.disable_usb_drive()
     try:
         import usb_ids
