@@ -130,7 +130,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
   flash, double flash, up flash, up-side flash) reaches gets no rope-lift
   edge (`GraphOptions::prefer_jumps`); rope lift is for rises nothing
   else reaches (or only unproven reach covers), costs
-  `GraphOptions::rope_lift_cost` (1.5s — never lift up to drop down),
+  `GraphOptions::rope_lift_cost` (1.5s — a lift never leads straight to a drop),
   grabs the **highest** platform within `nav_rope_lift_px`, and fires
   without a precise stop. Sweeps keep 8px inside platform ends.
 - **Slips are not data**: a re-press skipped on purpose

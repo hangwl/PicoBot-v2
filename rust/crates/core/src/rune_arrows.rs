@@ -3,7 +3,9 @@
 //! Activating a rune shows four arrows in a strip near the top of the
 //! window; the strip and the arrows move from rune to rune. Each arrow is
 //! a solid shape shaded along its length down the hue circle — some
-//! green to orange-red, others magenta to cyan or blue to green. Its
+//! green to orange-red, others magenta to cyan, blue to green, or magenta
+//! through red to orange (hues are measured around the circle, so a shading
+//! may cross red). Its
 //! direction is read twice: by its shading (highest-hue end = tail,
 //! lowest = tip) and by its silhouette (a wide head narrowing to a tip
 //! over a narrower shaft, fitted at 15° steps). They must not disagree;
@@ -130,21 +132,36 @@ fn hue_sv(bgr: [u8; 3]) -> (f64, f64, f64) {
     (h, d / mx, mx)
 }
 
-/// The hue of an arrow-coloured pixel.
+/// The hue of an arrow-coloured pixel. Red and pink (past `HUE_MAX`, under
+/// `HUE_MIN`) are where scenery and glows live, so an arrow shaded through
+/// them is taken there only at near-full saturation, like the cool hues.
 fn classify(bgr: [u8; 3]) -> Option<f64> {
     let (h, s, v) = hue_sv(bgr);
-    let (min_s, min_v) = if h > COOL_HUE {
+    let red = !(HUE_MIN..=HUE_MAX).contains(&h);
+    let (min_s, min_v) = if red || h > COOL_HUE {
         (COOL_MIN_SAT, COOL_MIN_VAL)
     } else {
         (MIN_SAT, MIN_VAL)
     };
-    (s >= min_s && v >= min_v && (HUE_MIN..=HUE_MAX).contains(&h)).then_some(h)
+    (s >= min_s && v >= min_v).then_some(h)
 }
 
 /// Only near-pure arrow colours.
 fn classify_pure(bgr: [u8; 3]) -> Option<f64> {
     let (h, s, v) = hue_sv(bgr);
-    (s >= PURE_SAT && v >= PURE_VAL && (HUE_MIN..=HUE_MAX).contains(&h)).then_some(h)
+    (s >= PURE_SAT && v >= PURE_VAL).then_some(h)
+}
+
+/// `px`'s hues as offsets (degrees) from their circular mean, so a shading
+/// that runs through the red wrap-around stays in order.
+fn hue_offsets(px: &[(f64, f64, f64)]) -> Vec<f64> {
+    let (sin, cos) = px.iter().fold((0.0, 0.0), |a, p| {
+        (a.0 + p.2.to_radians().sin(), a.1 + p.2.to_radians().cos())
+    });
+    let mean = sin.atan2(cos).to_degrees();
+    px.iter()
+        .map(|p| (p.2 - mean + 540.0).rem_euclid(360.0) - 180.0)
+        .collect()
 }
 
 /// One candidate arrow: its pixel count, centre, box, and direction (if
@@ -304,7 +321,8 @@ impl Angle {
 /// The way `px` (x, y, hue) points by its shading: from its high-hue end
 /// to its low.
 fn colour_direction(px: &[(f64, f64, f64)]) -> Option<Arrow> {
-    let mut hues: Vec<f64> = px.iter().map(|p| p.2).collect();
+    let offs = hue_offsets(px);
+    let mut hues = offs.clone();
     hues.sort_by(f64::total_cmp);
     // Percentiles, so a few stray pixels don't stretch the span.
     let (lo, hi) = (hues[hues.len() / 20], hues[hues.len() * 19 / 20]);
@@ -314,8 +332,11 @@ fn colour_direction(px: &[(f64, f64, f64)]) -> Option<Arrow> {
     }
     let end = |keep: &dyn Fn(f64) -> bool| {
         px.iter()
-            .filter(|p| keep(p.2))
-            .fold((0.0, 0.0, 0usize), |a, p| (a.0 + p.0, a.1 + p.1, a.2 + 1))
+            .zip(&offs)
+            .filter(|(_, h)| keep(**h))
+            .fold((0.0, 0.0, 0usize), |a, (p, _)| {
+                (a.0 + p.0, a.1 + p.1, a.2 + 1)
+            })
     };
     let tip = end(&|h| h <= lo + span * END_SHARE);
     let tail = end(&|h| h >= hi - span * END_SHARE);
@@ -458,6 +479,49 @@ fn sightings(window: &Image) -> Result<Vec<Candidate>, String> {
         }
     }
     Ok(found)
+}
+
+/// Every candidate blob the reader considers in `window`, one line each:
+/// pixel count, box, centre, whether it is arrow-shaped, and the direction
+/// it reads — for working out why a strip didn't read.
+pub fn diagnose(window: &Image) -> Vec<String> {
+    let (w, h) = (window.width as f64, window.height as f64);
+    let (bx0, by0) = ((BAND.0 * w) as usize, (BAND.1 * h) as usize);
+    let (bx1, by1) = (
+        ((BAND.2 * w) as usize).min(window.width),
+        ((BAND.3 * h) as usize).min(window.height),
+    );
+    if bx1 <= bx0 || by1 <= by0 {
+        return vec!["window too small".into()];
+    }
+    let (cw, ch) = (bx1 - bx0, by1 - by0);
+    let mut out = Vec::new();
+    for (name, f) in [
+        ("loose", classify as fn([u8; 3]) -> Option<f64>),
+        ("pure", classify_pure),
+    ] {
+        let mask: Vec<Option<f64>> = (by0..by1)
+            .flat_map(|y| (bx0..bx1).map(move |x| (x, y)))
+            .map(|(x, y)| f(window.bgr(x, y)))
+            .collect();
+        let lit = mask.iter().filter(|m| m.is_some()).count();
+        out.push(format!(
+            "{name}: {lit} px in the band {bx0},{by0}..{bx1},{by1}"
+        ));
+        for c in candidates(&mask, cw, ch, (bx0, by0)) {
+            out.push(format!(
+                "  {name} blob {} px, box {:.0}x{:.0}, at ({:.0},{:.0}), arrow-shaped {}, reads {:?}",
+                c.px,
+                c.size.0,
+                c.size.1,
+                c.center.0,
+                c.center.1,
+                c.arrow_shaped(),
+                c.arrow
+            ));
+        }
+    }
+    out
 }
 
 /// The four arrows in `window` (the whole client area), left to right; or

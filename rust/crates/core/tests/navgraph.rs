@@ -631,3 +631,72 @@ fn a_carried_move_isnt_linked_across_a_platform_that_would_catch_it() {
         .iter()
         .any(|l| l.y0 == 42.0 && l.y1 == 56.0));
 }
+
+#[test]
+fn an_edge_aimed_carry_takes_off_near_the_source_edge() {
+    use picobot_core::navgraph::{CarryAim, CARRY_BACK_PX, CARRY_FAR_PX};
+    // Source platform 75..122 and a 33px landing platform 6px to its left,
+    // flash carry 43: the middle-aimed takeoff is far from the gap;
+    // edge-aimed takes off as near the gap as the landing allows.
+    let long = reach_with(
+        1.0,
+        &[(
+            Move::Flash,
+            Reach {
+                dx: 43.0,
+                rise: 4.0,
+            },
+        )],
+    );
+    let (src, dst) = ([75.0, 84.0, 122.0, 84.0], [36.0, 84.0, 69.0, 84.0]);
+    let flash = |aim| {
+        let opts = GraphOptions {
+            carry_aim: aim,
+            ..GraphOptions::default()
+        };
+        let g = NavGraph::new(&[src, dst], &[], &long, opts);
+        transfers(&g, MoveKind::Flash)
+            .into_iter()
+            .find(|l| l.x1 < 70.0)
+            .expect("a flash onto the left platform")
+    };
+    let (middle, edge) = (flash(CarryAim::Middle), flash(CarryAim::Edge));
+    assert_eq!(middle.x1, (36.0 + 69.0) / 2.0); // the middle: 52.5
+    assert!(
+        edge.x0 < middle.x0 && edge.x0 > middle.x0 - 25.0,
+        "{edge:?} vs {middle:?}"
+    );
+    assert!(edge.x0 >= 75.0 + CARRY_BACK_PX - 1e-9);
+    assert_eq!(edge.x1 - edge.x0, middle.x1 - middle.x0); // the full carry either way
+    assert!(edge.x1 - 36.0 >= CARRY_FAR_PX.min(33.0 / 2.0) - 1e-9);
+}
+
+#[test]
+fn an_edge_aimed_carry_backs_off_to_stay_short_of_the_far_end() {
+    use picobot_core::navgraph::CarryAim;
+    // A short landing platform: taking off at the source's edge would fly
+    // past it, so the takeoff backs away to land CARRY_FAR_PX short.
+    let (src, dst) = ([75.0, 84.0, 122.0, 84.0], [36.0, 84.0, 60.0, 84.0]);
+    let long = reach_with(
+        1.0,
+        &[(
+            Move::Flash,
+            Reach {
+                dx: 43.0,
+                rise: 4.0,
+            },
+        )],
+    );
+    let opts = GraphOptions {
+        carry_aim: CarryAim::Edge,
+        ..GraphOptions::default()
+    };
+    let g = NavGraph::new(&[src, dst], &[], &long, opts);
+    let flash = transfers(&g, MoveKind::Flash)
+        .into_iter()
+        .find(|l| l.x1 < 61.0)
+        .expect("a flash onto the short platform");
+    assert!(flash.x1 >= 36.0 + 4.0 && flash.x1 <= 60.0);
+    assert_eq!(flash.x0 - flash.x1, 43.0);
+    assert!(flash.x0 > 75.0 + 8.0, "backed off from the edge: {flash:?}");
+}

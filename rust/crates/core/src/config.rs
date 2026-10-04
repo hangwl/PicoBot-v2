@@ -9,6 +9,7 @@ use serde_json::{json, Map, Value};
 use crate::error::{bad, Error, Result};
 use crate::fileio::write_text_atomic;
 use crate::json::{as_f64, as_i64, as_string, dumps, opt_string, truthy};
+use crate::navgraph::CarryAim;
 use crate::rotation::Rotation;
 use crate::skills::{skills_from_json, Skill, SkillKind};
 
@@ -345,6 +346,8 @@ pub struct BotConfig {
     /// Multiplier on walking cost in the planner (above 1 prefers hops).
     pub walk_cost_factor: f64,
     pub patrol_policy: PatrolPolicy,
+    /// Where carried moves (flashes) are aimed on the platform they land on.
+    pub nav_carry_aim: CarryAim,
     pub patrol_weight_temp: f64,
     pub patrol_mode: PatrolMode,
     /// How far ahead (minimap px) one attack reaches: a sweep stops this
@@ -440,6 +443,7 @@ impl Default for BotConfig {
             rope_penalty: 5.0,
             walk_cost_factor: 1.0,
             patrol_policy: PatrolPolicy::Weighted,
+            nav_carry_aim: CarryAim::Edge,
             patrol_weight_temp: 1.0,
             patrol_mode: PatrolMode::Sweep,
             sweep_reach_px: 12.0,
@@ -625,6 +629,9 @@ impl BotConfig {
         }
         if let Some(m) = get("patrol_mode").and_then(|v| PatrolMode::parse(&as_string(v))) {
             cfg.patrol_mode = m;
+        }
+        if let Some(v) = get("nav_carry_aim") {
+            cfg.nav_carry_aim = CarryAim::parse(&as_string(v)).unwrap_or(CarryAim::Edge);
         }
         if let Some(v) = get("patrol_policy") {
             cfg.patrol_policy =
@@ -813,6 +820,7 @@ impl BotConfig {
             "rope_penalty": self.rope_penalty,
             "walk_cost_factor": self.walk_cost_factor,
             "patrol_policy": self.patrol_policy.as_str(),
+            "nav_carry_aim": self.nav_carry_aim.as_str(),
             "patrol_weight_temp": self.patrol_weight_temp,
             "patrol_mode": self.patrol_mode.as_str(),
             "sweep_reach_px": self.sweep_reach_px,

@@ -1,5 +1,5 @@
 {
-  "_note": "Rune arrow strips cut from dashboard solve recordings (debug/frames/*_runesolve, key frames before the first arrow of each attempt). Each PNG is the window area x 370..995, y 160..300 of a 1366x768 client; 'arrows' is what the strip shows (c and e verified by eye: the keys pressed there were wrong). h and i are from bot solves the reader couldn't read: their arrows shade magenta-blue-cyan and blue-cyan-green, not green-orange. j has a glowing cyan monster beside the strip; k was misread live (a green glow left of the strip taken for an arrow), l and m are its neighbours.",
+  "_note": "Rune arrow strips cut from dashboard solve recordings (debug/frames/*_runesolve, key frames before the first arrow of each attempt). Each PNG is the window area x 370..995, y 160..300 of a 1366x768 client; 'arrows' is what the strip shows (c and e verified by eye: the keys pressed there were wrong). h and i are from bot solves the reader couldn't read: their arrows shade magenta-blue-cyan and blue-cyan-green, not green-orange. j has a glowing cyan monster beside the strip; k was misread live (a green glow left of the strip taken for an arrow), l and m are its neighbours. n and o (verified by eye) are two reads the bot gave up on: an arrow shaded magenta-red-orange runs through the red band the reader used to exclude.",
   "window": [1366, 768],
   "offset": [370, 160],
   "strips": [
@@ -15,6 +15,8 @@
     { "file": "strip_j.png", "arrows": ["down", "down", "down", "up"] },
     { "file": "strip_k.png", "arrows": ["right", "left", "up", "down"] },
     { "file": "strip_l.png", "arrows": ["up", "left", "up", "down"] },
-    { "file": "strip_m.png", "arrows": ["down", "left", "right", "right"] }
+    { "file": "strip_m.png", "arrows": ["down", "left", "right", "right"] },
+    { "file": "strip_n.png", "arrows": ["right", "right", "right", "up"] },
+    { "file": "strip_o.png", "arrows": ["right", "left", "up", "right"] }
   ]
 }

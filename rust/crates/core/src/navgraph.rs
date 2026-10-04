@@ -55,6 +55,36 @@ pub const CARRY_LAND_PX: f64 = 6.0;
 /// A carried move takes off at least this far (px) inside either end of
 /// its platform: the walk to the takeoff slides a few px past its stop.
 pub const CARRY_BACK_PX: f64 = 8.0;
+/// An edge-aimed carried move comes down at least this far (px) short of
+/// its landing platform's far end.
+pub const CARRY_FAR_PX: f64 = 7.0;
+
+/// Where a carried move is aimed on its landing platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CarryAim {
+    /// Taken off as near the source's edge as the walk allows, backed off
+    /// only as far as keeps it short of the far end: the flight crosses
+    /// the gap while the character is still high.
+    #[default]
+    Edge,
+    /// Aimed at the landing platform's middle.
+    Middle,
+}
+
+impl CarryAim {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CarryAim::Edge => "edge",
+            CarryAim::Middle => "middle",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        [CarryAim::Edge, CarryAim::Middle]
+            .into_iter()
+            .find(|a| a.as_str() == s)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MoveKind {
@@ -215,6 +245,7 @@ pub struct GraphOptions {
     /// flash, double flash, up-side flash, teleport) are linked where they
     /// land, taken off far enough back to land just onto the target.
     pub fixed_carry: bool,
+    pub carry_aim: CarryAim,
 }
 
 impl Default for GraphOptions {
@@ -234,6 +265,7 @@ impl Default for GraphOptions {
             prefer_jumps: true,
             rope_lift_cost: 1.5,
             fixed_carry: true,
+            carry_aim: CarryAim::Edge,
         }
     }
 }
@@ -686,10 +718,11 @@ impl NavGraph {
     }
 
     /// A move off `i`'s `end` that carries its full learned distance:
-    /// linked to `j` only where it comes down — taken off so it's aimed at
-    /// the middle of `j` (its distance varies either way), as near as `i`
-    /// allows; landing at least `CARRY_LAND_PX` inside `j`'s near end and
-    /// short of its far end, `j` the platform it actually comes down on.
+    /// linked to `j` only where it comes down. By `CarryAim::Edge` it takes
+    /// off as near `i`'s edge as the walk allows, backed off only to stay
+    /// `CARRY_FAR_PX` short of `j`'s far end; by `Middle`, aimed at the
+    /// middle of `j`. Landing at least `CARRY_LAND_PX` inside `j`'s near end
+    /// and short of its far end, `j` the platform it actually comes down on.
     #[allow(clippy::too_many_arguments)]
     fn carry_mv(
         &mut self,
@@ -707,9 +740,27 @@ impl NavGraph {
         }
         let (p, q) = (self.platforms[i], self.platforms[j]);
         let near = if step > 0.0 { q.x0 } else { q.x1 };
-        let want = (q.x0 + q.x1) / 2.0;
         let inset = CARRY_BACK_PX.min((p.x1 - p.x0) / 2.0);
-        let takeoff = (want - step * carry).clamp(p.x0 + inset, p.x1 - inset);
+        let aimed = match self.opts.carry_aim {
+            CarryAim::Middle => (q.x0 + q.x1) / 2.0 - step * carry,
+            CarryAim::Edge => {
+                // As near `i`'s edge as the walk allows, unless that comes
+                // down past `j`'s far end (less the room it needs).
+                let p_end = if step > 0.0 { p.x1 } else { p.x0 };
+                let far = if step > 0.0 { q.x1 } else { q.x0 };
+                let room = CARRY_FAR_PX
+                    .max(self.opts.edge_inset_px)
+                    .min((q.x1 - q.x0) / 2.0);
+                let nearest = p_end - step * inset;
+                let longest = far - step * room - step * carry;
+                if step > 0.0 {
+                    nearest.min(longest)
+                } else {
+                    nearest.max(longest)
+                }
+            }
+        };
+        let takeoff = aimed.clamp(p.x0 + inset, p.x1 - inset);
         let land = takeoff + step * carry;
         let room = self.opts.edge_inset_px;
         let (from_near, from_far) = ((land - near) * step, (q.x1 - q.x0) - (land - near) * step);
@@ -1048,6 +1099,7 @@ struct CacheKey {
     allow_flash: bool,
     allow_double_flash: bool,
     allow_teleport: bool,
+    carry_aim: CarryAim,
     region: (u64, u64),
     reach: Vec<crate::reach::SnapshotRow>,
 }
@@ -1088,6 +1140,7 @@ impl GraphCache {
             allow_flash: opts.allow_flash,
             allow_double_flash: opts.allow_double_flash,
             allow_teleport: opts.allow_teleport,
+            carry_aim: opts.carry_aim,
             region: (wh.0.to_bits(), wh.1.to_bits()),
             reach: reach.snapshot(),
         };

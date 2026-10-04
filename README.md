@@ -103,6 +103,7 @@ tools under the view.
 | [docs/configuration.md](docs/configuration.md) | `config.json` reference |
 | [docs/development.md](docs/development.md) | Setup, tests, conventions, debug frame captures |
 | [docs/learnings.md](docs/learnings.md) | What was tried, what we learned |
+| [docs/future-plans.md](docs/future-plans.md) | Decided ideas that are on hold |
 
 ## Remote connections over mobile data (Tailscale)
 

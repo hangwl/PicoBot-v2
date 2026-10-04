@@ -760,3 +760,76 @@ report descriptors). Saved in `firmware/phase-e/k75-descriptors.txt`.
   then sent harmless key-ups for all of them. Both answer builders now
   start with `out[0] = 0`. The in-memory firmware in the host's tests
   can't see this class of bug; only a C-side test or a run could.
+
+## Edge-landing misses on Castle's Gate 2 (2026-10-05)
+
+- **Data**: a missed leg now logs its polled path (`arc:`, ~20 Hz). 39
+  misses over a 9m39s run: 16 of 22 flashes, 9 of 18 double flashes, 9 of
+  23 up flashes.
+- **Flashes and double flashes between the same-row platforms** (middle
+  tier, 6–7px gaps, planned middle to middle) came down at the right x but
+  on the floor row: `100→52` took off at 98–102, first sample
+  `(62,66)` — already below the 56 row, inside the target's x span, and
+  then `(58,69)`. The carry (~43px) was met; the character crossed the
+  target's row over the gap, not over the platform, and fell under it.
+  Aiming the carry's end at the platform's middle puts the takeoff 20px+
+  from the gap, so about half the flight is spent before it reaches the
+  target. Not the skills: the measured air effects are ~2px and `e` is
+  cast in nearly every leg, missed or not.
+- **Edge aim** (`nav_carry_aim: edge`, opt-in): take off as near the
+  source's edge as the walk allows, backed off only to land 7px short of
+  the far end. On this map it moves the middle-tier takeoffs from ~96–104
+  to ~86–114 depending on direction, and lands near the far end rather
+  than the middle. It also changes the sweep plans on this geometry (two
+  patrol tests that encode them fail with it as default), so it ships off
+  until a live run says it helps: set `nav_carry_aim` to `edge`, run
+  again, and compare `Landed flash` / `Missed flash` counts.
+- **Up flashes (8 of the 9 misses)** came down at row 43–44 — the top
+  tier — while the plan was the 56 row: a ~25px rise where the model has
+  13. The leg counts as a miss, and two in a row ban the anchor
+  ("unreachable after retries"), though the bot is on a drawn platform
+  and the loop goes on. Not changed here; the rise estimate and the
+  overshoot bookkeeping need their own look.
+- **The top tier is drawn at y=42 but the character stands at y≈47 on
+  it** (an off-platform capture at (101, 47)): the drawing is about 5px
+  high there.
+
+## Arrows shaded through red (2026-10-05)
+
+- **Two unreadable runes** (`debug/frames/20261004-174119-234_rune`,
+  `…174128-582_rune`): the bot gave up with "no four arrows on one row".
+  `rune_check` (new example: every blob the reader considers, with an
+  `--at x,y` hue make-up of a patch) showed three of four arrows each
+  time. The missing arrow in the first was a magenta-red-orange one:
+  210 of its strongly coloured pixels sat at hues 330–359 and 54 at 0–29,
+  and the reader excludes 330–12° outright (red and pink are where glows
+  and monsters live). In the second, the first arrow was the same kind,
+  with only an 8x13 sliver detected.
+- **Fix**: the red band is accepted at the same near-full saturation as the
+  cool hues (the size, shape and four-in-a-row rules still filter the
+  scenery), and the shading direction is measured on hues taken as offsets
+  from their circular mean, so a gradient that crosses the wrap keeps its
+  order (tail = the end that is higher around the circle, as for the
+  other shadings). Both captures read, and match what the arrows show
+  (right, right, right, up; right, left, up, right); they are fixtures
+  `strip_n` and `strip_o`, and the 13 older strips read as before.
+- Not tested live: whether a red-band arrow from a spinning animation
+  still reads through `ArrowWatch`, and whether any red scenery now gets
+  past the near-pure rule inside the strip.
+
+- **Edge aim, live** (same map, 10m41s against 9m39s with middle aim):
+  18% of legs missed against 35%, 79 visits against 64, double flashes
+  32 of 44 landed against 9 of 18, flashes 4 of 7 against 6 of 22 (the
+  planner now crosses the middle-tier gaps with double flashes). Most of
+  the remaining misses are the overshoot to the top tier: a double flash
+  from the middle platform to the left one (planned 99→43) comes down on
+  row 42 above it, because the planner assumes a 4px rise. Left alone on
+  purpose. `edge` is now the default.
+- **Two sweep tests changed with it**: the plan for the middle-tier
+  platform from the floor's right end now lifts to the top tier, crosses
+  it with two double flashes and drops onto the platform, instead of
+  flashing along the middle tier — landing at the far end leaves a walk to
+  the next takeoff, so the lift route is the cheaper one. "Never lift up
+  to come back down" is therefore tested as "the next move after a lift
+  never drops", and the zigzag snake as "a new row is entered at the end
+  nearer where the last sweep left off".

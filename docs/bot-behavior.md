@@ -118,7 +118,7 @@ below) with every move whose **reach** covers the gap:
 | Move | Input | Use |
 |---|---|---|
 | walk | flash weaves (walk near the goal) | along a platform |
-| `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps — a carried move always flies its full learned distance, so it's planned aimed at the middle of the platform it lands on (taking off as far back as needed, at least 3px inside its own platform), only where it comes down on that platform and no platform in between catches it |
+| `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps — a carried move always flies its full learned distance, so it's planned taking off as near its own platform's edge as the walk allows (at least 8px inside it) and backed off only to land 7px short of the target platform's far end (`nav_carry_aim: edge`; `middle` aims at the platform's middle instead), only where it comes down on that platform and no platform in between catches it |
 | `up_flash` | jump, then Up + jump mid-air | platform directly above |
 | `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
 | `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column — only where no proven jump, flash or up flash reaches that platform (those come first); still used to skip a tier no single jump reaches. Costs `rope_lift_cost` (1.5s: its wind-up alone is ~1.2s), so a route doesn't lift to a higher tier just to drop back down |
