@@ -53,7 +53,9 @@ frame) → `normal` after 0.6s lit (emits `arrived`; waits out the
 fade-in).
 
 **`MapMonitor`** is the only caller: a dedicated thread with its own
-screen grabber sampling the minimap at 20 Hz, independent of the bot's
+screen grabber sampling the minimap at ~20 Hz (each period drawn from 35–70ms, so the
+cadence isn't a fixed tick; the blackout detector is time-based and
+unaffected), independent of the bot's
 cadence and the dashboard view. It also locates the panel (every 0.25s
 while unknown), relocates a moved panel, and pumps title reads. The
 feed and the bot only capture frames for their own use. The host's feed

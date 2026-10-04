@@ -18,6 +18,9 @@ supervisor.runtime.autoreload = False
 HW_WATCHDOG = True
 HW_WATCHDOG_S = 4.0
 
+# `maintenance` sets this in nvm[0] and resets; boot.py then boots stock.
+MAINTENANCE_FLAG = 0xA5
+
 # Add a delay to give the USB host time to get ready.
 # This helps prevent a race condition on startup.
 time.sleep(1)
@@ -302,6 +305,12 @@ def handle(command_line):
             pass
         commands_seen = True
         return
+    if command_line.lower() == 'maintenance':
+        release_everything()
+        reply("ACK", seq)
+        time.sleep(0.2)  # let the ACK out
+        microcontroller.nvm[0] = MAINTENANCE_FLAG
+        microcontroller.reset()
     commands_seen = True
     try:
         handled = run(parts)

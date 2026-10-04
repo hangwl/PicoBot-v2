@@ -61,3 +61,6 @@ models/
 *.bak
 Thumbs.db
 desktop.ini
+
+# Local USB identity for the Pico (copy of CIRCUITPY/usb_ids.example.py)
+/CIRCUITPY/usb_ids.py
