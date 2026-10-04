@@ -793,3 +793,26 @@ report descriptors). Saved in `firmware/phase-e/k75-descriptors.txt`.
 - **The top tier is drawn at y=42 but the character stands at y≈47 on
   it** (an off-platform capture at (101, 47)): the drawing is about 5px
   high there.
+
+## Arrows shaded through red (2026-10-05)
+
+- **Two unreadable runes** (`debug/frames/20261004-174119-234_rune`,
+  `…174128-582_rune`): the bot gave up with "no four arrows on one row".
+  `rune_check` (new example: every blob the reader considers, with an
+  `--at x,y` hue make-up of a patch) showed three of four arrows each
+  time. The missing arrow in the first was a magenta-red-orange one:
+  210 of its strongly coloured pixels sat at hues 330–359 and 54 at 0–29,
+  and the reader excludes 330–12° outright (red and pink are where glows
+  and monsters live). In the second, the first arrow was the same kind,
+  with only an 8x13 sliver detected.
+- **Fix**: the red band is accepted at the same near-full saturation as the
+  cool hues (the size, shape and four-in-a-row rules still filter the
+  scenery), and the shading direction is measured on hues taken as offsets
+  from their circular mean, so a gradient that crosses the wrap keeps its
+  order (tail = the end that is higher around the circle, as for the
+  other shadings). Both captures read, and match what the arrows show
+  (right, right, right, up; right, left, up, right); they are fixtures
+  `strip_n` and `strip_o`, and the 13 older strips read as before.
+- Not tested live: whether a red-band arrow from a spinning animation
+  still reads through `ArrowWatch`, and whether any red scenery now gets
+  past the near-pure rule inside the strip.
