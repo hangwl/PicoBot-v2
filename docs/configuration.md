@@ -162,6 +162,10 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
 - `move_miss_chance` (0–1; default 0) — the odds a flash move skips its
   last mid-air re-press so it genuinely misses (try 0.01–0.03). Never
   taught to the move-reach model. Setup → Tuning → Attacks edits it.
+- `chord_gap_chance` (0–1; default 0.2) — the odds a key event by a
+  different key than the last follows within 5–20 ms instead of the
+  usual 10–70 ms. Read when the bot starts; 0 keeps the old spacing.
+  Setup → Tuning → Attacks edits it.
 - `allowed_other_players` (default 0) — other players tolerated on the
   minimap before the bot pauses (`stop_when_players_appear`);
   `other_player_min_px` (default 6) — the smallest marker that counts.
