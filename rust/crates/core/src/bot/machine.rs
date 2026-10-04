@@ -24,7 +24,7 @@ use super::watchdog::Watchdog;
 use crate::config::RuneAction;
 use crate::rune::Rune;
 use crate::skills::SkillKind;
-use crate::timing::{human_between, human_reaction};
+use crate::timing::{human_between, human_reaction, jittered};
 
 /// Detours to one rune that may fail on the way before holding for it.
 const MAX_RUNE_TRIES: u32 = 3;
@@ -75,6 +75,12 @@ pub struct Machine {
     rune_retry_at: f64,
     /// A detour failed: back to farming.
     rune_back: bool,
+    /// The run ends at this time (`session_max_minutes`).
+    session_end: Option<f64>,
+    /// The next scheduled rest starts at this time.
+    next_break: Option<f64>,
+    /// A scheduled rest lasts until this time.
+    rest_until: Option<f64>,
 }
 
 impl Default for Machine {
@@ -91,6 +97,9 @@ impl Default for Machine {
             rune_tries: 0,
             rune_retry_at: f64::NEG_INFINITY,
             rune_back: false,
+            session_end: None,
+            next_break: None,
+            rest_until: None,
         }
     }
 }
@@ -127,8 +136,25 @@ fn rune_now<B: Body + ?Sized>(body: &mut B) -> Option<Rune> {
     rune
 }
 
+/// Hazards a person at the keyboard would see; the rest (loading, map
+/// identity) are the bot's own business and stop it at once.
+fn human_noticeable(reason: &str) -> bool {
+    matches!(reason, "other players" | "lie detector")
+}
+
+/// How long a person takes to notice and react to `reason`: another
+/// player's dot is a glance, a lie-detector window takes a moment more.
+fn noticing_delay(reason: &str) -> f64 {
+    if reason == "lie detector" {
+        human_between(0.7, 0.3, 2.0, 0.5)
+    } else {
+        human_reaction()
+    }
+}
+
 /// Why the bot should halt, if anything: None when clear. `notify` sends a
-/// one-shot alert (Pause re-checks quietly).
+/// one-shot alert (Pause re-checks quietly) and, for hazards a person
+/// would see, keeps playing for a human reaction time before stopping.
 fn safety<B: Body + ?Sized>(body: &mut B, notify: bool) -> Option<State> {
     if !body.focused() {
         return Some(State::Pause);
@@ -144,6 +170,9 @@ fn safety<B: Body + ?Sized>(body: &mut B, notify: bool) -> Option<State> {
         }
         let note = body.hazard_note().unwrap_or_default();
         body.notify(&format!("{r} detected — pausing{note}"));
+        if human_noticeable(&reason) {
+            body.sleep(noticing_delay(&reason));
+        }
     }
     Some(State::Pause)
 }
@@ -153,8 +182,9 @@ impl Machine {
     pub fn run<B: Body + ?Sized>(&mut self, body: &mut B) {
         self.state = State::Grind;
         body.state().session = Session::new(body.now());
+        self.start_schedule(body);
         self.enter(body);
-        while body.should_continue() {
+        while body.should_continue() && !self.session_over(body) {
             self.watch(body);
             if !self.switch(body) && body.should_continue() {
                 self.execute(body);
@@ -164,11 +194,54 @@ impl Machine {
         body.state().viz.state = "STOPPED".into();
     }
 
+    /// Draw this run's length limit and first rest.
+    fn start_schedule<B: Body + ?Sized>(&mut self, body: &mut B) {
+        let now = body.now();
+        let limit = body.config().session_max_minutes * 60.0;
+        self.session_end =
+            (limit > 0.0).then(|| now + jittered(limit, limit * 0.85, limit * 1.15, 0.1));
+        self.rest_until = None;
+        self.schedule_break(body);
+    }
+
+    /// The next rest: about `break_every_minutes` of farming from now.
+    fn schedule_break<B: Body + ?Sized>(&mut self, body: &mut B) {
+        let cfg = body.config();
+        let every = cfg.break_every_minutes * 60.0;
+        self.next_break = (every > 0.0 && cfg.break_minutes > 0.0)
+            .then(|| body.now() + jittered(every, every * 0.7, every * 1.3, 0.2));
+    }
+
+    /// Whether the run's time is up (announced once).
+    fn session_over<B: Body + ?Sized>(&mut self, body: &mut B) -> bool {
+        if !self.session_end.is_some_and(|t| body.now() >= t) {
+            return false;
+        }
+        body.notify("Session limit reached — stopping");
+        true
+    }
+
+    /// A scheduled rest is due: start it (the caller pauses).
+    fn break_due<B: Body + ?Sized>(&mut self, body: &mut B) -> bool {
+        let now = body.now();
+        if !self.next_break.is_some_and(|t| now >= t) {
+            return false;
+        }
+        let mean = body.config().break_minutes * 60.0;
+        let len = jittered(mean, mean * 0.7, mean * 1.4, 0.25);
+        self.next_break = None;
+        self.rest_until = Some(now + len);
+        body.log(&format!("Break: resting for {:.1} min", len / 60.0));
+        true
+    }
+
     /// Health checks: logged only — alerts are for hazards.
     fn watch<B: Body + ?Sized>(&mut self, body: &mut B) {
         let (now, player) = (body.now(), body.state_ref().viz.player);
-        if let Some(msg) = self.watchdog.tick(now, self.state, player) {
-            body.log(&msg);
+        if self.rest_until.is_none() {
+            if let Some(msg) = self.watchdog.tick(now, self.state, player) {
+                body.log(&msg);
+            }
         }
         let every = body.config().heartbeat_minutes * 60.0;
         if body.state().session.beat_due(now, every) {
@@ -192,6 +265,9 @@ impl Machine {
                 if self.rune_due(body) {
                     return self.on_rune(body);
                 }
+                if self.break_due(body) {
+                    return Next::Go(State::Pause);
+                }
                 let active = !body.rotation().anchors.is_empty();
                 if active && body.state_ref().travel_target.is_some() {
                     return Next::Go(State::Travel);
@@ -204,6 +280,9 @@ impl Machine {
                 }
                 if self.rune_due(body) {
                     return self.on_rune(body);
+                }
+                if self.break_due(body) {
+                    return Next::Go(State::Pause);
                 }
                 if self.travel_done {
                     Next::Go(State::Grind)
@@ -232,6 +311,15 @@ impl Machine {
                 }
             }
             State::Pause => {
+                if let Some(t) = self.rest_until {
+                    if body.now() < t {
+                        body.state().viz.hazard = Some("scheduled break".into());
+                        return Next::Stay;
+                    }
+                    self.rest_until = None;
+                    self.schedule_break(body);
+                    body.log("Break over — resuming");
+                }
                 if safety(body, false).is_some() || !body.focused() {
                     return Next::Stay;
                 }

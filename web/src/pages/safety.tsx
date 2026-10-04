@@ -67,6 +67,23 @@ export function SafetyPage({ s }: { s: AppState }) {
                        onCommit={(v) => save({ other_player_min_px: Math.round(v) })} />
         </Field>
       </Section>
+      <Section title="Session"
+               hint="Hours of unbroken play look like a macro. Each limit is jittered a little per run, and 0 turns it off.">
+        <Field label="Stop after (minutes)"
+               hint="The run ends on its own, with an alert, after about this long (±15%).">
+          <NumberField value={s.sessionMax} min={0} step={30}
+                       onCommit={(v) => save({ session_max_minutes: v })} />
+        </Field>
+        <Field label="Rest every (minutes)"
+               hint="Farm for about this long, then idle for the break below (needs both set). Keys are released, as in any pause.">
+          <NumberField value={s.breakEvery} min={0} step={5}
+                       onCommit={(v) => save({ break_every_minutes: v })} />
+        </Field>
+        <Field label="Rest for (minutes)">
+          <NumberField value={s.breakFor} min={0} step={1}
+                       onCommit={(v) => save({ break_minutes: v })} />
+        </Field>
+      </Section>
       <Section title="Telegram"
                hint="Alerts go out for hazards only: a hazard pause (other players, an unrecognized map) and runes (spotted, reached, or out of reach). Stops, crashes, a lost serial port, stalls and the heartbeat stay in the log.">
         <Field label="Log a status line every (minutes)"

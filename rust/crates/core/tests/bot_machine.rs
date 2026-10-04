@@ -50,6 +50,64 @@ fn a_hazard_pauses_with_an_alert() {
 }
 
 #[test]
+fn a_human_visible_hazard_is_noticed_after_a_reaction_delay() {
+    for (reason, lo, hi) in [("other players", 0.13, 0.56), ("lie detector", 0.3, 2.01)] {
+        for _ in 0..20 {
+            let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+            b.hazard = Some(reason.into());
+            let mut m = Machine::default();
+            let t0 = b.clock;
+            assert!(m.switch(&mut b));
+            assert_eq!(m.state, State::Pause);
+            let late = b.clock - t0;
+            assert!((lo..hi).contains(&late), "{reason}: {late}");
+        }
+    }
+}
+
+#[test]
+fn an_internal_hazard_stops_the_bot_at_once() {
+    let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+    b.hazard = Some("map transfer (loading screen)".into());
+    let mut m = Machine::default();
+    let t0 = b.clock;
+    assert!(m.switch(&mut b));
+    assert_eq!(b.clock, t0);
+}
+
+#[test]
+fn the_session_limit_ends_the_run_with_an_alert() {
+    let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+    b.cfg.session_max_minutes = 1.0;
+    b.stop_at = 600.0;
+    Machine::default().run(&mut b);
+    assert!(b.log_has("Session limit reached"));
+    assert!((51.0..=70.0).contains(&b.clock), "{}", b.clock);
+}
+
+#[test]
+fn scheduled_breaks_pause_and_resume_without_alerts() {
+    let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+    b.cfg.break_every_minutes = 1.0;
+    b.cfg.break_minutes = 0.5;
+    b.stop_at = 400.0;
+    Machine::default().run(&mut b);
+    assert!(b.log_has("Break: resting"));
+    assert!(b.log_has("Break over — resuming"));
+    assert!(!b.log_has("Paused for"));
+    assert!(b.held.is_none());
+}
+
+#[test]
+fn breaks_need_both_settings() {
+    let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
+    b.cfg.break_every_minutes = 1.0;
+    b.stop_at = 400.0;
+    Machine::default().run(&mut b);
+    assert!(!b.log_has("Break:"));
+}
+
+#[test]
 fn a_long_pause_raises_the_watchdog_alert() {
     let mut b = Sim::new(&[FLOOR], (30.0, 100.0));
     b.focus = false;

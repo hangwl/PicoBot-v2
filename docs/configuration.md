@@ -176,6 +176,10 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   the bot runs (default 30; 0 turns it off). Telegram gets hazards only.
 - `pause_on_lie_detector` (default true) — pause and alert while the
   lie detector's window shows (see bot-behavior.md, Safety).
+- `session_max_minutes` (default 0 = off) — end the run after about this
+  long; `break_every_minutes` and `break_minutes` (0 = off, both needed)
+  — rest that long every so often. Each is jittered per run; see
+  bot-behavior.md, Safety. Setup → Safety → Session edits them.
 - `auto_focus` (default true) — bring the game to the front when the
   bot starts; off waits for you to focus it (the bot pauses until then).
 - `evidence_captures` (default true) — save game screenshots to

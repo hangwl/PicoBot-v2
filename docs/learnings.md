@@ -352,6 +352,25 @@ landings per visit.
   them now. Evidence screenshots in `debug/frames/` are forensic
   residue on a deployed box, hence `evidence_captures`.
 
+## Human reaction and session hygiene (2026-10-04)
+
+- **A hazard stopped the bot in the same tick**: the machine went
+  hazard → PAUSE → `release_all` with nothing between, so the gap from a
+  player's dot appearing to every key coming up was only the detector's
+  latency (tens of ms). Hazards a person would see (other players, the lie
+  detector) now wait out a log-normal reaction first, with the keys still
+  down; loading, map identity and focus loss stay immediate, since nobody
+  watches those. The lie detector gets a longer, wider delay than a dot —
+  noticing a popup takes longer than a glance.
+- **No limit on a run, no rest**: nothing ended a run or paused it on its
+  own. `session_max_minutes` and scheduled breaks are drawn per run, and a
+  break reuses PAUSE (keys up, nothing else), muting the watchdog's
+  "needs attention" line, which would otherwise fire on every rest.
+- **The parity fixture counts**: adding a top-level `bind` key to
+  `config.json` broke `config_round_trips_and_parses_like_python`, whose
+  fixture the Python host wrote. A new top-level key is written only when
+  it isn't the default.
+
 ## A walk that "reached" its target without arriving (2026-10-04)
 
 - A navigator walk leg aimed at `x.round()` with the tolerance truncated,

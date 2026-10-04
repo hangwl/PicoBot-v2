@@ -227,6 +227,9 @@ export interface AppState {
   stopRune: boolean;
   stopLie: boolean;
   autoFocus: boolean;
+  sessionMax: number;
+  breakEvery: number;
+  breakFor: number;
   evidenceCaptures: boolean;
   runeAction: string;
   patrolMode: string;
@@ -306,6 +309,9 @@ const initial: AppState = {
   stopRune: true,
   stopLie: true,
   autoFocus: true,
+  sessionMax: 0,
+  breakEvery: 0,
+  breakFor: 0,
   evidenceCaptures: true,
   runeAction: "solve",
   patrolMode: "sweep",
@@ -652,6 +658,9 @@ function onEvent(p: Record<string, any> & { event: string }) {
         stopRune: c.stop_when_rune_appears !== false,
         stopLie: c.pause_on_lie_detector !== false,
         autoFocus: c.auto_focus !== false,
+        sessionMax: (c.session_max_minutes as number) ?? 0,
+        breakEvery: (c.break_every_minutes as number) ?? 0,
+        breakFor: (c.break_minutes as number) ?? 0,
         evidenceCaptures: c.evidence_captures !== false,
         runeAction: (c.rune_action as string) ?? "solve",
         patrolMode: (c.patrol_mode as string) ?? "sweep",

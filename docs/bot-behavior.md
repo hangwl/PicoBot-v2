@@ -453,6 +453,23 @@ alerts; the mini-game is the player's to solve, and farming resumes once
 the window closes. The first sighting is saved to
 `debug/frames/*_liedetector/`. A rune is handled separately (below).
 
+**Reaction time**: hazards a person at the keyboard would see — other
+players and the lie detector — are acted on after a human delay (~0.22s
+for a player's dot, ~0.7s for the lie-detector window, log-normal and
+bounded). The alert goes out at once; the bot keeps playing until the
+delay is up, then releases every key and pauses. Hazards that are the
+bot's own business (loading screens, map identity, focus loss) stop it
+immediately.
+
+**Session limits** (Setup → Safety → Session): `session_max_minutes`
+ends the run on its own (alert: "Session limit reached"), the limit drawn
+per run within ±15% of the setting. `break_every_minutes` with
+`break_minutes` schedules rests: after about that much farming (±30%)
+the bot goes to PAUSE for about the break length (±40%) — keys released,
+shown as "scheduled break", no alert and no long-pause warning — then
+resumes where it was. A rune detour takes priority and a break waits
+for it. All three are 0 (off) by default.
+
 ### Runes
 
 With `stop_when_rune_appears` on, a rune marker on the minimap
