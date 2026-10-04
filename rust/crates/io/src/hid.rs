@@ -5,9 +5,11 @@
 //! `picobot_core::timing`). A key counts as held from the moment a press
 //! is *attempted* — a press whose ACK timed out may still land — and
 //! stays held until a key-up is confirmed; dropping the controller
-//! releases everything it holds.
+//! releases everything it holds. With a lease, each key-down tells the
+//! firmware to let go on its own unless renewed in time, so a hung
+//! caller can't leave a key down.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,14 +26,18 @@ type ClockFn = Box<dyn Fn() -> f64 + Send>;
 const UP_TRIES: usize = 3;
 /// Firmware-side sweep: releases every key and button the Pico holds.
 pub const RELEASE_ALL: &str = "hid|release_all";
+/// How long the firmware keeps a bot-held key without a renewal (s).
+pub const KEY_LEASE: f64 = 3.0;
 
 pub struct HidController {
     send: SendFn,
     sleep: SleepFn,
     gap: Option<GapFn>,
     clock: ClockFn,
-    held: BTreeSet<String>,
+    /// Held keys, with when each was last sent down.
+    held: BTreeMap<String, f64>,
     last_event: Option<f64>,
+    lease: Option<f64>,
 }
 
 impl HidController {
@@ -57,8 +63,49 @@ impl HidController {
             sleep: Box::new(sleep),
             gap,
             clock: Box::new(clock),
-            held: BTreeSet::new(),
+            held: BTreeMap::new(),
             last_event: None,
+            lease: None,
+        }
+    }
+
+    /// Key-downs carry a `lease` (s) that `renew` keeps alive.
+    pub fn with_lease(mut self, lease: f64) -> Self {
+        self.lease = Some(lease);
+        self
+    }
+
+    /// The longest a caller should go between `renew` calls while keys
+    /// are held (None without a lease); a key is due at half of it.
+    pub fn renew_every(&self) -> Option<f64> {
+        self.lease.map(|l| l / 3.0)
+    }
+
+    fn down_payload(&self, key: &str) -> String {
+        match self.lease {
+            Some(l) => format!("hid|key|down|{key}|{}", (l * 1000.0).round() as u64),
+            None => format!("hid|key|down|{key}"),
+        }
+    }
+
+    /// Re-send the down of every held key due for renewal. Not a finger
+    /// event: unspaced, and the OS sees no change.
+    pub fn renew(&mut self) {
+        let Some(every) = self.renew_every() else {
+            return;
+        };
+        let now = (self.clock)();
+        let due: Vec<String> = self
+            .held
+            .iter()
+            .filter(|(_, sent)| now - **sent >= every / 2.0)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in due {
+            let payload = self.down_payload(&key);
+            if (self.send)(&payload) {
+                self.held.insert(key, (self.clock)());
+            }
         }
     }
 
@@ -82,8 +129,10 @@ impl HidController {
 
     pub fn key_down(&mut self, key: &str) -> bool {
         self.space();
-        self.held.insert(key.to_owned());
-        (self.send)(&format!("hid|key|down|{key}"))
+        self.renew();
+        self.held.insert(key.to_owned(), (self.clock)());
+        let payload = self.down_payload(key);
+        (self.send)(&payload)
     }
 
     /// A key stays tracked as held until its key-up is confirmed.
@@ -108,8 +157,22 @@ impl HidController {
             return false;
         }
         let hold = hold.unwrap_or_else(|| human_hold(Some(key)));
-        (self.sleep)(hold);
+        self.hold(hold);
         self.key_up(key)
+    }
+
+    /// Sleep `secs`, renewing held keys along the way.
+    pub fn hold(&mut self, secs: f64) {
+        let slices = match self.renew_every() {
+            Some(every) => (secs / every).ceil().max(1.0) as usize,
+            None => 1,
+        };
+        for i in 0..slices {
+            if i > 0 {
+                self.renew();
+            }
+            (self.sleep)(secs / slices as f64);
+        }
     }
 
     pub fn move_by(&mut self, dx: i32, dy: i32) -> bool {
@@ -131,14 +194,14 @@ impl HidController {
     }
 
     pub fn held_keys(&self) -> impl Iterator<Item = &str> {
-        self.held.iter().map(String::as_str)
+        self.held.keys().map(String::as_str)
     }
 
     /// Release every key this controller believes is held; if any key-up
     /// goes unconfirmed, the firmware is asked to release everything.
     /// Tracking is cleared either way.
     pub fn release_all(&mut self) {
-        let keys: Vec<String> = std::mem::take(&mut self.held).into_iter().collect();
+        let keys: Vec<String> = std::mem::take(&mut self.held).into_keys().collect();
         let mut all_up = true;
         for key in keys {
             self.space();
@@ -242,7 +305,7 @@ mod tests {
     #[test]
     fn an_unconfirmed_key_up_is_retried() {
         let (mut hid, sent) = flaky(2);
-        hid.held.insert("a".into());
+        hid.held.insert("a".into(), 0.0);
         assert!(hid.key_up("a"));
         assert_eq!(*sent.lock().unwrap(), ["hid|key|up|a"; 3]);
         assert_eq!(hid.held_keys().count(), 0);
@@ -251,7 +314,7 @@ mod tests {
     #[test]
     fn a_key_up_that_never_lands_keeps_the_key_held() {
         let (mut hid, sent, _) = recorder(true);
-        hid.held.insert("a".into());
+        hid.held.insert("a".into(), 0.0);
         assert!(!hid.key_up("a"));
         assert_eq!(sent.lock().unwrap().len(), UP_TRIES);
         assert_eq!(hid.held_keys().collect::<Vec<_>>(), ["a"]);
@@ -310,6 +373,69 @@ mod tests {
         let s = slept.lock().unwrap();
         assert_eq!(s.len(), 2);
         assert!((s[0] - 0.03).abs() < 1e-9 && (s[1] - 0.01).abs() < 1e-9);
+    }
+
+    /// A leased controller over a recording sender and a hand-set clock.
+    fn leased() -> (HidController, Log<String>, Arc<Mutex<f64>>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let clock = Arc::new(Mutex::new(0.0f64));
+        let (s, c, c2) = (sent.clone(), clock.clone(), clock.clone());
+        let hid = HidController::with(
+            move |p| {
+                s.lock().unwrap().push(p.to_owned());
+                true
+            },
+            move |t| *c2.lock().unwrap() += t,
+            None,
+            move || *c.lock().unwrap(),
+        )
+        .with_lease(3.0);
+        (hid, sent, clock)
+    }
+
+    #[test]
+    fn leased_downs_carry_the_lease_and_ups_do_not() {
+        let (mut hid, sent, _) = leased();
+        hid.key_down("left");
+        hid.key_up("left");
+        assert_eq!(
+            *sent.lock().unwrap(),
+            ["hid|key|down|left|3000", "hid|key|up|left"]
+        );
+    }
+
+    #[test]
+    fn only_keys_due_are_renewed() {
+        let (mut hid, sent, clock) = leased();
+        hid.key_down("left");
+        *clock.lock().unwrap() = 0.3;
+        hid.key_down("space");
+        hid.renew();
+        assert_eq!(sent.lock().unwrap().len(), 2, "nothing due yet");
+        *clock.lock().unwrap() = 0.6;
+        hid.renew();
+        assert_eq!(sent.lock().unwrap()[2], "hid|key|down|left|3000");
+        assert_eq!(sent.lock().unwrap().len(), 3, "space was sent 0.3s ago");
+    }
+
+    #[test]
+    fn a_long_hold_is_renewed_through() {
+        let (mut hid, sent, clock) = leased();
+        assert!(hid.press("x", Some(3.5)));
+        let sent = sent.lock().unwrap();
+        let downs = sent.iter().filter(|p| *p == "hid|key|down|x|3000").count();
+        assert_eq!(downs, 4, "the press and a renewal every ~0.9s: {sent:?}");
+        assert_eq!(sent.last().unwrap(), "hid|key|up|x");
+        assert!((*clock.lock().unwrap() - 3.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn without_a_lease_nothing_is_renewed() {
+        let (mut hid, sent, _) = recorder(false);
+        hid.key_down("a");
+        hid.renew();
+        hid.hold(10.0);
+        assert_eq!(*sent.lock().unwrap(), ["hid|key|down|a"]);
     }
 
     #[test]

@@ -131,10 +131,39 @@ last_rx = time.monotonic()
 # an older host sends no keepalives and may hold a key for seconds.
 watchdog_armed = False
 held = set()
+# Leased holds: a down may carry "|<ms>"; a key not renewed (another
+# leased down) or released by then is let go here. Keys are keycodes or
+# ('mouse', button).
+leases = {}
+
+
+def set_lease(key, parts):
+    if len(parts) >= 5 and parts[4].strip().isdigit():
+        leases[key] = time.monotonic() + int(parts[4]) / 1000
+    else:
+        leases.pop(key, None)
+
+
+def expire_leases(now):
+    for key, deadline in list(leases.items()):
+        if now < deadline:
+            continue
+        del leases[key]
+        held.discard(key)
+        print("[console] lease expired; releasing", key)
+        try:
+            if isinstance(key, tuple):
+                if mouse is not None:
+                    mouse.release(key[1])
+            else:
+                keyboard.release(key)
+        except Exception:
+            pass
 
 
 def release_everything():
     held.clear()
+    leases.clear()
     try:
         keyboard.release_all()
     except Exception:
@@ -169,10 +198,12 @@ def run(parts):
             if action == 'down':
                 keyboard.press(kc)
                 held.add(kc)
+                set_lease(kc, parts)
                 return True
             if action == 'up':
                 keyboard.release(kc)
                 held.discard(kc)
+                leases.pop(kc, None)
                 return True
             return False
         if kind == 'mouse' and mouse is not None:
@@ -182,10 +213,12 @@ def run(parts):
             if action == 'down':
                 mouse.press(btn)
                 held.add(('mouse', btn))
+                set_lease(('mouse', btn), parts)
                 return True
             if action == 'up':
                 mouse.release(btn)
                 held.discard(('mouse', btn))
+                leases.pop(('mouse', btn), None)
                 return True
             return False
         if kind == 'move' and mouse is not None:
@@ -208,9 +241,11 @@ def run(parts):
         if kc is not None and cmd == 'down':
             keyboard.press(kc)
             held.add(kc)
+            leases.pop(kc, None)
             return True
         if kc is not None and cmd == 'up':
             keyboard.release(kc)
+            leases.pop(kc, None)
             held.discard(kc)
             return True
     return False
@@ -277,6 +312,8 @@ def step():
     if watchdog_armed and held and now - last_rx > WATCHDOG_S:
         print("[console] host silent; releasing all keys")
         release_everything()
+    if leases:
+        expire_leases(now)
 
     # If still connected but host hasn't sent any command yet, periodically re-emit PICO_READY
     if now_connected and not commands_seen:
