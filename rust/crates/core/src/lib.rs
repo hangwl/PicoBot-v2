@@ -15,6 +15,7 @@ pub mod fuzzy;
 pub mod heat;
 pub mod identity;
 pub mod json;
+pub mod keys;
 pub mod layout;
 pub mod lie_detector;
 pub mod maps;

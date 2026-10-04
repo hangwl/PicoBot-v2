@@ -543,6 +543,13 @@ fn make_body(host: &Arc<Host>, stop: Arc<Stop>) -> Result<HostBody, String> {
 fn preflight(host: &Arc<Host>) -> Result<(), String> {
     host.serial_link()
         .ok_or("no serial — pick a port in the Connection panel")?;
+    let bad = host.unpressable_keys(&host.bot_config());
+    if !bad.is_empty() {
+        return Err(format!(
+            "the Pico can't press {} — fix the key on the Class page",
+            bad.join(", ")
+        ));
+    }
     host.get_feed().ok_or("game window not found")?;
     Ok(())
 }
