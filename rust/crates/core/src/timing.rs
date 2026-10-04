@@ -163,6 +163,12 @@ pub fn human_between(mean: f64, lo: f64, hi: f64, sigma: f64) -> f64 {
     human_between_with(&mut rand::rng(), tempo().factor(), mean, lo, hi, sigma)
 }
 
+/// A jittered interval in `[lo, hi]` around `mean`, independent of the
+/// session pace — for machine cadences (sampling), not human actions.
+pub fn jittered(mean: f64, lo: f64, hi: f64, sigma: f64) -> f64 {
+    human_between_with(&mut rand::rng(), 1.0, mean, lo, hi, sigma)
+}
+
 /// Keys held a little longer than a tapped letter.
 fn long_hold(key: Option<&str>) -> bool {
     matches!(

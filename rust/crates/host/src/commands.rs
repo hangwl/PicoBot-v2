@@ -426,6 +426,7 @@ impl Host {
             "stop_when_map_unrecognized",
             "record_rune_solves",
             "pause_on_lie_detector",
+            "auto_focus",
         ];
         let mut edits: Vec<(String, Value)> = Vec::new();
         for (k, v) in &want {

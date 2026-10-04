@@ -590,7 +590,9 @@ fn run_bot(h: &Arc<Host>, mut body: HostBody) -> Result<String, String> {
             h.bus.emit("map", &n);
         }
     }
-    body.eyes.window.activate();
+    if h.bot_config().auto_focus {
+        body.eyes.window.activate();
+    }
     body.sleep(1.0);
     let ran = catch_unwind(AssertUnwindSafe(|| Machine::default().run(&mut body)));
     body.log("Smart bot stopped");

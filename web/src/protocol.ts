@@ -226,6 +226,7 @@ export interface AppState {
   stopPlayers: boolean;
   stopRune: boolean;
   stopLie: boolean;
+  autoFocus: boolean;
   runeAction: string;
   patrolMode: string;
   sweepReach: number;
@@ -303,6 +304,7 @@ const initial: AppState = {
   stopPlayers: true,
   stopRune: true,
   stopLie: true,
+  autoFocus: true,
   runeAction: "solve",
   patrolMode: "sweep",
   sweepReach: 12,
@@ -647,6 +649,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         stopPlayers: c.stop_when_players_appear !== false,
         stopRune: c.stop_when_rune_appears !== false,
         stopLie: c.pause_on_lie_detector !== false,
+        autoFocus: c.auto_focus !== false,
         runeAction: (c.rune_action as string) ?? "solve",
         patrolMode: (c.patrol_mode as string) ?? "sweep",
         sweepReach: (c.sweep_reach_px as number) ?? 12,

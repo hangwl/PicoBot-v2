@@ -56,6 +56,7 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
     "record_rune_solves": true,
     "stop_when_map_unrecognized": true,
     "pause_on_lie_detector": true,
+    "auto_focus": true,
     "minimap_colors": {
       "player": [12, 240, 239],
       "other_player": [118, 45, 253],
@@ -175,6 +176,8 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   the bot runs (default 30; 0 turns it off). Telegram gets hazards only.
 - `pause_on_lie_detector` (default true) — pause and alert while the
   lie detector's window shows (see bot-behavior.md, Safety).
+- `auto_focus` (default true) — bring the game to the front when the
+  bot starts; off waits for you to focus it (the bot pauses until then).
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest
   `debug_capture_max_events` folders. See [development.md](development.md#debug-frame-captures).

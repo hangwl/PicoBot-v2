@@ -148,7 +148,15 @@ struct Monitor {
     last_title: Option<String>,
 }
 
+/// Monitor sample period: jittered, and short enough that a `min_dark_s`
+/// blackout still spans several samples.
 const PERIOD: f64 = 0.05;
+const PERIOD_MIN: f64 = 0.035;
+const PERIOD_MAX: f64 = 0.07;
+
+fn sample_period() -> f64 {
+    picobot_core::timing::jittered(PERIOD, PERIOD_MIN, PERIOD_MAX, 0.25)
+}
 const LOCATE_EVERY: f64 = 0.25;
 /// The title is re-read this often: a map change with no blackout (or one
 /// too short to see) still shows up in it.
@@ -170,7 +178,7 @@ impl Monitor {
             if let Some(e) = eyes.as_mut() {
                 self.tick(e);
             }
-            let rest = (PERIOD - (monotonic() - started)).max(0.005);
+            let rest = (sample_period() - (monotonic() - started)).max(0.005);
             std::thread::sleep(Duration::from_secs_f64(rest));
         }
     }
@@ -282,5 +290,31 @@ impl Monitor {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use picobot_core::minimap::{TransitionDetector, TransitionEvent};
+
+    #[test]
+    fn the_sample_period_is_jittered_within_bounds() {
+        let draws: Vec<f64> = (0..500).map(|_| sample_period()).collect();
+        assert!(draws.iter().all(|p| (PERIOD_MIN..=PERIOD_MAX).contains(p)));
+        let first = draws[0];
+        assert!(draws.iter().any(|p| (p - first).abs() > 1e-4));
+    }
+
+    #[test]
+    fn a_blackout_is_seen_at_the_slowest_sampling() {
+        let mut d = TransitionDetector::default();
+        let dark = Image::new(8, 8);
+        let (mut t, mut seen) = (0.0, false);
+        while t < 0.4 {
+            seen |= d.note(&dark, t) == Some(TransitionEvent::Loading);
+            t += PERIOD_MAX;
+        }
+        assert!(seen, "blackout missed at {PERIOD_MAX}s sampling");
     }
 }

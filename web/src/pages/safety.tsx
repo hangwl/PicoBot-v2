@@ -12,6 +12,8 @@ const TOGGLES: [key: string, on: (s: AppState) => boolean, label: string, hint: 
     "The title names no saved map. Off lets the bot farm an unsaved map with the global rotation."],
   ["pause_on_lie_detector", (s) => s.stopLie, "Pause for a lie detector",
     "Its window shows in the game (checked every second). The bot stops and alerts you — the mini-game is yours to solve; farming resumes once it closes."],
+  ["auto_focus", (s) => s.autoFocus, "Focus the game on start",
+    "Bring the game window to the front when the bot starts. Off: the bot waits until you focus it yourself."],
 ];
 
 export function SafetyPage({ s }: { s: AppState }) {

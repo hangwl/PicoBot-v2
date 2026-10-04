@@ -300,6 +300,8 @@ pub struct BotConfig {
     pub record_rune_solves: bool,
     pub stop_when_map_unrecognized: bool,
     pub pause_on_lie_detector: bool,
+    /// Bring the game to the front when the bot starts; off waits for it.
+    pub auto_focus: bool,
     // Keys
     pub attack_keys: Vec<String>,
     pub buff_keys: Vec<String>,
@@ -389,6 +391,7 @@ impl Default for BotConfig {
             record_rune_solves: true,
             stop_when_map_unrecognized: true,
             pause_on_lie_detector: true,
+            auto_focus: true,
             attack_keys: vec!["a".into()],
             buff_keys: Vec::new(),
             buff_interval_seconds: 60.0,
@@ -522,6 +525,7 @@ impl BotConfig {
                 &mut cfg.stop_when_map_unrecognized,
             ),
             ("pause_on_lie_detector", &mut cfg.pause_on_lie_detector),
+            ("auto_focus", &mut cfg.auto_focus),
             ("name_ocr", &mut cfg.name_ocr),
         ] {
             if let Some(v) = get(name) {
@@ -748,6 +752,7 @@ impl BotConfig {
             "record_rune_solves": self.record_rune_solves,
             "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,
+            "auto_focus": self.auto_focus,
             "attack_keys": self.attack_keys,
             "buff_keys": self.buff_keys,
             "buff_interval_seconds": self.buff_interval_seconds,
