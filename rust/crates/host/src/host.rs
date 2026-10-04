@@ -15,6 +15,7 @@ use picobot_core::bot::measure::plan_for;
 use picobot_core::bot::{LegViz, MeasureStatus, Mode, Viz};
 use picobot_core::config::{AppConfig, BotConfig, ClassTravel};
 use picobot_core::identity::MapIdentity;
+use picobot_core::keys::{self, PICO_KEYS};
 use picobot_core::maps::{MapEntry, MapStore, PlayerRule};
 use picobot_core::navgraph::{GraphCache, GraphOptions, NavGraph};
 use picobot_core::platform_fit::{PlatformFit, SegKey};
@@ -23,7 +24,7 @@ use picobot_core::rotation::resolve_coord;
 use picobot_core::skills::Skill;
 use picobot_core::timing::monotonic;
 use picobot_core::vision::Region;
-use picobot_io::hid::{HELD, RELEASE_ALL};
+use picobot_io::hid::{HELD, KEYS, RELEASE_ALL};
 use picobot_io::ocr::{find_model, TitleReader};
 use picobot_io::serial::{discover_data_port, find_data_port, list_ports, SendError, SerialLink};
 use serde_json::{json, Map, Value};
@@ -144,7 +145,7 @@ fn reconnect_candidates(want: &str, now: &[String], seen: &mut HashSet<String>) 
 }
 
 /// `left|page up|mouse:left` → its names (a key name may hold a comma).
-fn parse_held(data: &str) -> BTreeSet<String> {
+fn parse_names(data: &str) -> BTreeSet<String> {
     data.split('|')
         .map(str::trim)
         .filter(|k| !k.is_empty())
@@ -480,12 +481,78 @@ impl Host {
     /// What the Pico says it holds (keys by name, buttons as
     /// `mouse:<name>`), or None when its firmware can't say.
     pub(crate) fn pico_held(&self) -> Result<Option<BTreeSet<String>>, String> {
+        self.pico_names(HELD)
+    }
+
+    /// The key names the Pico's firmware knows, or None when it can't say.
+    pub(crate) fn pico_keys(&self) -> Result<Option<BTreeSet<String>>, String> {
+        self.pico_names(KEYS)
+    }
+
+    fn pico_names(&self, query: &str) -> Result<Option<BTreeSet<String>>, String> {
         let link = self.serial_link().ok_or("no serial port")?;
-        match link.query(HELD, Duration::from_millis(1500)) {
-            Ok(data) => Ok(Some(parse_held(&data))),
+        match link.query(query, Duration::from_millis(1500)) {
+            Ok(data) => Ok(Some(parse_names(&data))),
             Err(SendError::Rejected) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    /// Keys a run with `cfg` would press that the Pico can't: checked
+    /// against its own list when it can say, else this host's.
+    pub(crate) fn unpressable_keys(&self, cfg: &BotConfig) -> Vec<String> {
+        let known = match self.pico_keys() {
+            Ok(Some(keys)) => keys,
+            _ => PICO_KEYS.iter().map(|k| k.to_string()).collect(),
+        };
+        keys::unpressable(cfg, &known)
+    }
+
+    /// On connect: warn when the firmware on the Pico knows other keys
+    /// than this host (a stale copy of `CIRCUITPY/code.py`).
+    fn check_key_map(&self) {
+        let Some(link) = self.serial_link() else {
+            return;
+        };
+        if !link.wait_ready(Duration::from_secs(3)) {
+            return;
+        }
+        let pico = match self.pico_keys() {
+            Ok(Some(pico)) => pico,
+            Ok(None) => {
+                self.bus.emit_level(
+                    "remote",
+                    "the Pico's firmware predates key-map checks — copy CIRCUITPY/code.py to it",
+                    "warn",
+                );
+                return;
+            }
+            Err(_) => return,
+        };
+        let ours: BTreeSet<String> = PICO_KEYS.iter().map(|k| k.to_string()).collect();
+        let list = |v: Vec<&String>| {
+            if v.is_empty() {
+                "none".to_owned()
+            } else {
+                v.into_iter().cloned().collect::<Vec<_>>().join(", ")
+            }
+        };
+        let missing: Vec<&String> = ours.difference(&pico).collect();
+        let extra: Vec<&String> = pico.difference(&ours).collect();
+        if missing.is_empty() && extra.is_empty() {
+            self.bus
+                .emit_level("remote", "the Pico's key map matches", "debug");
+            return;
+        }
+        self.bus.emit_level(
+            "remote",
+            &format!(
+                "the Pico's key map differs from this host's (missing: {}; extra: {}) — copy CIRCUITPY/code.py to it",
+                list(missing),
+                list(extra)
+            ),
+            "warn",
+        );
     }
 
     /// After a run: let go of whatever the Pico still holds that no
@@ -594,6 +661,11 @@ impl Host {
         drop(old);
         self.log(&format!("serial connected on {port}"));
         self.bus.emit("status", "Remote: Serial connected");
+        let h = self.clone();
+        std::thread::Builder::new()
+            .name("KeyMapCheck".into())
+            .spawn(move || h.check_key_map())
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1389,11 +1461,11 @@ mod reconnect_tests {
 
     #[test]
     fn held_replies_split_on_bars_not_commas() {
-        let held = parse_held("left|,|page up|mouse:left");
+        let held = parse_names("left|,|page up|mouse:left");
         assert_eq!(
             held.into_iter().collect::<Vec<_>>(),
             [",", "left", "mouse:left", "page up"]
         );
-        assert!(parse_held("").is_empty());
+        assert!(parse_names("").is_empty());
     }
 }

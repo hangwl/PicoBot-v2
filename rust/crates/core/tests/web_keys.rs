@@ -1,5 +1,6 @@
-//! The dashboard's key list (`web/src/keys.ts` `PICO_KEYS`) must match
-//! what the Pico firmware can press (`CIRCUITPY/code.py` `KEY_MAP`).
+//! The dashboard's key list (`web/src/keys.ts` `PICO_KEYS`) and the
+//! host's (`picobot_core::keys::PICO_KEYS`) must match what the Pico
+//! firmware can press (`CIRCUITPY/code.py` `KEY_MAP`).
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -82,5 +83,20 @@ fn the_dashboard_keys_match_the_firmware_key_map() {
     assert!(
         only_fw.is_empty() && only_web.is_empty(),
         "firmware only: {only_fw:?}; dashboard only: {only_web:?}"
+    );
+}
+
+#[test]
+fn the_host_keys_match_the_firmware_key_map() {
+    let fw = firmware_keys();
+    let host: BTreeSet<String> = picobot_core::keys::PICO_KEYS
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+    let only_fw: Vec<_> = fw.difference(&host).collect();
+    let only_host: Vec<_> = host.difference(&fw).collect();
+    assert!(
+        only_fw.is_empty() && only_host.is_empty(),
+        "firmware only: {only_fw:?}; host only: {only_host:?}"
     );
 }

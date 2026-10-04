@@ -28,6 +28,8 @@ const UP_TRIES: usize = 3;
 pub const RELEASE_ALL: &str = "hid|release_all";
 /// Asks what the Pico holds: `ACK <seq> left|space|mouse:left`.
 pub const HELD: &str = "hid|held";
+/// Asks which key names the Pico's firmware knows, `|`-joined.
+pub const KEYS: &str = "hid|keys";
 /// How long the firmware keeps a bot-held key without a renewal (s).
 pub const KEY_LEASE: f64 = 3.0;
 

@@ -175,7 +175,7 @@ what was tried and what was learned in `docs/learnings.md` instead.
   bot swaps it in on its own thread), settings through the config
   version, maps through saves (the patrol replans on changed anchors).
 - **Remote keys mirror the finger**: `key|down` on touch, `key|up` on
-  lift — never synthesized taps. `web/src/keys.ts` `PICO_KEYS` must match
+  lift — never synthesized taps. `web/src/keys.ts` `PICO_KEYS` and `core/src/keys.rs` `PICO_KEYS` must match
   the firmware `KEY_MAP` (a test checks it).
 
 ## Map

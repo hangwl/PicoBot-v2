@@ -290,6 +290,10 @@ def handle(command_line):
         commands_seen = True
         reply("ACK", seq, held_names())
         return
+    if command_line.lower() == 'hid|keys':
+        commands_seen = True
+        reply("ACK", seq, "|".join(sorted(KEY_MAP)))
+        return
     # Handshake compatibility: "hello" or "hello|handshake"
     if parts[0].lower() == 'hello' and len(parts) <= 2:
         try:

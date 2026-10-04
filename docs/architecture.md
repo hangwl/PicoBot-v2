@@ -84,6 +84,13 @@ Wire protocol (one line each way):
   and releases anything still held that no dashboard finger holds
   (`Clients::held_keys`). Connection has "Check held keys" (`host|held`)
   and "Release all keys" (`host|release_all`).
+- Key map: `hid|keys` is answered with every name the firmware's
+  `KEY_MAP` knows. On connect the host compares it with
+  `picobot_core::keys::PICO_KEYS` and warns when they differ (a stale
+  `code.py` on the Pico) or when the firmware predates the query. A bot
+  run or measurement won't start while a configured key (arrows, move
+  keys, rune key, skills) is one the Pico can't press — checked against
+  the Pico's list, or the host's when the Pico can't say.
 - The reader only reads bytes already waiting: reader and writer share
   one synchronous Windows handle, and a read left blocking would hold
   every write behind it. Round trips are ~4 ms.
