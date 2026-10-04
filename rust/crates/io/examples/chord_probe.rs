@@ -6,11 +6,15 @@
 //!
 //! Focus an empty Notepad first: the keys go to whatever is in front.
 //! "acked" waits for each command's ACK (the real path); "piped" sends the
-//! second command without waiting for the first.
+//! second command without waiting for the first. "hid" goes through
+//! `HidController` with every different-key pair a chord, as the bot does
+//! when `chord_gap_chance` fires (the asked gap is ignored).
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use picobot_core::timing::{key_gap_for, monotonic};
+use picobot_io::hid::HidController;
 use picobot_io::serial::SerialLink;
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -85,7 +89,7 @@ fn main() {
     let port = args.next().expect("port, e.g. COM8");
     let reps: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(25);
     START.set(Instant::now()).ok();
-    let link = SerialLink::open(&port).expect("open the port");
+    let link = Arc::new(SerialLink::open(&port).expect("open the port"));
     assert!(link.wait_ready(Duration::from_secs(3)), "no PICO_READY");
 
     let cases: Vec<Case> = [
@@ -97,6 +101,7 @@ fn main() {
         ("piped", 0.0),
         ("piped", 3.0),
         ("piped", 6.0),
+        ("hid", 0.0),
     ]
     .iter()
     .map(|&(mode, gap_ms)| Case { mode, gap_ms })
@@ -140,6 +145,13 @@ fn main() {
 
     let thread = unsafe { GetCurrentThreadId() };
     let sender = std::thread::spawn(move || {
+        let l = link.clone();
+        let mut hid = HidController::with(
+            move |p| l.send_acked(p, Duration::from_millis(500)).is_ok(),
+            |s| std::thread::sleep(Duration::from_secs_f64(s.max(0.0))),
+            Some(Box::new(|same| key_gap_for(same, 1.0))),
+            monotonic,
+        );
         // (case index, rep) → index of the first event in SEEN's order.
         let mut order = Vec::new();
         for (ci, c) in cases.iter().enumerate() {
@@ -149,6 +161,16 @@ fn main() {
                 let second = "hid|key|down|f9";
                 let t0 = Instant::now();
                 let at = t0 + Duration::from_secs_f64(c.gap_ms / 1000.0);
+                if c.mode == "hid" {
+                    hid.key_down("f8");
+                    hid.key_down("f9");
+                    std::thread::sleep(Duration::from_millis(40));
+                    hid.key_up("f8");
+                    hid.key_up("f9");
+                    std::thread::sleep(Duration::from_millis(150));
+                    order.push((ci, n0));
+                    continue;
+                }
                 if c.mode == "acked" {
                     let _ = link.send_acked(first, Duration::from_millis(500));
                     wait_until(at);

@@ -245,6 +245,7 @@ export interface AppState {
   others: number;
   moveAttack: number;
   moveMiss: number;
+  chordGap: number;
   groundAttack: number;
   doubleChance: number;
   targetApm: number;
@@ -328,6 +329,7 @@ const initial: AppState = {
   others: 0,
   moveAttack: 1,
   moveMiss: 0,
+  chordGap: 0.2,
   groundAttack: 0,
   doubleChance: 0.4,
   targetApm: 0,
@@ -677,6 +679,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         playerMinPx: (c.other_player_min_px as number) ?? 6,
         moveAttack: (c.move_attack_chance as number) ?? 1,
         moveMiss: (c.move_miss_chance as number) ?? 0,
+        chordGap: (c.chord_gap_chance as number) ?? 0.2,
         groundAttack: (c.ground_attack_chance as number) ?? 0,
         doubleChance: (c.weave_double_chance as number) ?? 0.4,
         targetApm: (c.target_attacks_per_min as number) ?? 0,

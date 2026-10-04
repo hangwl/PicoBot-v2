@@ -36,6 +36,14 @@ export function AttacksPage({ s }: { s: AppState }) {
                        onCommit={(v) => save({ move_miss_chance: v / 100 })} />
         </Field>
       </Section>
+      <Section title="Fingers"
+               hint="Keys pressed by different fingers sometimes land almost together, as on a real keyboard.">
+        <Field label="Quick overlaps (%)"
+               hint="Odds a key event by a different key than the last follows within 5–20 ms instead of the usual 10–70 ms. Takes effect when the bot next starts. 0 keeps the old spacing.">
+          <NumberField value={pct(s.chordGap)} min={0} max={100} step={5}
+                       onCommit={(v) => save({ chord_gap_chance: v / 100 })} />
+        </Field>
+      </Section>
       <Section title="Attack rate"
                hint="Steers the odds above so the bot casts about this many attacks a minute: under it, more windows attack; over it, fewer. 0 leaves the odds alone.">
         <Field label="Target attacks per minute">

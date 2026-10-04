@@ -360,6 +360,9 @@ pub struct BotConfig {
     pub move_attack_chance: f64,
     /// Odds a flash move's mid-air re-press is skipped on purpose (0 = never).
     pub move_miss_chance: f64,
+    /// Odds a key event by a different finger than the last one lands as a
+    /// quick chord (5-20ms later) instead of the usual 10-70ms spacing.
+    pub chord_gap_chance: f64,
     /// Odds a landing carries an attack window.
     pub ground_attack_chance: f64,
     /// Attacks per minute to steer toward (0 = off).
@@ -447,6 +450,7 @@ impl Default for BotConfig {
             weave_double_chance: 0.4,
             move_attack_chance: 1.0,
             move_miss_chance: 0.0,
+            chord_gap_chance: 0.2,
             ground_attack_chance: 0.0,
             target_attacks_per_min: 0.0,
             weave_range_px: 24,
@@ -576,6 +580,7 @@ impl BotConfig {
             ("weave_double_chance", &mut cfg.weave_double_chance),
             ("move_attack_chance", &mut cfg.move_attack_chance),
             ("move_miss_chance", &mut cfg.move_miss_chance),
+            ("chord_gap_chance", &mut cfg.chord_gap_chance),
             ("ground_attack_chance", &mut cfg.ground_attack_chance),
             ("target_attacks_per_min", &mut cfg.target_attacks_per_min),
             ("anchor_float_px", &mut cfg.anchor_float_px),
@@ -818,6 +823,7 @@ impl BotConfig {
             "weave_double_chance": self.weave_double_chance,
             "move_attack_chance": self.move_attack_chance,
             "move_miss_chance": self.move_miss_chance,
+            "chord_gap_chance": self.chord_gap_chance,
             "ground_attack_chance": self.ground_attack_chance,
             "target_attacks_per_min": self.target_attacks_per_min,
             "weave_range_px": self.weave_range_px,

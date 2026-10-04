@@ -189,6 +189,27 @@ pub fn key_gap() -> f64 {
     human_between(0.025, 0.01, 0.07, 0.5)
 }
 
+/// Spacing when different fingers land nearly together (a chord, or a
+/// quick roll between keys): ~8ms, within [0.005, 0.02]s. The floor is the
+/// Pico's ACK round trip (about 4.5ms), which no gap can beat.
+pub fn chord_gap() -> f64 {
+    human_between(0.008, 0.005, 0.02, 0.4)
+}
+
+/// Like [`key_gap`], but a press by a different finger than the last
+/// event's is a chord with probability `chord_chance`.
+pub fn key_gap_for(same_finger: bool, chord_chance: f64) -> f64 {
+    key_gap_for_with(&mut rand::rng(), same_finger, chord_chance)
+}
+
+pub fn key_gap_for_with<R: Rng + ?Sized>(rng: &mut R, same_finger: bool, chord_chance: f64) -> f64 {
+    if !same_finger && rng.random_bool(chord_chance.clamp(0.0, 1.0)) {
+        human_between_with(rng, 1.0, 0.008, 0.005, 0.02, 0.4)
+    } else {
+        human_between_with(rng, 1.0, 0.025, 0.01, 0.07, 0.5)
+    }
+}
+
 /// Time to notice something unexpected and respond: ~0.22s.
 pub fn human_reaction() -> f64 {
     human_between(0.22, 0.13, 0.55, 0.3)
@@ -305,5 +326,31 @@ mod tests {
             .fold((f64::MAX, f64::MIN), |(a, b), f| (a.min(*f), b.max(*f)));
         assert!(hi - lo > 0.02); // it drifts
         assert!(factors.iter().all(|f| (0.7..1.4).contains(&(f / t.base()))));
+    }
+}
+
+#[cfg(test)]
+mod chord_tests {
+    use super::*;
+
+    #[test]
+    fn different_fingers_sometimes_chord_under_10ms_and_one_finger_never_does() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let chords: Vec<f64> = (0..2000)
+            .map(|_| key_gap_for_with(&mut rng, false, 0.2))
+            .collect();
+        let fast = chords.iter().filter(|g| **g < 0.010).count() as f64 / 2000.0;
+        assert!((0.08..=0.2).contains(&fast), "{fast}");
+        assert!(chords.iter().all(|g| (0.005..=0.07).contains(g)));
+        let same: Vec<f64> = (0..2000)
+            .map(|_| key_gap_for_with(&mut rng, true, 1.0))
+            .collect();
+        assert!(same.iter().all(|g| (0.01..=0.07).contains(g)));
+    }
+
+    #[test]
+    fn chord_chance_zero_keeps_the_old_gaps() {
+        let mut rng = StdRng::seed_from_u64(3);
+        assert!((0..500).all(|_| key_gap_for_with(&mut rng, false, 0.0) >= 0.01));
     }
 }
