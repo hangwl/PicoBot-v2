@@ -398,6 +398,27 @@ landings per visit.
   120ms (p5–p95 54–267); different-key gaps median 386ms; 2 of 43 under
   10ms (4.7%).
 
+## Key events arrive on an 8 ms comb (2026-10-04)
+
+- **The sub-10 ms chord idea can't work on this firmware**: the host's
+  ACK round trip to the Pico is a median 4.1 ms (p90 4.7, max 7.2), so
+  gaps of 4–9 ms could be sent, but `chord_probe` (F8/F9 pairs read back
+  with Raw Input) shows Windows receives them on a grid. Asked 0, 3, 5 or
+  6 ms apart, the pair arrives 8.0 ms apart (min 7.7, max 8.2); asked 8,
+  12, 20 ms it arrives 8, 16, 24. Pipelining the second command without
+  waiting for the ACK changes nothing.
+- **Why**: CircuitPython hardcodes `bInterval = 8` in the HID endpoint
+  descriptors (`usb_hid_descriptor_template`, not a build macro), so the
+  host polls the Pico every 8 ms and every report leaves on a poll. The
+  K75 the Pico clones polls every 1 ms (`bInterval = 1` in its dump).
+- **The bigger tell**: not just chords — *every* gap between key events,
+  and every hold, lands on multiples of 8 ms with ~0.2 ms of jitter.
+  Humanised delays inside the host are quantised on the way out, and a
+  real 1 kHz keyboard's gaps are not. Anything that timestamps raw input
+  at millisecond resolution can see the comb. Fixing it needs
+  `bInterval = 1`: a custom CircuitPython build, or the TinyUSB firmware
+  (Phase E); `boot.py` can't change it.
+
 ## A walk that "reached" its target without arriving (2026-10-04)
 
 - A navigator walk leg aimed at `x.round()` with the tolerance truncated,
