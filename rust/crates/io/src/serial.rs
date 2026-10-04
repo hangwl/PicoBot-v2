@@ -158,6 +158,16 @@ impl SerialLink {
         ))
     }
 
+    /// A link for `spec`: `hid` / `hid:<vid>:<pid>` ride the vendor HID
+    /// channel of the TinyUSB firmware, anything else is a COM port.
+    pub fn open_spec(spec: &str) -> io::Result<Self> {
+        if crate::hid_transport::parse_spec(spec).is_some() {
+            crate::hid_transport::open(spec)
+        } else {
+            SerialLink::open(spec)
+        }
+    }
+
     /// A link over any transport (tests use an in-memory firmware).
     pub fn start(
         port_name: &str,

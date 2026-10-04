@@ -699,3 +699,55 @@ landings per visit.
   overlay then sat shifted until the next map change. Now the whole frame
   is verified against the live window (two agreeing checks, so one stray
   rectangle can't flip it) and a located frame wins over a stored one.
+
+## The real K75's descriptors (2026-10-05)
+
+Read via usbipd-win into WSL (`usbhid-dump`; usbview on Windows can't read
+report descriptors). Saved in `firmware/phase-e/k75-descriptors.txt`.
+
+- **Three interfaces, not one**: boot keyboard (EP1 IN 16B), a 158-byte
+  multi-collection interface (EP2 IN 16B — consumer/system control, a
+  120-bit bitmap keyboard, a 5-button mouse, 3 vendor bytes) and a third
+  with no boot subclass (EP3 IN 8B). The mouse question answers itself:
+  the clone keeps `hid|mouse|*`/`move`/`scroll` on a real mouse
+  collection.
+- **Interface 2 is already a 64-byte vendor channel** (usage page
+  0xFF13): 64-byte IN report, 64-byte Output and 64-byte Feature both
+  served over EP0 — there is no OUT pipe on the real device. Cloning all
+  three report descriptors byte-for-byte leaves the device
+  indistinguishable at descriptor level, and host→device commands riding
+  EP0 SET_REPORT is exactly how the vendor's config software talks. Keep
+  the IN-only 3-pipe topology; don't add an interrupt-OUT endpoint.
+- Device-level fields the spike already had right: `bcdDevice 0x0111`,
+  `bmAttributes 0xA0` (remote wakeup), 100mA, `bcdUSB 0x0200`, no serial
+  string, EP0 64B. The keyboard endpoint's `wMaxPacketSize` is 16, not
+  TinyUSB's usual 8.
+- `usbipd bind` is the only step needing admin; attach/detach/dump are
+  unprivileged after that. Detaching returns the keyboard to Windows.
+- `firmware/phase-e/k75/` builds on this: all three report descriptors
+  byte-identical, `code.py`'s line protocol over if2's 64B reports
+  (host->device via EP0 SET_REPORT — no OUT pipe, like the real device),
+  `maintenance` reboots to BOOTSEL (the only over-USB update path left).
+  One divergence: EP3's packet is 64B not 8B so a report clears in one
+  poll. Not yet run on hardware.
+
+## TinyUSB firmware review and the HID transport (2026-10-05)
+
+- **Review of `k75/`** (descriptors, key map, wire safety all match
+  `code.py` and the capture) found three C bugs: `names[n++] = num[n]`
+  (undefined behaviour — a held mouse button could put a garbage name in
+  a `hid|held` answer, which the host uses to release strays), a 12-byte
+  buffer that cut "mouse:middle" to "mouse:middl", and `snprintf` used
+  without `<stdio.h>`. Fixed. `tests/web_keys.rs` now also checks
+  `keymap.c` against `code.py`'s `KEY_MAP` (86 names; every HID usage
+  code was compared by hand once).
+- **Known gaps against `code.py`**: `PICO_READY` is sent once, on mount,
+  not every second until the host speaks (the host sends `hello` first, so
+  it doesn't matter); EP3 is 64 bytes where the real K75's is 8, so a
+  line moves in one poll instead of eight.
+- **`hid_transport`**: lines cut into 64-byte zero-padded reports, NULs
+  dropped on receipt, two handles on the interface (a waiting read must
+  not hold the writes — the serial link's rule), and a refusal to open
+  when more than one device matches, since the real K75's vendor channel
+  has the same page and would receive the bot's text. Tested over an
+  in-memory firmware (handshake, ACKs, a reply spanning several reports).

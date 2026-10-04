@@ -11,7 +11,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let port = args.next().expect("port, e.g. COM6");
     let count: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(40);
-    let link = SerialLink::open(&port).expect("open the port");
+    let link = SerialLink::open_spec(&port).expect("open the port");
     assert!(link.wait_ready(Duration::from_secs(3)), "no PICO_READY");
     println!("ready (numbered: {})", link.numbered());
     let mut ms = Vec::new();

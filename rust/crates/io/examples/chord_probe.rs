@@ -89,7 +89,7 @@ fn main() {
     let port = args.next().expect("port, e.g. COM8");
     let reps: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(25);
     START.set(Instant::now()).ok();
-    let link = Arc::new(SerialLink::open(&port).expect("open the port"));
+    let link = Arc::new(SerialLink::open_spec(&port).expect("open the port"));
     assert!(link.wait_ready(Duration::from_secs(3)), "no PICO_READY");
 
     let cases: Vec<Case> = [

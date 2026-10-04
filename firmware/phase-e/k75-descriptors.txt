@@ -1,0 +1,55 @@
+K75 (0c45:8006) report descriptors, captured 2026-10-05 via usbipd-win
+(busid 2-2) into WSL: `usbhid-dump -d 0c45:8006 -e descriptor`.
+
+The composite is three HID interfaces, all interrupt-IN at 1 ms:
+
+  if0  keyboard  EP 0x81  16B pkt   65-byte report desc  (boot kbd + LEDs)
+  if1  media     EP 0x82  16B pkt  158-byte report desc  (see below)
+  if2  vendor    EP 0x83   8B pkt   30-byte report desc  (64B IN + OUT + feat)
+
+if0 is the stock boot-keyboard report descriptor (mod byte, reserved
+byte, 5 LEDs out, 6-key array) — TinyUSB's TUD_HID_REPORT_DESC_KEYBOARD()
+is the same layout.
+
+if1 is a multi-collection interface, report IDs:
+  ID 3  consumer control (16-bit usage)
+  ID 2  system control (3 on/off: sleep/wake/power)
+  ID 1  120-bit bitmap keyboard (NKRO-style, Fn layer)
+  ID 6  mouse (5 buttons, X/Y/wheel rel)
+  ID 5  vendor page 0xFFFF, 3 bytes IN
+
+if2 (the command channel the clone rides) is already a vendor-defined
+64-byte channel — usage page 0xFF13, no report ID:
+  usage 2       64-byte Input   (device->host, interrupt IN)
+  usage 3       64-byte Output  (host->device, SET_REPORT on EP0 —
+                                 there is no OUT pipe on the real device)
+  usage 0xFF00  64-byte Feature (GET/SET_REPORT on EP0)
+
+So the clone can keep all three report descriptors byte-identical and the
+3-pipe IN-only topology; host->device commands go over EP0 control, which
+is how the vendor's own config software talks.
+
+--- raw usbhid-dump output ---
+
+001:002:002:DESCRIPTOR         1791131288.513405
+ 06 13 FF 09 01 A1 01 15 00 26 FF 00 75 08 95 40
+ 09 02 81 02 09 03 91 02 0A 00 FF B1 02 C0
+
+001:002:001:DESCRIPTOR         1791131288.514257
+ 05 0C 09 01 A1 01 85 03 19 00 2A 3C 03 15 00 26
+ 3C 03 95 01 75 10 81 00 C0 05 01 09 80 A1 01 85
+ 02 05 01 19 81 29 83 15 00 25 01 95 03 75 01 81
+ 02 95 01 75 05 81 01 C0 05 01 09 06 A1 01 85 01
+ 05 07 15 00 25 01 19 00 29 77 95 78 75 01 81 02
+ C0 05 01 09 02 A1 01 85 06 09 01 A1 00 05 09 19
+ 01 29 03 15 00 25 01 95 05 75 01 81 02 95 01 75
+ 03 81 01 05 01 09 30 09 31 09 38 15 81 25 7F 75
+ 08 95 03 81 06 C0 C0 06 FF FF 09 01 A1 01 85 05
+ 09 01 15 00 26 FF 00 75 08 95 03 81 02 C0
+
+001:002:000:DESCRIPTOR         1791131288.515010
+ 05 01 09 06 A1 01 05 07 19 E0 29 E7 15 00 25 01
+ 75 01 95 08 81 02 95 01 75 08 81 01 95 05 75 01
+ 05 08 19 01 29 05 91 02 95 01 75 03 91 01 95 06
+ 75 08 15 00 26 FF 00 05 07 19 00 2A FF 00 81 00
+ C0
