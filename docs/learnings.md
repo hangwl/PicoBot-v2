@@ -337,10 +337,14 @@ landings per visit.
   hardened one is a single COM7. A pinned `serial_port` needs updating
   after the switch.
 
-- **Host process surface** (2026-10-04): the release profile's `debug = 1`
-  embeds symbols and source paths (`botbody.rs`, `lie_detector.rs`, …) —
-  right for profiling, wrong for a deployed copy, so a `dist` profile
-  strips them. Listeners were wildcard `[::]`; they now bind the
+- **Host process surface** (2026-10-04): the `dist` profile (`debug = 0`,
+  thin LTO) was meant to strip symbols and source paths, but on MSVC the
+  symbols already live in the `.pdb`, not the exe: both builds carry only
+  a relative `picobot.pdb` name and no function names. What stays in
+  either exe is ~40 relative source file names (`lie_detector.rs`,
+  `rune_arrows.rs`, …) from panic locations, which only nightly's
+  `-Zlocation-detail=none` removes; the exe is also ~1% bigger than
+  release. So `dist` is a cheap hygiene profile, not a scrub. Listeners were wildcard `[::]`; they now bind the
   addresses `bind` names. `auto` takes loopback plus every detected
   Tailscale/LAN address rather than Tailscale only, so existing phone
   URLs keep working; `tailscale` and `loopback` are the tighter choices.
