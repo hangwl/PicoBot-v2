@@ -78,6 +78,12 @@ Wire protocol (one line each way):
   within 3s even while the reader's keepalives flow. A down without a
   lease (dashboard keys) holds until its up; older firmware ignores the
   field.
+- Held-key query: `hid|held` is answered `ACK <seq> left|space|mouse:left`
+  (`|`-joined — `,` is a key name; `SerialLink::query` returns the data,
+  older firmware NACKs it). After a bot run or measurement the host asks,
+  and releases anything still held that no dashboard finger holds
+  (`Clients::held_keys`). Connection has "Check held keys" (`host|held`)
+  and "Release all keys" (`host|release_all`).
 - The reader only reads bytes already waiting: reader and writer share
   one synchronous Windows handle, and a read left blocking would hold
   every write behind it. Round trips are ~4 ms.

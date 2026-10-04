@@ -80,6 +80,7 @@ fn rig(fw: Firmware) -> Rig {
                 "NACK"
             };
             let reply = match seq {
+                Some(s) if fw.v2 && cmd == "hid|held" => format!("ACK {s} left|page up"),
                 Some(s) if fw.v2 => format!("{word} {s}"),
                 _ => word.to_owned(),
             };
@@ -133,6 +134,15 @@ fn a_late_reply_is_never_credited_to_the_next_command() {
             .send_acked("hid|key|down|mute", Duration::from_millis(400)),
         Err(SendError::Timeout)
     );
+}
+
+#[test]
+fn a_query_returns_the_data_its_ack_carries() {
+    let r = rig(Firmware { v2: true });
+    assert_eq!(r.link.query("hid|held", T).as_deref(), Ok("left|page up"));
+    assert_eq!(r.link.query("hid|key|down|a", T).as_deref(), Ok(""));
+    let old = rig(Firmware { v2: false });
+    assert_eq!(old.link.query("hid|held", T), Err(SendError::Rejected));
 }
 
 #[test]

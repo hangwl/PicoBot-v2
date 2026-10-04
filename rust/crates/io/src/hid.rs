@@ -26,6 +26,8 @@ type ClockFn = Box<dyn Fn() -> f64 + Send>;
 const UP_TRIES: usize = 3;
 /// Firmware-side sweep: releases every key and button the Pico holds.
 pub const RELEASE_ALL: &str = "hid|release_all";
+/// Asks what the Pico holds: `ACK <seq> left|space|mouse:left`.
+pub const HELD: &str = "hid|held";
 /// How long the firmware keeps a bot-held key without a renewal (s).
 pub const KEY_LEASE: f64 = 3.0;
 
