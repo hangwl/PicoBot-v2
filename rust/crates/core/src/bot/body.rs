@@ -387,6 +387,7 @@ pub trait Body {
                 .walk_stats()
                 .map_or(GraphOptions::default().walk_speed, |w| w.speed),
             allow_teleport: cfg.class_travel == ClassTravel::Teleport && cfg.teleport_key.is_some(),
+            carry_aim: cfg.nav_carry_aim,
             ..Default::default()
         }
     }

@@ -760,3 +760,36 @@ report descriptors). Saved in `firmware/phase-e/k75-descriptors.txt`.
   then sent harmless key-ups for all of them. Both answer builders now
   start with `out[0] = 0`. The in-memory firmware in the host's tests
   can't see this class of bug; only a C-side test or a run could.
+
+## Edge-landing misses on Castle's Gate 2 (2026-10-05)
+
+- **Data**: a missed leg now logs its polled path (`arc:`, ~20 Hz). 39
+  misses over a 9m39s run: 16 of 22 flashes, 9 of 18 double flashes, 9 of
+  23 up flashes.
+- **Flashes and double flashes between the same-row platforms** (middle
+  tier, 6–7px gaps, planned middle to middle) came down at the right x but
+  on the floor row: `100→52` took off at 98–102, first sample
+  `(62,66)` — already below the 56 row, inside the target's x span, and
+  then `(58,69)`. The carry (~43px) was met; the character crossed the
+  target's row over the gap, not over the platform, and fell under it.
+  Aiming the carry's end at the platform's middle puts the takeoff 20px+
+  from the gap, so about half the flight is spent before it reaches the
+  target. Not the skills: the measured air effects are ~2px and `e` is
+  cast in nearly every leg, missed or not.
+- **Edge aim** (`nav_carry_aim: edge`, opt-in): take off as near the
+  source's edge as the walk allows, backed off only to land 7px short of
+  the far end. On this map it moves the middle-tier takeoffs from ~96–104
+  to ~86–114 depending on direction, and lands near the far end rather
+  than the middle. It also changes the sweep plans on this geometry (two
+  patrol tests that encode them fail with it as default), so it ships off
+  until a live run says it helps: set `nav_carry_aim` to `edge`, run
+  again, and compare `Landed flash` / `Missed flash` counts.
+- **Up flashes (8 of the 9 misses)** came down at row 43–44 — the top
+  tier — while the plan was the 56 row: a ~25px rise where the model has
+  13. The leg counts as a miss, and two in a row ban the anchor
+  ("unreachable after retries"), though the bot is on a drawn platform
+  and the loop goes on. Not changed here; the rise estimate and the
+  overshoot bookkeeping need their own look.
+- **The top tier is drawn at y=42 but the character stands at y≈47 on
+  it** (an off-platform capture at (101, 47)): the drawing is about 5px
+  high there.

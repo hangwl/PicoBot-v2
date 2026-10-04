@@ -343,6 +343,18 @@ impl Navigator {
             );
         }
         if ok {
+            if matches!(leg.kind, MoveKind::Flash | MoveKind::DoubleFlash) {
+                let (s, p) = (start.unwrap_or((0.0, 0.0)), pos.unwrap_or((0.0, 0.0)));
+                let arc = arc_line(&body.state_ref().last_flight);
+                body.log(&format!(
+                    "Landed {}: planned {:.0} → {:.0}, took off at {:.0}, came down at {:.0}  arc: {arc}",
+                    leg.kind.as_str(),
+                    leg.x0,
+                    leg.x1,
+                    s.0,
+                    p.0
+                ));
+            }
             body.ground_window();
             LegStatus::Ok
         } else {
