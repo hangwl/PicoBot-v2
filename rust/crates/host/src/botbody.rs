@@ -148,7 +148,7 @@ impl HostBody {
             return self.lie_seen;
         };
         let found = find_lie_detector(&win);
-        if let (Some(at), false) = (found, self.lie_seen) {
+        if let (Some(at), false, true) = (found, self.lie_seen, self.cfg.evidence_captures) {
             let meta = self.with_context(serde_json::json!({ "title_at": [at.0, at.1] }));
             self.lie_evidence.save(&[("window", &win)], &meta);
         }
@@ -322,12 +322,17 @@ impl Body for HostBody {
                     "patrol_move": patrol.and_then(|p| p.move_kind.clone()),
                 }),
             );
-            self.lost_dot.save(&[("frame", img)], &meta);
+            if self.cfg.evidence_captures {
+                self.lost_dot.save(&[("frame", img)], &meta);
+            }
         }
         pos
     }
 
     fn off_platform(&mut self, pos: (f64, f64), info: serde_json::Value) {
+        if !self.cfg.evidence_captures {
+            return;
+        }
         let Some(img) = self.frame() else { return };
         let mut o = self.geometry_overlay();
         o.player = Some(pos);
@@ -355,6 +360,9 @@ impl Body for HostBody {
     }
 
     fn rune_event(&mut self, event: &str, info: serde_json::Value) {
+        if !self.cfg.evidence_captures {
+            return;
+        }
         let Some(img) = self.frame() else { return };
         let mut o = self.geometry_overlay();
         o.player = self.state.viz.player;

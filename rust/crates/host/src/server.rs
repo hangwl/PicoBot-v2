@@ -3,7 +3,7 @@
 //! free port when its own is busy; the page learns the live WS port from
 //! a `<meta>` the HTTP server fills in.
 
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6, TcpListener as StdListener};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6, TcpListener as StdListener};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -45,14 +45,99 @@ fn bind(port: u16) -> std::io::Result<(StdListener, bool)> {
     Ok((s.into(), dual))
 }
 
-/// The first free port of `base..base + attempts`.
-pub fn bind_from(base: u16, attempts: u16) -> std::io::Result<(StdListener, u16, bool)> {
+fn bind_one(addr: SocketAddr) -> std::io::Result<StdListener> {
+    let domain = if addr.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
+    let s = Socket::new(domain, Type::STREAM, None)?;
+    s.bind(&addr.into())?;
+    s.listen(128)?;
+    s.set_nonblocking(true)?;
+    Ok(s.into())
+}
+
+/// One listener per address on `port`. An IPv6 address that can't be
+/// bound (no IPv6 stack) is skipped; any other failure drops them all.
+fn bind_scoped(addrs: &[IpAddr], port: u16) -> std::io::Result<Vec<StdListener>> {
+    let mut out = Vec::new();
+    for ip in addrs {
+        match bind_one(SocketAddr::new(*ip, port)) {
+            Ok(l) => out.push(l),
+            Err(_) if ip.is_ipv6() => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(out)
+}
+
+/// This machine's IPv4 addresses (Tailscale flagged), Tailscale first.
+fn local_ipv4s() -> Vec<(bool, Ipv4Addr)> {
+    let mut found: Vec<(bool, Ipv4Addr)> = Vec::new();
+    // Connecting a UDP socket sends nothing; it only picks the route.
+    for probe in ["100.100.100.100:53", "8.8.8.8:53"] {
+        if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0") {
+            if s.connect(probe).is_ok() {
+                if let Ok(SocketAddr::V4(a)) = s.local_addr() {
+                    let ip = *a.ip();
+                    let tail = ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1]);
+                    if !ip.is_loopback() && !ip.is_unspecified() && !found.iter().any(|f| f.1 == ip)
+                    {
+                        found.push((tail, ip));
+                    }
+                }
+            }
+        }
+    }
+    found.sort_by_key(|f| !f.0);
+    found
+}
+
+/// The addresses to serve on for a `bind` setting; empty means every
+/// interface (`all`, or a setting that isn't understood).
+pub fn bind_addrs(mode: &str) -> Vec<IpAddr> {
+    let loopback = [
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(Ipv6Addr::LOCALHOST),
+    ];
+    let mode = mode.trim().to_lowercase();
+    let extra: Vec<IpAddr> = match mode.as_str() {
+        "all" | "" => return Vec::new(),
+        "loopback" => Vec::new(),
+        "auto" => local_ipv4s().into_iter().map(|f| f.1.into()).collect(),
+        "tailscale" => local_ipv4s()
+            .into_iter()
+            .filter(|f| f.0)
+            .map(|f| f.1.into())
+            .collect(),
+        other => match other.parse::<Ipv4Addr>() {
+            Ok(ip) => vec![ip.into()],
+            Err(_) => return Vec::new(),
+        },
+    };
+    loopback.into_iter().chain(extra).collect()
+}
+
+/// The first free port of `base..base + attempts`, bound on `addrs`
+/// (every interface when empty). The flag says whether the wildcard
+/// listener also takes IPv6.
+pub fn bind_from(
+    base: u16,
+    attempts: u16,
+    addrs: &[IpAddr],
+) -> std::io::Result<(Vec<StdListener>, u16, bool)> {
     let mut last = None;
     for off in 0..attempts {
-        match bind(base + off) {
-            Ok((l, dual)) => {
-                let port = l.local_addr()?.port();
-                return Ok((l, port, dual));
+        let tried = if addrs.is_empty() {
+            bind(base + off).map(|(l, dual)| (vec![l], dual))
+        } else {
+            bind_scoped(addrs, base + off).map(|ls| (ls, true))
+        };
+        match tried {
+            Ok((ls, dual)) => {
+                let port = ls[0].local_addr()?.port();
+                return Ok((ls, port, dual));
             }
             Err(e) => last = Some(e),
         }
@@ -185,7 +270,7 @@ async fn serve(
     uri: Uri,
 ) -> Response {
     let path = uri.path().to_owned();
-    let resp = respond(&http, &path);
+    let resp = respond(&http, &path, addr.ip().to_canonical().is_loopback());
     let msg = format!(
         "http: {} GET {path} → {}",
         addr.ip().to_canonical(),
@@ -197,9 +282,17 @@ async fn serve(
 
 /// `/health`, a built file, or `index.html` with the live WS port filled
 /// in (also the SPA fallback for unknown routes).
-fn respond(http: &Http, path: &str) -> Response {
+fn respond(http: &Http, path: &str, local: bool) -> Response {
     let ws_port = http.host.ws_port();
     if path == "/health" {
+        if !local {
+            return reply(
+                StatusCode::OK,
+                "application/json",
+                br#"{"ok": true}"#.to_vec(),
+                true,
+            );
+        }
         let dist = http.static_dir.join("index.html").exists();
         let t = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -254,29 +347,12 @@ fn respond(http: &Http, path: &str) -> Response {
     }
 }
 
-/// This machine's IPv4 addresses, Tailscale (100.64/10) first.
-pub fn local_urls(port: u16) -> Vec<String> {
-    let mut found: Vec<(bool, String)> = Vec::new();
-    // Connecting a UDP socket sends nothing; it only picks the route.
-    for probe in ["100.100.100.100:53", "8.8.8.8:53"] {
-        if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0") {
-            if s.connect(probe).is_ok() {
-                if let Ok(std::net::SocketAddr::V4(a)) = s.local_addr() {
-                    let ip = *a.ip();
-                    let tail = ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1]);
-                    if !ip.is_loopback()
-                        && !ip.is_unspecified()
-                        && !found.iter().any(|f| f.1 == ip.to_string())
-                    {
-                        found.push((tail, ip.to_string()));
-                    }
-                }
-            }
-        }
-    }
-    found.sort_by_key(|f| !f.0);
-    let urls: Vec<String> = found
+/// Dashboard URLs for this machine's addresses, Tailscale (100.64/10)
+/// first; only those in `bound` when the listeners are scoped.
+pub fn local_urls(port: u16, bound: &[IpAddr]) -> Vec<String> {
+    let urls: Vec<String> = local_ipv4s()
         .into_iter()
+        .filter(|(_, ip)| bound.is_empty() || bound.contains(&IpAddr::V4(*ip)))
         .map(|(tail, ip)| {
             format!(
                 "http://{ip}:{port} ({})",
@@ -288,5 +364,34 @@ pub fn local_urls(port: u16) -> Vec<String> {
         vec![format!("http://localhost:{port}")]
     } else {
         urls
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bind_modes_pick_addresses() {
+        assert!(bind_addrs("all").is_empty());
+        let loop_only = bind_addrs("loopback");
+        assert!(loop_only.iter().all(|a| a.is_loopback()));
+        assert!(loop_only.contains(&IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        let one = bind_addrs("192.0.2.7");
+        assert!(one.contains(&"192.0.2.7".parse::<IpAddr>().unwrap()));
+        assert!(one.iter().filter(|a| !a.is_loopback()).count() == 1);
+        assert!(bind_addrs("nonsense").is_empty());
+    }
+
+    #[test]
+    fn a_scoped_bind_stays_on_loopback_and_skips_busy_ports() {
+        let loop_only = bind_addrs("loopback");
+        let (first, port, _) = bind_from(38_500, 5, &loop_only).unwrap();
+        assert!(first
+            .iter()
+            .all(|l| l.local_addr().unwrap().ip().is_loopback()));
+        // The same base again takes the next port.
+        let (_second, next, _) = bind_from(port, 5, &loop_only).unwrap();
+        assert_ne!(port, next);
     }
 }

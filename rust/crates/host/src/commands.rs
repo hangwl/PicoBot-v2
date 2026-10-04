@@ -427,6 +427,7 @@ impl Host {
             "record_rune_solves",
             "pause_on_lie_detector",
             "auto_focus",
+            "evidence_captures",
         ];
         let mut edits: Vec<(String, Value)> = Vec::new();
         for (k, v) in &want {

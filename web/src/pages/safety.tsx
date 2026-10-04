@@ -14,6 +14,8 @@ const TOGGLES: [key: string, on: (s: AppState) => boolean, label: string, hint: 
     "Its window shows in the game (checked every second). The bot stops and alerts you — the mini-game is yours to solve; farming resumes once it closes."],
   ["auto_focus", (s) => s.autoFocus, "Focus the game on start",
     "Bring the game window to the front when the bot starts. Off: the bot waits until you focus it yourself."],
+  ["evidence_captures", (s) => s.evidenceCaptures, "Save evidence captures",
+    "Game screenshots written to debug/frames/ when the dot is lost, the player is off every platform, a rune shows or a lie detector appears."],
 ];
 
 export function SafetyPage({ s }: { s: AppState }) {

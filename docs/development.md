@@ -8,6 +8,7 @@ Rust (<https://rustup.rs>) and Node.js. Development happens on Windows
 ```powershell
 cd web; npm install; npm run build                          # build the dashboard (web/dist)
 cd rust; cargo build --release                              # build the host
+cd rust; cargo build --profile dist -p picobot-host         # deployment build: no symbols or source paths (target/dist)
 cd rust; cargo run --release -p picobot-host -- --root ..   # run it (or picobot.bat in the root)
 cd rust; cargo test                                         # the suite (~220 tests, a few seconds)
 cd rust; cargo clippy --all-targets; cargo fmt              # lints and formatting

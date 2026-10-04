@@ -337,6 +337,17 @@ landings per visit.
   hardened one is a single COM7. A pinned `serial_port` needs updating
   after the switch.
 
+- **Host process surface** (2026-10-04): the release profile's `debug = 1`
+  embeds symbols and source paths (`botbody.rs`, `lie_detector.rs`, …) —
+  right for profiling, wrong for a deployed copy, so a `dist` profile
+  strips them. Listeners were wildcard `[::]`; they now bind the
+  addresses `bind` names. `auto` takes loopback plus every detected
+  Tailscale/LAN address rather than Tailscale only, so existing phone
+  URLs keep working; `tailscale` and `loopback` are the tighter choices.
+  `/health` gave its port and build state to anyone; only loopback sees
+  them now. Evidence screenshots in `debug/frames/` are forensic
+  residue on a deployed box, hence `evidence_captures`.
+
 ## A walk that "reached" its target without arriving (2026-10-04)
 
 - A navigator walk leg aimed at `x.round()` with the tolerance truncated,

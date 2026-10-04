@@ -145,6 +145,7 @@ fn main() -> ExitCode {
         eprintln!("ws_tls is set, but the Rust host serves plain ws:// for now");
     }
     let (ws_base, http_base) = (config.ws_port as u16, config.http_port as u16);
+    let bind_mode = config.bind.clone();
     let window = config.default_target_window.clone();
     let host = host::Host::new(root.clone(), config, window);
     host.bus.subscribe(|e| {
@@ -175,9 +176,11 @@ fn main() -> ExitCode {
         }
     };
     let served = rt.block_on(async {
-        let (ws, ws_port, _) = server::bind_from(ws_base, 10).map_err(|e| format!("ws: {e}"))?;
+        let scope = server::bind_addrs(&bind_mode);
+        let (ws, ws_port, _) =
+            server::bind_from(ws_base, 10, &scope).map_err(|e| format!("ws: {e}"))?;
         let (http, http_port, dual) =
-            server::bind_from(http_base, 5).map_err(|e| format!("http: {e}"))?;
+            server::bind_from(http_base, 5, &scope).map_err(|e| format!("http: {e}"))?;
         host.set_ws_port(ws_port);
         host.set_http_port(http_port);
         if ws_port != ws_base {
@@ -194,8 +197,12 @@ fn main() -> ExitCode {
                 "warn",
             );
         }
-        let ws = tokio::net::TcpListener::from_std(ws).map_err(|e| e.to_string())?;
-        let http = tokio::net::TcpListener::from_std(http).map_err(|e| e.to_string())?;
+        let listeners = |ls: Vec<std::net::TcpListener>| {
+            ls.into_iter()
+                .map(|l| tokio::net::TcpListener::from_std(l).map_err(|e| e.to_string()))
+                .collect::<Result<Vec<_>, _>>()
+        };
+        let (ws, http) = (listeners(ws)?, listeners(http)?);
         let ws_app =
             server::ws_router(host.clone()).into_make_service_with_connect_info::<SocketAddr>();
         let static_dir = root.join("web").join("dist");
@@ -204,12 +211,21 @@ fn main() -> ExitCode {
             static_dir,
         })
         .into_make_service_with_connect_info::<SocketAddr>();
-        tokio::spawn(async move { axum::serve(ws, ws_app).await });
-        tokio::spawn(async move { axum::serve(http, http_app).await });
+        for l in ws {
+            let app = ws_app.clone();
+            tokio::spawn(async move { axum::serve(l, app).await });
+        }
+        for l in http {
+            let app = http_app.clone();
+            tokio::spawn(async move { axum::serve(l, app).await });
+        }
         host.bus.emit("status", &format!("ws port: {ws_port}"));
         host.bus.emit(
             "status",
-            &format!("dashboard: {}", server::local_urls(http_port).join(", ")),
+            &format!(
+                "dashboard: {}",
+                server::local_urls(http_port, &scope).join(", ")
+            ),
         );
         println!(
             "picobot (rust) running — ws :{ws_port}, http :{http_port}{}. Ctrl+C to quit.",

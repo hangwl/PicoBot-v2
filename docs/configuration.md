@@ -178,6 +178,24 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   lie detector's window shows (see bot-behavior.md, Safety).
 - `auto_focus` (default true) — bring the game to the front when the
   bot starts; off waits for you to focus it (the bot pauses until then).
+- `evidence_captures` (default true) — save game screenshots to
+  `debug/frames/` (dot lost, off platform, rune, lie detector). Turn it
+  off on a deployed machine; `record_rune_solves` and the dashboard's
+  explicit snapshot are separate.
+
+Top-level (not in `"bot"`):
+
+- `bind` (default `"auto"`) — where the dashboard listens: `auto`
+  (loopback plus this machine's Tailscale and LAN addresses),
+  `loopback`, `tailscale` (loopback plus the Tailscale address), `all`
+  (every interface), or one IPv4 address (plus loopback). The addresses
+  are read at start-up; restart after the network changes.
+  `/health` returns the full status JSON to loopback callers and only
+  `{"ok": true}` to others.
+- `serial_port` — `auto` probes every COM port (open, DTR toggle,
+  handshake); once the Pico's port is known, pin it (a number in
+  `config.json`, e.g. `COM7`) so a run doesn't. Don't pass `--window`
+  from launchers: the title already lives in `default_target_window`.
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest
   `debug_capture_max_events` folders. See [development.md](development.md#debug-frame-captures).
