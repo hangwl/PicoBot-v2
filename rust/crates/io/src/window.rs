@@ -130,11 +130,16 @@ impl GameWindow {
         ))
     }
 
-    /// Whether the game has the keyboard focus (compared by title, so a
-    /// restarted game still counts).
+    /// Whether the game has the keyboard focus: the cached handle first,
+    /// else by title (a restarted game still counts).
     pub fn is_active(&self) -> bool {
         let fg = unsafe { GetForegroundWindow() };
-        !fg.0.is_null() && title_of(fg).trim() == self.title.trim()
+        if fg.0.is_null() {
+            return false;
+        }
+        fg.0 as isize == self.hwnd
+            || (!unsafe { IsWindow(Some(self.hwnd())) }.as_bool()
+                && title_of(fg).trim() == self.title.trim())
     }
 
     /// Bring the game to the front (best effort; `is_active` is the truth).
