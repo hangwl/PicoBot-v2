@@ -22,5 +22,6 @@ windows = { version = "0.62", features = [
 ] }
 
 [dev-dependencies]
+hidapi = "2"
 serde_json.workspace = true
 image = { version = "0.25.10", default-features = false, features = ["png"] }
