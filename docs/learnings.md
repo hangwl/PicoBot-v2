@@ -378,6 +378,26 @@ landings per visit.
   fixture the Python host wrote. A new top-level key is written only when
   it isn't the default.
 
+## Input capture is blocked while the game is focused (2026-10-04)
+
+- **No human baseline from inside the game**: `key_timing` (first a
+  `WH_KEYBOARD_LL` hook, then Raw Input with `RIDEV_INPUTSINK`) saw 0 key
+  events whenever the game window had the focus — even keys pressed in
+  that window while the recorder watched another title — and worked
+  normally (129 events, the real keyboard identified) with Discord in
+  front and the game still running. The game isn't elevated, so UIPI
+  isn't the cause: its protection withholds keyboard input from other
+  processes while it is in front. An independent hook written in C# saw
+  nothing either.
+- **What it means**: a person's in-game timing can't be recorded from the
+  PC, and the game's protection watches the input stack while it has the
+  focus — worth weighing when deciding how much to invest in the Pico's
+  USB identity. The recorder still measures any other window, and the
+  Pico and a real keyboard show up as separate devices.
+- **A rough human reference** (typing in Discord, not play): holds median
+  120ms (p5–p95 54–267); different-key gaps median 386ms; 2 of 43 under
+  10ms (4.7%).
+
 ## A walk that "reached" its target without arriving (2026-10-04)
 
 - A navigator walk leg aimed at `x.round()` with the tolerance truncated,
