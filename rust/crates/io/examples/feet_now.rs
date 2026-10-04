@@ -1,11 +1,12 @@
 //! Where the player's feet read now, against a map's drawn platform rows.
 //!
-//!     cargo run --release -p picobot-io --example feet_now -- <maps/file.json> [samples]
+//!     cargo run --release -p picobot-io --example feet_now -- <maps/file.json> [samples] [save.png]
 //!
 //! Captures the live minimap, reads the dot with the real detector and
 //! prints each sample's feet with the nearest drawn row (residual = feet y
 //! minus the row: positive means the feet sit below the line). Stand still
-//! on one platform while it runs.
+//! on one platform while it runs. A third argument saves the last minimap
+//! crop as a PNG.
 
 use std::path::Path;
 use std::time::Duration;
@@ -19,6 +20,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let map_path = args.next().expect("a maps/*.json file");
     let samples: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(10);
+    let save = args.next();
     let map: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&map_path).expect("read the map")).unwrap();
     let plats: Vec<[f64; 4]> = map["platforms"]
@@ -53,6 +55,16 @@ fn main() {
         let img = grab
             .capture(l + reg.0, t + reg.1, reg.2, reg.3)
             .expect("capture the minimap");
+        if let Some(path) = &save {
+            let mut rgb = image::RgbImage::new(img.width as u32, img.height as u32);
+            for y in 0..img.height {
+                for x in 0..img.width {
+                    let b = img.bgr(x, y);
+                    rgb.put_pixel(x as u32, y as u32, image::Rgb([b[2], b[1], b[0]]));
+                }
+            }
+            rgb.save(path).expect("save the crop");
+        }
         let (w, h) = (reg.2 as f64, reg.3 as f64);
         match mm.player_pos(&img, &mut tracker) {
             Some((x, y)) => {

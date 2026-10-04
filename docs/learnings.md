@@ -790,9 +790,16 @@ report descriptors). Saved in `firmware/phase-e/k75-descriptors.txt`.
   ("unreachable after retries"), though the bot is on a drawn platform
   and the loop goes on. Not changed here; the rise estimate and the
   overshoot bookkeeping need their own look.
-- **The top tier is drawn at y=42 but the character stands at y≈47 on
-  it** (an off-platform capture at (101, 47)): the drawing is about 5px
-  high there.
+- **Platform rows vs the minimap art** (checked 2026-10-05; this note
+  first said the top tier was drawn 5px high, from an off-platform capture
+  whose position and frame were taken at different moments, and that was
+  wrong): standing still on the top tier the detector reads feet (56, 42)
+  — eight identical samples, residual +0.0 against the drawn row 42 — and
+  the saved frame shows why the lines look high: the minimap draws the
+  player marker resting on top of the platform art, so its feet sit 4–6px
+  above the art's bars (bars ~47, 60 and 75 for rows 42, 56, 69). Lines
+  aligned to the feet are right; the art is not the reference. `feet_now`
+  measures this live (stand still, compare feet with the drawn rows).
 
 ## Arrows shaded through red (2026-10-05)
 
