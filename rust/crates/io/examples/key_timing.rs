@@ -35,6 +35,9 @@ struct Rec {
     window: GameWindow,
     events: Vec<Ev>,
     held: HashMap<u32, f64>,
+    /// Key events the hook saw anywhere, and how many were elsewhere.
+    seen: u32,
+    elsewhere: u32,
 }
 
 static REC: OnceLock<Mutex<Rec>> = OnceLock::new();
@@ -48,7 +51,10 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
         let rec = REC.get().filter(|_| down || up);
         if let Some(m) = rec {
             let mut r = m.lock().unwrap();
-            if r.window.is_active() {
+            r.seen += 1;
+            if !r.window.is_active() {
+                r.elsewhere += 1;
+            } else {
                 let t = r.start.elapsed().as_secs_f64();
                 if down {
                     // Auto-repeat is the OS's, not the typist's.
@@ -146,6 +152,8 @@ fn main() {
         window,
         events: Vec::new(),
         held: HashMap::new(),
+        seen: 0,
+        elsewhere: 0,
     }))
     .ok();
     let thread = unsafe { GetCurrentThreadId() };
@@ -162,7 +170,11 @@ fn main() {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
         let _ = UnhookWindowsHookEx(h);
     }
-    let events = REC.get().unwrap().lock().unwrap().events.clone();
+    let (events, seen, elsewhere) = {
+        let r = REC.get().unwrap().lock().unwrap();
+        (r.events.clone(), r.seen, r.elsewhere)
+    };
+    println!("hook saw {seen} key events; {elsewhere} were while another window had the focus");
     summarize(&events);
     if let Some(path) = out {
         let mut csv = String::from("t,vk,event\n");
