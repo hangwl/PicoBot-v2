@@ -34,13 +34,13 @@ and follows the same view.
 | `class|use|<name>` | apply a profile live (stops the bot and any move measurement first); re-sends `class`, `skills` and `config` |
 | `class|add|<name>\|{spec}` | create a profile (travel, air_attacks, double_flash, teleport_key, teleport_cooldown, skills) and apply it |
 | `class|caps|{json}` | edit the active profile's abilities (`double_flash`, `air_attacks`: bool); re-sends `class` and `config` |
-| `patrol|policy|<weighted\|greedy>` | set the loop-ordering policy |
+| `patrol|policy|<weighted\|greedy\|zigzag>` | set the loop-ordering policy |
 | `patrol|mode|sweep\|anchors` / `patrol|reach|<px>` | sweep each anchor's platform or pass through the points, and the attack reach a sweep stops short by (0–200 minimap px); saved to `config.json`, then re-sends `config` |
 | `patrol|rope_penalty|<s>` / `patrol|walk_factor|<x>` | planner costs: seconds added to every rope climb (0–600) and the multiplier on walking legs (0.1–10); saved to `config.json`, then re-sends `config` |
 | `patrol|temp|<v>` | set the weighted-roulette temperature |
 | `skills|set\|{json}` (`name, key, kind, cooldown`, attacks also `stance` (ground/air/any) and `weight`, summons also `charges, duration`) / `skills|del\|<name>` / `skills|list` | edit the active skill book (profile kit when a profile is active; the first edit gives an inheriting profile its own kit) |
 | `host|snapshot` | save the whole game window, lossless, to `debug/frames/<stamp>_snapshot/` (`window.png`, `meta.json`: window, size, map, bot state, hazard); answered by a `notify` (the folder) or an `error` |
-| `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`, `record_rune_solves`: bool), `rune_action` (`solve`\|`approach`\|`pause`), `rune_key` (a key name), `allowed_other_players` (≥ 0), `other_player_min_px` (≥ 1) and `heartbeat_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
+| `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`, `record_rune_solves`, `pause_on_lie_detector`: bool), `rune_action` (`solve`\|`approach`\|`pause`), `rune_key` (a key name), `allowed_other_players` (≥ 0), `other_player_min_px` (≥ 1) and `heartbeat_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
 | `attacks|set|{json}` | `move_attack_chance`, `ground_attack_chance`, `weave_double_chance` (0–1) and `target_attacks_per_min` (≥ 0); saved to `config.json`, then re-sends `config` |
 | `notify|test` | send one Telegram test alert; the host answers with a `notify` (sent) or `error` event |
 | `movekeys|set|{json}` | movement keybinds (jump/rope-lift/flash) + nav radius |
@@ -103,7 +103,10 @@ charges: {skill: [have, max]}}`) and `patrol` (`{target, leg, legs, move,
 misses, next: [anchor], arrived, halted}` — the loop's current target,
 the leg being run, misses toward it, the next anchors, anchors reached
 this run, and whether it's halted with no plan) in every view,
-`player`, `others` (other-player markers on the minimap), `session` (the run's `{up, visits, misses, skips, pauses, paused, apm, moves: {kind: {ok, failed}}}` in seconds and counts; only while the bot runs), and map identity (`map`, `map_via`,
+`player`, `others` (other-player markers on the minimap), `heat` and
+`heat_cell` (Panel view, while the bot runs: attack heat as a flat
+`[x, y, weight%, ...]` of cell corners in panel px, `heat_cell` px
+square), `session` (the run's `{up, visits, misses, skips, pauses, paused, apm, moves: {kind: {ok, failed}}}` in seconds and counts; only while the bot runs), and map identity (`map`, `map_via`,
 `map_conf`, `map_title`, `layout`, `no_rotation`). Overlays (platforms,
 ropes, anchors, routes) are drawn host-side into the JPEG: in the Panel
 view shifted by `ox`/`oy`, in the Window view shifted to where the

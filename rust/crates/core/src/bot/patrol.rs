@@ -264,8 +264,10 @@ impl Patrol {
         match outcome {
             Outcome::Aborted => self.resplice = true,
             Outcome::Cooldown => {
-                // Rope lift or teleport started cooling: re-route without
-                // it — never wait, never count a failure.
+                // Rope lift or teleport is cooling: re-route without it if
+                // there's another way, else through it once ready — never
+                // a failure. A beat to notice before going on.
+                body.sleep(human_reaction());
                 self.resplice = true;
             }
             Outcome::Failed => {
@@ -557,17 +559,11 @@ impl Patrol {
             exclude.push(MoveKind::Teleport);
         }
         let sweep = self.plan.get(self.seg).and_then(|s| s.sweep);
-        let legs = match sweep {
-            // On the swept platform already: on to the exit.
-            Some((_, exit)) if graph.locate(pos.0, pos.1) == graph.locate(exit.0, exit.1) => {
-                graph.route(pos, exit, &exclude)
-            }
-            Some((entry, exit)) => graph.route(pos, entry, &exclude).and_then(|mut l| {
-                l.extend(graph.route(entry, exit, &exclude)?);
-                Some(l)
-            }),
-            None => graph.route(pos, body.anchors_px()[idx], &exclude),
-        };
+        // Avoiding what's cooling, else through it (it's ready again in
+        // seconds): a cooldown never makes the anchor unreachable.
+        let legs = self
+            .route_to(graph, body, pos, idx, sweep, &exclude)
+            .or_else(|| self.route_to(graph, body, pos, idx, sweep, &[]));
         let Some(legs) = legs else {
             return false;
         };
@@ -580,6 +576,29 @@ impl Patrol {
         self.leg_i = 0;
         self.publish(body);
         true
+    }
+
+    /// Legs from `pos` to anchor `idx` — through its sweep, if it has one.
+    fn route_to<B: Body + ?Sized>(
+        &self,
+        graph: &NavGraph,
+        body: &mut B,
+        pos: (f64, f64),
+        idx: usize,
+        sweep: Option<crate::planner::Way>,
+        exclude: &[MoveKind],
+    ) -> Option<Vec<Leg>> {
+        match sweep {
+            // On the swept platform already: on to the exit.
+            Some((_, exit)) if graph.locate(pos.0, pos.1) == graph.locate(exit.0, exit.1) => {
+                Some(vec![graph.walk_leg(pos, exit)])
+            }
+            Some((entry, exit)) => graph.route(pos, entry, exclude).map(|mut l| {
+                l.push(graph.walk_leg(entry, exit));
+                l
+            }),
+            None => graph.route(pos, body.anchors_px()[idx], exclude),
+        }
     }
 
     fn arrive<B: Body + ?Sized>(&mut self, body: &mut B, idx: usize) {

@@ -106,6 +106,8 @@ pub struct Viz {
     /// Summon charges: (skill, have, max).
     pub summon_charges: Vec<(String, u32, u32)>,
     pub patrol: Option<PatrolStatus>,
+    /// Attack heat cells (`AttackHeat::snapshot`), refreshed by the host.
+    pub heat: Vec<(f64, f64, f64)>,
 }
 
 /// Where the patrol loop stands (the dashboard's Home status).
@@ -177,6 +179,8 @@ pub struct BotState {
     pub air_slack: Option<(f64, f64)>,
     /// When each attack was cast, over the last `RATE_WINDOW_S`.
     pub attack_log: std::collections::VecDeque<f64>,
+    /// Where attacks were cast on this map.
+    pub heat: crate::heat::AttackHeat,
     pub anchor_idx: usize,
     pub travel_target: Option<usize>,
     /// Anchor index → monotonic time its ban lapses.
@@ -214,6 +218,7 @@ impl BotState {
             travel_attack_at: f64::NEG_INFINITY,
             air_slack: None,
             attack_log: Default::default(),
+            heat: Default::default(),
             anchor_idx: 0,
             travel_target: None,
             bans: Default::default(),
@@ -416,7 +421,11 @@ pub trait Body {
             let now = self.now();
             self.state().skills.mark_used(&skill.name, now);
             if skill.kind.is_attack() {
-                self.state().attack_log.push_back(now);
+                let st = self.state();
+                st.attack_log.push_back(now);
+                if let Some(p) = st.viz.player {
+                    st.heat.add(p, now);
+                }
             }
             self.log(&format!("Skill: {}", skill.name));
             return true;

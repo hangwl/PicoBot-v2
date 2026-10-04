@@ -36,6 +36,9 @@ export interface FrameMeta {
   h: number;
   ox?: number;
   oy?: number;
+  /** Attack heat while the bot runs: flat [x, y, weight%, ...] cell corners. */
+  heat?: number[];
+  heat_cell?: number;
   player?: [number, number];
   hazard?: string;
   state?: string;
@@ -222,6 +225,7 @@ export interface AppState {
   session: SessionStats | null;
   stopPlayers: boolean;
   stopRune: boolean;
+  stopLie: boolean;
   runeAction: string;
   patrolMode: string;
   sweepReach: number;
@@ -242,6 +246,8 @@ export interface AppState {
   logFilter: LogFilter;
   viewMode: ViewMode;
   canvasMode: CanvasMode;
+  /** Draw the attack heatmap over the panel view. */
+  showHeat: boolean;
   /** Hash route: home | control | setup | setup/<page> | log. */
   route: string;
 }
@@ -296,6 +302,7 @@ const initial: AppState = {
   session: null,
   stopPlayers: true,
   stopRune: true,
+  stopLie: true,
   runeAction: "solve",
   patrolMode: "sweep",
   sweepReach: 12,
@@ -316,6 +323,7 @@ const initial: AppState = {
   logFilter: "info",
   viewMode: "minimap",
   canvasMode: "none",
+  showHeat: false,
   route: readRoute(),
 };
 
@@ -638,6 +646,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         fps: (c.view_fps as number) ?? state.fps,
         stopPlayers: c.stop_when_players_appear !== false,
         stopRune: c.stop_when_rune_appears !== false,
+        stopLie: c.pause_on_lie_detector !== false,
         runeAction: (c.rune_action as string) ?? "solve",
         patrolMode: (c.patrol_mode as string) ?? "sweep",
         sweepReach: (c.sweep_reach_px as number) ?? 12,

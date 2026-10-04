@@ -263,6 +263,87 @@ A whole-codebase pass before the Rust port found, among others:
   so standing up there reads as off every platform, and up flashes
   planned onto the middle tier land on the real top tier instead.
 
+## Live runs on Castle's Gate 2 (2026-10-03)
+
+Each run was 3–5 minutes with the real character; misses are missed
+landings per visit.
+
+| Run | Change | Visits | Misses |
+|---|---|---|---|
+| 1 | sweeps as merged | 17 | 45% |
+| 2 | settle before up flash/down jump, full-carry gap moves, sweep crossing as one walk | 30 | 25% |
+| 3 | carried moves aimed at the landing platform's middle, "caught" check, cooldown fallback in the splice | 36 | 27% |
+| 4 | rise learned between platform rows | 39 | 28% |
+| 5 | median carry, zig-zag order | 22 | 33% |
+
+- **Gap moves were planned as variable-length**: the graph linked a flash
+  from the platform's edge to anywhere within reach, but a flash always
+  flies its full carry — planned for 15px, it flew 37 and overshot.
+  Carried moves now take off so they come down where their full carry
+  takes them, aimed at the middle of the landing platform (the carry
+  varies by several px either way), and aren't linked where a platform
+  in between would catch them first.
+- **The sweep crossing detoured**: routed through the graph, the walk
+  across a platform was priced at the learned walk speed (~12px/s) and
+  lost to hops along another tier. It's one walk leg now.
+- **Up flash rise inflated 13 → 19**: a pause at the top of the arc read
+  as the landing, so the rise learned was the apex. Rises are measured
+  between platform rows now (dot rows only off the drawn platforms), and
+  up flashes and down jumps settle 0.5s first so they don't take off
+  moving. Rope lift misses dropped from 5/9 to 2/19.
+- **Flash carry ratcheted 37 → 43 → 51**: the envelope grew to every
+  longest success (a flight carried by walking momentum, or drifting
+  down a tier), and with full-carry planning a too-long carry puts every
+  takeoff too far back — flash missed 7/13 in run 4. A sideways move's dx
+  is now the median of its last 9 carries: in run 5 the flash samples
+  read 36–44 with a median of 37 and flash missed 1/6. Double flash
+  carries spread 44–53 (5/17 missed); misses are now logged with the
+  planned leg, the takeoff read and where it came down.
+- **Zig-zag order**: with sweeps, greedy order still hopped between tiers
+  when a far platform on another tier happened to be cheaper. `zigzag`
+  finishes the nearest row first; ties between a sweep's ends go to the
+  nearer one, so a row keeps its direction and the loop snakes.
+- **The rotation's coverage was invisible**: per-anchor stats said how
+  often an anchor was reached, not which stretches were attacked. Attacks
+  now feed a decaying heat grid shown over the Panel view.
+
+## A walk that "reached" its target without arriving (2026-10-04)
+
+- A navigator walk leg aimed at `x.round()` with the tolerance truncated,
+  while the navigator judged arrival (and whether the walk still needed
+  doing) against the unrounded `x`. Goals are anchors at fractional px,
+  so the walk could stop within tolerance of the rounded target but just
+  outside it of the real one — 96 for 100.4 with a 4px tolerance. Every
+  step then re-walked a zero-length leg ("Navigating to … / Navigation
+  target reached") without moving: TRAVEL burned its 40 steps and banned
+  the anchor for 45s, and a rune detour could spin until its 90s timeout.
+  The simulator's walk teleported onto the target, so no test saw it; it
+  now has `edge_stop` (stop at the first whole pixel within tolerance,
+  like the real primitive). The walk aims at the exact `x` with the same
+  tolerance arrival uses.
+
+## Rune detours and the lie detector (2026-10-03)
+
+- **"No route" while rope lift cooled**: the navigator left cooling moves
+  out of every route, so a rune on Castle's Gate 2's top tier — which
+  only rope lift reaches from below once up flashes are learned at 13px
+  (the tier is 14 up) — read as unreachable whenever the lift had just
+  been used, and the detour paused for good. A cooling move is now routed
+  through and waited out at its takeoff.
+- **One failure paused until the rune vanished**: a missed landing or two
+  on the way ended the detour for good. Failures on the way now go back
+  to farming and retry (~15s, 3 tries); only an undrawable rune (nothing
+  under it, no room beside it) pauses at once.
+- **An unread puzzle left no trace**: the solver gave up without saving
+  what it saw, so whether the reader or the activation failed was
+  unknowable. An unread read now saves the window (`unread` rune event).
+- **Lie detector**: three Save-window captures showed its countdown
+  window at the same spot, titled in a yellow-green (G 211-254, R
+  183-221, B < 25) no other UI on those screens uses. The title's 80x9
+  pixel pattern is matched against text-coloured pixels anywhere in the
+  window: it hits all three captures and none of the other saved windows
+  (rune solves, snapshots, the MULTIKILL banner, chat).
+
 ## Jumps over rope lift (2026-10-03)
 
 - Rope lift was the cheapest rise (cost 0.5 against an up flash's 1.0),
@@ -296,6 +377,50 @@ A whole-codebase pass before the Rust port found, among others:
   the first arrow was pressed (the strip changes then — read all four
   first, then answer), and every attempt correctly from ~0.1-0.2s after
   the interact press, JPEG frames included.
+- **Not every puzzle is green to red** (2026-10-03): two bot solves read
+  "found 0 clear arrows" and "found 2" with the puzzle plainly up — its
+  arrows were shaded magenta → blue → cyan and blue → cyan → green, hues
+  the reader didn't accept. What all the shadings share is the direction:
+  hue falls from tail to tip (magenta 300° … orange 30°). The reader now
+  takes hues 12-330° and splits each blob at its own hue span (lowest 30%
+  = tip, highest 30% = tail, span ≥ 30°). Accepting cyan let a cyan glow
+  in the scenery swallow an arrow, so past 160° only near-pure pixels
+  count (saturation ≥ 0.85, value ≥ 0.8); and a green glow level with the
+  strip won the "tightest row" once its own direction became readable, so
+  rows are scored on spread plus 25 × ln(size ratio). All 26 saved
+  attempt windows read as before (the one disagreement was the new
+  reader's, fixed by the size term), and both unread puzzles read.
+- **A misread over busy scenery** (2026-10-03, strip k): read left,
+  right, left, down for right, left, up, down — the rune failed once and
+  read right on the retry. The "up" arrow sat over a saturated green bush
+  and joined it into a 45x35 blob with no clear direction; the first
+  arrow was half hidden behind a monster (~100 px, under the 150 minimum);
+  and a monster's green glow (37x89) passed as an arrow. Now blobs must
+  be arrow-shaped (10-36 px a side, at most 1.8:1), the minimum is 80 px,
+  and where the looser colour rule gives no clean arrow a second pass
+  over near-pure pixels (saturation ≥ 0.85, value ≥ 0.8) does — the
+  arrow is purer than the scenery it runs into. The size ratio allowed in
+  a row rose to 3.5 (a half-hidden arrow is small); the ln-ratio term
+  still prefers even rows. All 13 strips and 30 saved attempts read
+  right, the misread one included.
+- **Reading by shape, over frames** (2026-10-04): to stop each new
+  shading from needing a fix, direction is also read from the arrow's
+  silhouette. A 1-D width profile along the arrow wasn't enough (27 of
+  52 arrows read, the rest unsure, some leaning wrong) — sparkle and
+  antialiased fringes stretch it, and per-slice width can't see whether
+  the shape is centred. Opening the blob (1px erode, then dilate) and
+  comparing it on a 12x12 grid with an ideal arrow of the same length
+  and width read 39 of 52 with none wrong, so it's a safe second
+  opinion: shading and silhouette must not disagree, and either decides
+  alone. Shape alone reads 5 of 13 strips; with shading, 13 of 13.
+  Locating the strip itself first was dropped: its 1px yellow outline
+  is translucent (it vanishes on bright scenery) and the instruction
+  text's orange is shared with other UI. The solver now watches frames
+  (`ArrowWatch`): still arrows answer once two frames agree; an arrow
+  whose reads keep changing is spinning, and the game makes a spinning
+  arrow pause on or wiggle across its answer, so after 1.5s the
+  direction it read most is pressed (tested on painted spins; no real
+  spinning puzzle recorded yet).
 - **Recordings mislabelled solves**: leaving PAUSE passes through a
   reaction delay published as a bare PAUSE, which the recorder took for
   an interruption; it now waits 1.5s before calling it that.

@@ -7,7 +7,9 @@
 //! Every reachable anchor is visited once per loop; the policy only picks
 //! the order. `Weighted` is a roulette with P(next) ∝ 1/cost^temp, so far
 //! anchors still get drawn; `Greedy` takes the cheapest next leg (costs
-//! jittered ±20% for variety). Anchors with no route are returned as
+//! jittered ±20% for variety); `Zigzag` works row by row — the nearest row
+//! with anchors left, greedy within it — so sweeps snake across the map
+//! tier after tier. Anchors with no route are returned as
 //! skipped, with the reason, so the caller can ban them for a while.
 
 use std::collections::HashSet;
@@ -16,6 +18,9 @@ use rand::Rng;
 
 use crate::config::PatrolPolicy;
 use crate::navgraph::{Leg, MoveKind, NavGraph};
+
+/// Anchors whose platform rows are this close (px) share a row (`Zigzag`).
+pub const ROW_PX: f64 = 6.0;
 
 /// One leg of the loop: to `anchor`, along planned `legs` — or, when
 /// `legs` is None, the hand-recorded leg from anchor `from`. A swept
@@ -196,10 +201,18 @@ pub fn plan_loop<R: Rng + ?Sized>(
                     .filter_map(|&(entry, exit)| {
                         let mut legs = clock.route(g, cur, entry)?;
                         let approach = cost_of(&legs);
-                        legs.extend(g.route(entry, exit, &[])?);
+                        legs.push(g.walk_leg(entry, exit));
                         Some((legs, Some((entry, exit)), approach))
                     })
-                    .min_by(|a, b| a.2.total_cmp(&b.2)),
+                    // Near ties go to the nearer end: a row keeps its way.
+                    .min_by(|a, b| {
+                        let near = |w: &Option<Way>| w.map_or(0.0, |w| (w.0 .0 - cur.0).abs());
+                        if (a.2 - b.2).abs() > 0.1 {
+                            a.2.total_cmp(&b.2)
+                        } else {
+                            near(&a.1).total_cmp(&near(&b.1))
+                        }
+                    }),
                 None => clock.route(g, cur, req.anchors[i]).map(|l| {
                     let c = cost_of(&l);
                     (l, None, c)
@@ -224,7 +237,17 @@ pub fn plan_loop<R: Rng + ?Sized>(
         if routes.is_empty() {
             break;
         }
-        let costs: Vec<(usize, f64)> = routes.iter().map(|r| (r.0, r.3)).collect();
+        let mut costs: Vec<(usize, f64)> = routes.iter().map(|r| (r.0, r.3)).collect();
+        if req.policy == PatrolPolicy::Zigzag {
+            let row = |p: (f64, f64)| g.locate(p.0, p.1).map_or(p.1, |k| g.platforms[k].y_at(p.0));
+            let here = row(cur);
+            let near = costs
+                .iter()
+                .map(|&(i, _)| row(req.anchors[i]))
+                .min_by(|a, b| (a - here).abs().total_cmp(&(b - here).abs()))
+                .expect("routes aren't empty");
+            costs.retain(|&(i, _)| (row(req.anchors[i]) - near).abs() <= ROW_PX);
+        }
         let next = pick_next(&costs, req.policy, req.temp, rng);
         let (route, cost, sweep) = routes
             .into_iter()
@@ -267,7 +290,7 @@ pub fn pick_next<R: Rng + ?Sized>(
     rng: &mut R,
 ) -> usize {
     match policy {
-        PatrolPolicy::Greedy => {
+        PatrolPolicy::Greedy | PatrolPolicy::Zigzag => {
             let mut best = costs[0].0;
             let mut best_cost = f64::INFINITY;
             for &(i, c) in costs {

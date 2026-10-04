@@ -40,6 +40,9 @@ what was tried and what was learned in `docs/learnings.md` instead.
 
 ## Invariants — don't break these
 
+- **Lie detector**: detected (its title, `core/src/lie_detector.rs`,
+  checked once a second on the whole window) and alerted — never solved
+  by the bot.
 - **Map identity**: `MapEntry.name` = user alias; `MapEntry.map_name` =
   OCR'd in-game title only — it's what identity matches. One
   `MapIdentity` is shared by host and bot; don't add parallel resolvers.
@@ -75,7 +78,8 @@ what was tried and what was learned in `docs/learnings.md` instead.
   `HidController` spaces consecutive key events; don't bypass it with
   raw sends.
 - **Loop ordering is a policy** (`patrol_policy`): `weighted` roulette
-  (∝ 1/cost^temp, default) or `greedy` cheapest-next — both ban
+  (∝ 1/cost^temp, default), `greedy` cheapest-next, or `zigzag` (row by
+  row, greedy within a row) — all ban
   unreachable anchors and execute the plan strictly.
 - **Always on the move, strictly on plan**: the patrol executes a
   pre-planned anchor loop leg by leg; the next loop is planned before the
@@ -98,7 +102,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
   — a rune that shows again failed and is retried after its 3s lock
   (wiggling meanwhile), up to 3 tries; one that stays gone is solved.
   `approach`: stand beside it (glyphs touching, `rune::TARGET_GAP`; facing
-  it) and PAUSE until it's gone. Giving up holds in PAUSE too. The rune is
+  it) and PAUSE until it's gone. A detour that fails on the way farms on
+  and retries (~15s, 3 tries); then, or when the rune can't be reached
+  as drawn, it holds in PAUSE. A cooling move is waited for, never "no
+  route". The rune is
   remembered (`RuneTracker`): the player's dot covers it, so a rune that
   vanishes under the player is still there — only stepping off proves it
   gone. It is never a host hazard — movement must not abort on it. Arrow
@@ -127,7 +134,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Landings are scored tolerantly (platform span + row slack) — a
-  successful move must never shrink the envelope. A deliberate
+  successful move must never shrink the envelope, except a sideways
+  move's dx (`typical_carry`): carried moves fly their full distance
+  (`GraphOptions::fixed_carry`, aimed at the landing platform's middle),
+  so their dx is the median recent carry. A deliberate
   measurement is the exception: `ReachModel.calibrate` sets the envelope
   to the measured result (lower included) and records it in `measured`.
   Upward: `up_flash` (Up + jump mid-air), `up_side_flash`, `rope_lift`.
@@ -177,6 +187,7 @@ Rust host (`rust/crates/`):
 | Map-change monitor + identity | `host/src/feed.rs` (`MapMonitor` thread), `core/src/minimap.rs` (blackout, panel, dot), `core/src/identity.rs` (pin + voted title reads) |
 | Titles | `core/src/title.rs` (band segmentation, crop), `core/src/fuzzy.rs` (`title_score`), `io/src/ocr.rs` (recogniser) |
 | Move measurement | `core/src/bot/measure.rs`, `bot/flight.rs` (dot arc sampler: peak, landing) |
+| Attack heatmap | `core/src/heat.rs` (`AttackHeat`, decaying 4px grid; fed by `use_skill`, sent as `heat` frame meta, painted by the Panel view's Heat toggle) |
 | Host + dashboard cmds | `host/src/host.rs` (state, bot/measure runs, maps), `commands.rs` (edits: class, skills, layout, nav), `server.rs` (HTTP + WS), `clients.rs`, `bus.rs`, `telegram.rs` |
 | The real body | `host/src/botbody.rs` (`HostBody`: Pico keys, captures, stop-aware sleeps) |
 | Frame pipeline | `host/src/streamer.rs` (`FrameStreamer` thread), `frames.rs` (`assemble_panel`, `annotate`, `PBF1`) |

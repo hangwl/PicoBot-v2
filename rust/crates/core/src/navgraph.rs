@@ -49,6 +49,12 @@ pub const ROPE_CLEAR_PX: f64 = 8.0;
 pub const EXPLORE_PENALTY: f64 = 1.6;
 /// Max rise for a "horizontal" gap move.
 pub const LEVEL_PX: f64 = 4.0;
+/// A carried move comes down at least this far (px) inside its platform's
+/// near end — its distance varies, so it's aimed at the middle.
+pub const CARRY_LAND_PX: f64 = 6.0;
+/// A carried move takes off at least this far (px) inside either end of
+/// its platform: the walk to the takeoff slides a few px past its stop.
+pub const CARRY_BACK_PX: f64 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MoveKind {
@@ -205,6 +211,10 @@ pub struct GraphOptions {
     pub prefer_jumps: bool,
     /// What a rope lift costs (s): its wind-up alone is ~1.2s.
     pub rope_lift_cost: f64,
+    /// Moves off a platform's end that carry their full distance (jump,
+    /// flash, double flash, up-side flash, teleport) are linked where they
+    /// land, taken off far enough back to land just onto the target.
+    pub fixed_carry: bool,
 }
 
 impl Default for GraphOptions {
@@ -223,6 +233,7 @@ impl Default for GraphOptions {
             rope_clear_px: ROPE_CLEAR_PX,
             prefer_jumps: true,
             rope_lift_cost: 1.5,
+            fixed_carry: true,
         }
     }
 }
@@ -674,6 +685,72 @@ impl NavGraph {
         None
     }
 
+    /// A move off `i`'s `end` that carries its full learned distance:
+    /// linked to `j` only where it comes down — taken off so it's aimed at
+    /// the middle of `j` (its distance varies either way), as near as `i`
+    /// allows; landing at least `CARRY_LAND_PX` inside `j`'s near end and
+    /// short of its far end, `j` the platform it actually comes down on.
+    #[allow(clippy::too_many_arguments)]
+    fn carry_mv(
+        &mut self,
+        reach: &ReachModel,
+        i: usize,
+        step: f64,
+        j: usize,
+        kind: MoveKind,
+        rise: f64,
+    ) {
+        let Some(m) = kind.reach_move() else { return };
+        let (carry, peak) = (reach.get(m).dx, reach.get(m).rise);
+        if carry <= 0.0 {
+            return;
+        }
+        let (p, q) = (self.platforms[i], self.platforms[j]);
+        let near = if step > 0.0 { q.x0 } else { q.x1 };
+        let want = (q.x0 + q.x1) / 2.0;
+        let inset = CARRY_BACK_PX.min((p.x1 - p.x0) / 2.0);
+        let takeoff = (want - step * carry).clamp(p.x0 + inset, p.x1 - inset);
+        let land = takeoff + step * carry;
+        let room = self.opts.edge_inset_px;
+        let (from_near, from_far) = ((land - near) * step, (q.x1 - q.x0) - (land - near) * step);
+        if from_near < CARRY_LAND_PX.min((q.x1 - q.x0) / 2.0)
+            || from_far < room.min((q.x1 - q.x0) / 2.0)
+        {
+            return;
+        }
+        let (y0, peak) = (p.y_at(takeoff), peak.max(LEVEL_PX));
+        if self.comes_down_on(land, y0, peak) != Some(j) {
+            return;
+        }
+        // A platform on the way, under the arc's peak but above where it
+        // comes down, catches the character first.
+        let (lo, hi) = (takeoff.min(land), takeoff.max(land));
+        let caught = self.platforms.iter().enumerate().any(|(k, o)| {
+            let mid = (o.x0.max(lo) + o.x1.min(hi)) / 2.0;
+            k != i
+                && k != j
+                && o.x0 < hi
+                && o.x1 > lo
+                && o.y_at(mid) >= y0 - peak - 0.5
+                && o.y_at(mid) < q.y_at(land) - 0.5
+        });
+        if caught {
+            return;
+        }
+        self.mv(reach, i, takeoff, j, land, kind, carry, rise);
+    }
+
+    /// The platform a move rising up to `peak` from row `y` comes down on
+    /// at column `x`: the highest one there its peak clears.
+    fn comes_down_on(&self, x: f64, y: f64, peak: f64) -> Option<usize> {
+        self.platforms
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.spans(x, 0.0) && p.y_at(x) >= y - peak - 0.5)
+            .min_by(|a, b| a.1.y_at(x).total_cmp(&b.1.y_at(x)))
+            .map(|(k, _)| k)
+    }
+
     fn link_off_end(&mut self, reach: &ReachModel, i: usize, end: f64, step: f64) {
         let p = self.platforms[i];
         let ey = p.y_at(end);
@@ -695,30 +772,25 @@ impl NavGraph {
             let land_x = near + step * self.opts.edge_inset_px.min((q.x1 - q.x0) / 4.0);
             let dx = (land_x - takeoff).abs();
             let rise = ey - q.y_at(near);
-            if rise <= LEVEL_PX {
-                for kind in [
+            let carried: &[MoveKind] = if rise <= LEVEL_PX {
+                &[
                     MoveKind::Jump,
                     MoveKind::Flash,
                     MoveKind::DoubleFlash,
                     MoveKind::Teleport,
-                ] {
+                ]
+            } else {
+                &[MoveKind::UpSideFlash, MoveKind::Teleport]
+            };
+            for &kind in carried {
+                if self.opts.fixed_carry {
+                    self.carry_mv(reach, i, step, j, kind, rise);
+                } else {
                     self.mv(reach, i, takeoff, j, land_x, kind, dx, rise);
                 }
-            } else {
-                self.mv(
-                    reach,
-                    i,
-                    takeoff,
-                    j,
-                    land_x,
-                    MoveKind::UpSideFlash,
-                    dx,
-                    rise,
-                );
-                if self.up_lands_on(reach, j, land_x, ey, Some(i)) {
-                    self.mv(reach, i, takeoff, j, land_x, MoveKind::UpFlash, dx, rise);
-                }
-                self.mv(reach, i, takeoff, j, land_x, MoveKind::Teleport, dx, rise);
+            }
+            if rise > LEVEL_PX && self.up_lands_on(reach, j, land_x, ey, Some(i)) {
+                self.mv(reach, i, takeoff, j, land_x, MoveKind::UpFlash, dx, rise);
             }
         }
     }
@@ -747,6 +819,19 @@ impl NavGraph {
             }
         }
         out
+    }
+
+    /// A walk along one platform from `from` to `to` (a sweep's crossing:
+    /// it must stay on the platform, whatever a detour would cost).
+    pub fn walk_leg(&self, from: (f64, f64), to: (f64, f64)) -> Leg {
+        Leg {
+            kind: MoveKind::Walk,
+            x0: from.0,
+            y0: from.1,
+            x1: to.0,
+            y1: to.1,
+            cost: (to.0 - from.0).abs() / self.walk_speed,
+        }
     }
 
     /// Cheapest legs from `start` to `goal`, avoiding the `exclude`d move

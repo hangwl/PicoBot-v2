@@ -25,6 +25,7 @@ pub fn sync_map<B: Body + ?Sized>(body: &mut B) -> bool {
     let st = body.state();
     st.map_version = v;
     st.summons.reset();
+    st.heat.clear();
     st.skills = book.carry_from(&st.skills);
     st.anchor_idx = 0;
     st.travel_target = None;

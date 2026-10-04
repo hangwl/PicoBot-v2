@@ -133,6 +133,8 @@ fn send(host: &Host, mode: &str, mut img: Image, overlay: &Overlay, extra: Map<S
         "session",
         "layout",
         "no_rotation",
+        "heat",
+        "heat_cell",
         "ox",
         "oy",
     ] {
@@ -241,6 +243,18 @@ fn provide(host: &Host, mode: &str, eyes: &mut Eyes, tracker: &mut PlayerTracker
                     p[0].as_i64().unwrap_or(0) + dx,
                     p[1].as_i64().unwrap_or(0) + dy
                 ]);
+            }
+            if let Some(v) = viz.as_ref().filter(|v| !v.heat.is_empty()) {
+                // Flat [x, y, weight%, ...] in panel px.
+                let flat: Vec<i64> = v
+                    .heat
+                    .iter()
+                    .flat_map(|&(x, y, w)| {
+                        [x as i64 + dx, y as i64 + dy, (w * 100.0).round() as i64]
+                    })
+                    .collect();
+                meta.insert("heat".into(), json!(flat));
+                meta.insert("heat_cell".into(), picobot_core::heat::CELL_PX.into());
             }
             meta.insert("ox".into(), dx.into());
             meta.insert("oy".into(), dy.into());

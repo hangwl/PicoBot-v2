@@ -21,6 +21,31 @@ fn no_rope(mut s: Sim) -> Sim {
 }
 
 #[test]
+fn a_walk_that_stops_at_the_threshold_edge_arrives() {
+    // Anchors sit at fractional px: a walk that stops at the edge of the
+    // threshold must count as there, not be re-walked step after step.
+    for goal_x in [100.4, 100.5, 100.6, 99.5] {
+        let mut b = Sim::new(&[FLOOR], (20.0, 100.0));
+        b.edge_stop = true;
+        let n = nav(b.graph());
+        assert!(
+            n.go(&mut b, (goal_x, 100.0), 3, 5),
+            "goal {goal_x} from the left, at {:?}",
+            b.pos
+        );
+        assert!(b.walks <= 2, "goal {goal_x}: {} walks", b.walks);
+        b.pos = (180.0, 100.0);
+        b.walks = 0;
+        assert!(
+            n.go(&mut b, (goal_x, 100.0), 3, 5),
+            "goal {goal_x} from the right, at {:?}",
+            b.pos
+        );
+        assert!(b.walks <= 2, "goal {goal_x}: {} walks", b.walks);
+    }
+}
+
+#[test]
 fn climbs_with_up_flashes() {
     let mut b = no_rope(Sim::new(&[FLOOR, MID, TOP], (10.0, 100.0)));
     assert!(nav(b.graph()).go(&mut b, (80.0, 66.0), 3, 40));
@@ -54,7 +79,7 @@ fn flash_and_double_flash_gaps() {
     let mut b = Sim::new(&[MID, SIDE], (60.0, 84.0));
     assert!(nav(b.graph()).go(&mut b, (170.0, 84.0), 3, 40));
     assert_eq!(b.moves, ["flash"]);
-    let mut b = Sim::new(&[MID, [150.0, 84.0, 190.0, 84.0]], (60.0, 84.0));
+    let mut b = Sim::new(&[MID, [145.0, 84.0, 190.0, 84.0]], (60.0, 84.0));
     assert!(nav(b.graph()).go(&mut b, (170.0, 84.0), 3, 40));
     assert_eq!(b.moves, ["double_flash"]);
 }
@@ -62,7 +87,7 @@ fn flash_and_double_flash_gaps() {
 #[test]
 fn up_side_flash() {
     let mut b = Sim::new(
-        &[[0.0, 100.0, 100.0, 100.0], [115.0, 86.0, 160.0, 86.0]],
+        &[[0.0, 100.0, 100.0, 100.0], [110.0, 86.0, 160.0, 86.0]],
         (50.0, 100.0),
     );
     assert!(nav(b.graph()).go(&mut b, (140.0, 86.0), 3, 40));
@@ -78,14 +103,18 @@ fn a_cooling_rope_lift_is_not_waited_for() {
 }
 
 #[test]
-fn a_long_rope_cooldown_excludes_rope_lift() {
+fn a_cooling_rope_lift_nothing_else_replaces_is_waited_for() {
     let mut b = Sim::new(&[FLOOR, [60.0, 70.0, 100.0, 70.0]], (80.0, 100.0));
     b.rope_cd = 10.0;
     assert_eq!(
         nav(b.graph()).step(&mut b, (80.0, 70.0)),
-        StepStatus::NoRoute
+        StepStatus::Cooldown
     );
     assert!(b.moves.is_empty());
+    // `go` waits it out, then lifts.
+    b.rope_cd = 1.0;
+    assert!(nav(b.graph()).go(&mut b, (80.0, 70.0), 3, 40));
+    assert_eq!(b.moves, ["rope_lift"]);
 }
 
 #[test]
@@ -112,7 +141,10 @@ fn a_tiny_leading_walk_does_not_stall() {
 fn landing_outcomes_teach_reach() {
     let mut b = Sim::new(&[MID, SIDE], (60.0, 84.0));
     b.flash = 30.0;
-    assert!(nav(b.graph()).go(&mut b, (170.0, 84.0), 3, 40));
+    // A carry is the median of a few flights.
+    for x in [170.0, 60.0, 170.0] {
+        assert!(nav(b.graph()).go(&mut b, (x, 84.0), 3, 40));
+    }
     assert!(b.state.reach.get(Move::Flash).dx > 25.0);
 }
 
@@ -156,7 +188,7 @@ fn a_failed_rope_grab_exits_the_rope() {
 
 #[test]
 fn a_teleport_leg_executes() {
-    let plats = [FLOOR, MID, [140.0, 84.0, 190.0, 84.0]];
+    let plats = [FLOOR, MID, [135.0, 84.0, 190.0, 84.0]];
     let mut b = no_rope(Sim::new(&plats, (60.0, 84.0)).with_reach(reach_with(&[
         (
             Move::Teleport,
@@ -343,4 +375,29 @@ fn legs_are_counted_by_kind_in_the_session() {
         .session
         .summary(10.0)
         .contains("moves: up_flash 1 · walk 1"));
+}
+
+#[test]
+fn a_landing_read_above_the_row_teaches_no_extra_rise() {
+    // An up flash from the floor onto MID (16px up) whose landing reads
+    // steady 6px over MID's row: within the platform snap, so it landed —
+    // but it rose 16, not 22.
+    let mut b = no_rope(Sim::new(&[FLOOR, MID], (80.0, 100.0)));
+    b.script = std::iter::repeat_n((80.0, 100.0), 8)
+        .chain([(80.0, 90.0), (80.0, 78.0), (80.0, 78.0), (80.0, 78.0)])
+        .collect();
+    let leg = Leg {
+        kind: MoveKind::UpFlash,
+        x0: 80.0,
+        y0: 100.0,
+        x1: 80.0,
+        y1: 84.0,
+        cost: 1.0,
+    };
+    let before = b.state.reach.get(Move::UpFlash).rise;
+    assert_eq!(
+        nav(b.graph()).execute_leg(&mut b, &leg),
+        picobot_core::bot::LegStatus::Ok
+    );
+    assert_eq!(b.state.reach.get(Move::UpFlash).rise, before);
 }

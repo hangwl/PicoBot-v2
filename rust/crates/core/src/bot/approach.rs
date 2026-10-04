@@ -16,8 +16,11 @@ use super::navigator::{Navigator, StepStatus};
 use crate::rune::{at_rune, gap, on_rune, on_x, platform_under, slot_x, Rune, TARGET_GAP};
 use crate::timing::human_between;
 
-/// The whole detour may take this long (s).
-const TIMEOUT_S: f64 = 60.0;
+/// The whole detour may take this long (s), cooldown waits included.
+const TIMEOUT_S: f64 = 90.0;
+/// Route checks finding no way in a row before giving up: a read mid-move
+/// or off the drawn lines can find none for a moment.
+const MAX_NO_ROUTE: u32 = 3;
 /// Missed landings on the way before giving up.
 const MAX_MISSES: u32 = 3;
 /// Placement attempts on the rune's platform before giving up.
@@ -27,7 +30,10 @@ const MAX_PLACES: u32 = 4;
 pub enum Approach {
     Moving,
     Arrived,
+    /// Failed on the way: worth another try later.
     Failed(String),
+    /// The rune can't be reached as the map is drawn.
+    Impossible(String),
 }
 
 /// Where to stand at the rune.
@@ -47,6 +53,7 @@ pub struct RuneApproach {
     started: Option<f64>,
     misses: u32,
     places: u32,
+    no_route: u32,
 }
 
 impl RuneApproach {
@@ -71,10 +78,10 @@ impl RuneApproach {
             return Approach::Failed("timed out on the way".into());
         }
         let Some(graph) = body.graph() else {
-            return Approach::Failed("no platforms drawn".into());
+            return Approach::Impossible("no platforms drawn".into());
         };
         let Some(plat) = platform_under(&graph, rune.bbox) else {
-            return Approach::Failed("it isn't over a drawn platform".into());
+            return Approach::Impossible("it isn't over a drawn platform".into());
         };
         let p = graph.platforms[plat];
         let slots: Vec<f64> = match self.stand {
@@ -88,7 +95,7 @@ impl RuneApproach {
         .filter(|x| p.spans(*x, 0.0))
         .collect();
         if slots.is_empty() {
-            return Approach::Failed("no room beside it".into());
+            return Approach::Impossible("no room beside it".into());
         }
         let Some(pos) = body.pos() else {
             blind_wait(body);
@@ -116,11 +123,20 @@ impl RuneApproach {
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(g, _)| g);
         let Some(goal) = goal else {
-            return Approach::Failed("no route to it".into());
+            return self.no_route(body);
         };
         let nav = self.nav.as_ref().expect("navigator set above");
-        match nav.step(body, goal) {
-            StepStatus::NoRoute => Approach::Failed("no route to it".into()),
+        let status = nav.step(body, goal);
+        if status != StepStatus::NoRoute {
+            self.no_route = 0;
+        }
+        match status {
+            StepStatus::NoRoute => self.no_route(body),
+            StepStatus::Cooldown => {
+                // At the takeoff of a move that's cooling: wait it out.
+                body.sleep(human_between(0.3, 0.2, 0.5, 0.3));
+                Approach::Moving
+            }
             StepStatus::Failed => {
                 self.misses += 1;
                 if self.misses >= MAX_MISSES {
@@ -131,6 +147,15 @@ impl RuneApproach {
             }
             _ => Approach::Moving,
         }
+    }
+
+    fn no_route<B: Body + ?Sized>(&mut self, body: &mut B) -> Approach {
+        self.no_route += 1;
+        if self.no_route >= MAX_NO_ROUTE {
+            return Approach::Failed("no route to it".into());
+        }
+        body.sleep(human_between(0.3, 0.2, 0.5, 0.3));
+        Approach::Moving
     }
 
     /// On the rune's platform: walk to `x`, turn toward the rune, and check

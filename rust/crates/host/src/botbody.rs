@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use picobot_core::bot::{Body, BotState, FlightRecorder, Keys, Machine, Mode, MoveMeasurer};
 use picobot_core::config::BotConfig;
+use picobot_core::lie_detector::find_lie_detector;
 use picobot_core::maps::{MapEntry, PlayerRule};
 use picobot_core::minimap::{MinimapAnalyzer, PlayerTracker, RegionSource};
 use picobot_core::timing::{monotonic, new_session};
@@ -21,6 +22,9 @@ use crate::evidence::{merged, pixel_stats, Evidence};
 use crate::feed::Eyes;
 use crate::frames::{annotate, Overlay};
 use crate::host::Host;
+
+/// The game window is checked for the lie detector this often (s).
+const LIE_CHECK_S: f64 = 1.0;
 
 /// A stop that wakes sleepers at once.
 #[derive(Default)]
@@ -88,6 +92,11 @@ pub struct HostBody {
     cfg_version: u64,
     /// Other players tolerated on the current map (global or its rule).
     players_allowed: i64,
+    /// When the window was last checked for the lie detector, and whether
+    /// it showed then.
+    lie_checked_at: f64,
+    lie_seen: bool,
+    lie_evidence: Evidence,
 }
 
 impl HostBody {
@@ -121,7 +130,30 @@ impl HostBody {
             minimap_warned: false,
             cfg_version: host_version,
             players_allowed: 0,
+            lie_checked_at: f64::NEG_INFINITY,
+            lie_seen: false,
+            lie_evidence: Evidence::lie_detector(),
         }
+    }
+
+    /// Whether the lie detector's window shows: the whole window is
+    /// checked at most once a second, the first sighting saved.
+    fn lie_detector(&mut self) -> bool {
+        let now = monotonic();
+        if now - self.lie_checked_at < LIE_CHECK_S {
+            return self.lie_seen;
+        }
+        self.lie_checked_at = now;
+        let Some(win) = self.eyes.window_img() else {
+            return self.lie_seen;
+        };
+        let found = find_lie_detector(&win);
+        if let (Some(at), false) = (found, self.lie_seen) {
+            let meta = self.with_context(serde_json::json!({ "title_at": [at.0, at.1] }));
+            self.lie_evidence.save(&[("window", &win)], &meta);
+        }
+        self.lie_seen = found.is_some();
+        self.lie_seen
     }
 
     /// The drawn platforms and learned ropes, for an evidence overlay.
@@ -161,6 +193,7 @@ impl HostBody {
             let mut session = self.state.session.snapshot(now);
             session["apm"] = self.attack_rate().round().into();
             self.state.viz.session = Some(session);
+            self.state.viz.heat = self.state.heat.snapshot(now);
             self.host.set_bot_viz(Some(self.state.viz.clone()));
         }
     }
@@ -318,7 +351,7 @@ impl Body for HostBody {
         let mut overlay = img.clone();
         annotate(&mut overlay, &o);
         let meta = self.with_context(merged(serde_json::json!({ "event": event }), info));
-        if event == "attempt" {
+        if event == "attempt" || event == "unread" {
             // The puzzle is still up (the answer comes after a pause): keep
             // the window it was read from, to check a misread against.
             let window = self.eyes.window_img();
@@ -356,7 +389,10 @@ impl Body for HostBody {
             self.note_others(n, rule == Some(PlayerRule::Ignore));
         }
         let others = self.state.viz.others as i64;
-        let reason = if loading {
+        let lie = self.cfg.pause_on_lie_detector && self.lie_detector();
+        let reason = if lie {
+            Some("lie detector")
+        } else if loading {
             Some("map transfer (loading screen)")
         } else if self.host.identity.identifying() {
             Some("identifying map")

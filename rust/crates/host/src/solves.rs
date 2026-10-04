@@ -573,8 +573,8 @@ mod tests {
             for i in 0..24i64 {
                 let t = i as f64 / 23.0;
                 let bgr = [0u8, (255.0 - 170.0 * t) as u8, (80.0 + 175.0 * t) as u8];
-                for j in 0..12i64 {
-                    let (a, b) = (i - 12, j - 6);
+                for j in 0..18i64 {
+                    let (a, b) = (i - 12, j - 9);
                     let (x, y) = match *to {
                         "right" => (a, b),
                         "left" => (-a, b),

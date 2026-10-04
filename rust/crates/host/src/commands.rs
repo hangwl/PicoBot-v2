@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use picobot_core::bot::measure::plan_for;
 use picobot_core::bot::navigator::legs_viz;
-use picobot_core::config::{BotConfig, ClassTravel};
+use picobot_core::config::{BotConfig, ClassTravel, PatrolPolicy};
 use picobot_core::layout::{
     erase_target, line_under_feet, next_anchor_name, r4, resnap_anchors, restore_anchors,
     same_lines, shift_line, tidy, Erase, Moved,
@@ -387,7 +387,7 @@ impl Host {
             },
             None => None,
         };
-        let policy = policy.filter(|p| ["weighted", "greedy"].contains(p));
+        let policy = policy.filter(|p| PatrolPolicy::parse(p).is_some());
         let cfg = match self.commit_bot(|bot| {
             if let Some(p) = policy {
                 bot.insert("patrol_policy".into(), p.into());
@@ -425,6 +425,7 @@ impl Host {
             "stop_when_rune_appears",
             "stop_when_map_unrecognized",
             "record_rune_solves",
+            "pause_on_lie_detector",
         ];
         let mut edits: Vec<(String, Value)> = Vec::new();
         for (k, v) in &want {
