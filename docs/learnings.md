@@ -418,6 +418,13 @@ landings per visit.
   at millisecond resolution can see the comb. Fixing it needs
   `bInterval = 1`: a custom CircuitPython build, or the TinyUSB firmware
   (Phase E); `boot.py` can't change it.
+- **Fixed with a two-byte patch** (`firmware/`): a CircuitPython 10.3.1
+  build with `bInterval = 1` (it needs Arm GCC 14; Ubuntu 22.04's is too
+  old). `chord_probe` afterwards: asked 8/12/20 ms arrives 8.0/12.0/20.0
+  (min–max within about ±2 ms), asked 0 or 5 ms arrives ~4.8 ms (the ACK
+  round trip is the floor), and unacknowledged pairs reach 1.6–3 ms. The
+  comb is gone. The USB identity and `boot.py`/`code.py` were untouched
+  by the reflash.
 
 ## A walk that "reached" its target without arriving (2026-10-04)
 
