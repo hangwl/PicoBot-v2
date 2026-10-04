@@ -645,7 +645,7 @@ impl Host {
         {
             return Ok(());
         }
-        let link = SerialLink::open(port).map_err(|e| e.to_string())?;
+        let link = SerialLink::open_spec(port).map_err(|e| e.to_string())?;
         let bus = self.bus.clone();
         link.on_line(move |line| {
             bus.emit_level("remote", &format!("RX: {line}"), "debug");

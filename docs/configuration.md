@@ -203,7 +203,10 @@ Top-level (not in `"bot"`):
   are read at start-up; restart after the network changes.
   `/health` returns the full status JSON to loopback callers and only
   `{"ok": true}` to others.
-- `serial_port` — `auto` probes every COM port (open, DTR toggle,
+- `serial_port` — `hid` (or `hid:<vid>:<pid>` in hex) talks to the TinyUSB
+  firmware over its vendor HID channel instead of a COM port; it refuses
+  to open when more than one device matches (unplug the real keyboard).
+  `auto` probes every COM port (open, DTR toggle,
   handshake); once the Pico's port is known, pin it (a number in
   `config.json`, e.g. `COM7`) so a run doesn't. Don't pass `--window`
   from launchers: the title already lives in `default_target_window`.

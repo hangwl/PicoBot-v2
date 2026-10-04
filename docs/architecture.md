@@ -50,6 +50,14 @@ keyboard the user owns). The host command `maintenance` makes `code.py`
 set `nvm[0]` and reset; `boot.py` clears the flag and boots stock once,
 so files can be edited. See [development.md](development.md#pico-firmware).
 
+**TinyUSB firmware** (`firmware/phase-e/k75`, `io/src/hid_transport.rs`):
+the same protocol over a vendor-defined HID interface — lines cut into
+64-byte reports, written as output reports (SET_REPORT over EP0; the
+device has no OUT pipe) and read as input reports. `SerialLink::open_spec`
+picks it for `hid` / `hid:<vid>:<pid>`; `SerialLink` itself is unchanged.
+The device has no COM port and no stock-boot mode: `maintenance` reboots
+into BOOTSEL.
+
 Wire protocol (one line each way):
 
 - Host → Pico: `<seq>:hid|key|down|<name>` (also `up`, `hid|mouse|…`,

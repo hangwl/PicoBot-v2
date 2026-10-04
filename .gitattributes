@@ -1,2 +1,3 @@
 rust/crates/core/tests/fixtures/** -text
 firmware/*.patch -text
+firmware/**/*.sh text eol=lf
