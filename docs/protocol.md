@@ -55,7 +55,7 @@ and follows the same view.
 | `measure|effect|<skill>` | the skill-effect sweep for one skill (keeps the other skills' rows); each skill's rows are saved as soon as it is done |
 | `measure|profile|walk` | walk-tap sweep then walking pace (stopped with `measure|stop`); saves `profiles.walk_taps` and `profiles.walk_speed` in the reach file |
 | `measure|profile|up_flash` | up-flash timing sweep (stopped with `measure|stop`); saves `profiles.up_flash` in the reach file |
-| `host|serial\|<port\|auto>` / `host|window|<title>` | connection |
+| `host|serial\|<port\|auto>` / `host|window|<title>` | connection; `<port>` is a COM port, `hid`, or `hid:<vid>:<pid>`. The `host` event's `ports` lists HID channels (`device` is the spec, `desc` names it) before the COM ports |
 | `key|down\|<k>` / `key|up\|<k>` | remote input pad (Pico HID): a real press and release — the dashboard sends them on touch and lift. `<k>` is a Pico `KEY_MAP` name. Keys a client still holds when it disconnects are released |
 | `config|get` | full config snapshot |
 

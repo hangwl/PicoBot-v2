@@ -2,7 +2,7 @@
 import { Icon, type IconName } from "./icons";
 import { kitLabel } from "./live";
 import { ClassPage, skillSummary } from "./pages/class";
-import { ConnectionPage } from "./pages/connection";
+import { ConnectionPage, linkName } from "./pages/connection";
 import { LayoutPage } from "./pages/layout";
 import { MapPage } from "./pages/map";
 import { MeasurePage, allMeasured } from "./pages/measure";
@@ -80,7 +80,7 @@ const ENTRIES: Entry[] = [
   },
   {
     page: "connection", title: "Connection", icon: "plug",
-    sub: (s) => `${s.serial || "no serial"}${s.serialOpen ? "" : " (closed)"} · ` +
+    sub: (s) => `${s.serial ? linkName(s.serial) : "no Pico link"}${s.serialOpen ? "" : " (closed)"} · ` +
       `${s.window || "no window"}`,
     flag: (s) => (s.serialOpen && s.window ? null : "todo"),
   },

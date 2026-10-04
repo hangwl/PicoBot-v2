@@ -110,10 +110,11 @@ Wire protocol (one line each way):
   one synchronous Windows handle, and a read left blocking would hold
   every write behind it. Round trips are ~4 ms.
 - A port that fails underneath the reader is closed and reported
-  (`Remote: Serial lost`); waiting senders fail at once. A
+  (`Remote: Pico link lost`); waiting senders fail at once. A
   `SerialReconnect` thread then stops any bot run or measurement and
   retries every 2s: the lost port once it's back, otherwise only ports
-  that appeared since the loss (probing toggles DTR). Reconnected, it
+  that appeared since the loss (probing toggles DTR); a HID link just
+  retries its own spec. Reconnected, it
   waits for `PICO_READY` and sends `hid|release_all`; the run is left
   for the user to restart. A port picked in Connection meanwhile ends
   the retries.

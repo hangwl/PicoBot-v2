@@ -515,7 +515,7 @@ impl BotRun {
 fn make_body(host: &Arc<Host>, stop: Arc<Stop>) -> Result<HostBody, String> {
     let link = host
         .serial_link()
-        .ok_or("no serial — pick a port in the Connection panel")?;
+        .ok_or("no Pico link — pick one in the Connection panel")?;
     let feed = host.get_feed().ok_or("game window not found")?;
     let eyes = Eyes::open(&host.window_title()).ok_or("game window not found")?;
     let cfg = host.bot_config();
@@ -553,7 +553,7 @@ fn make_body(host: &Arc<Host>, stop: Arc<Stop>) -> Result<HostBody, String> {
 /// so the dashboard hears at once.
 fn preflight(host: &Arc<Host>) -> Result<(), String> {
     host.serial_link()
-        .ok_or("no serial — pick a port in the Connection panel")?;
+        .ok_or("no Pico link — pick one in the Connection panel")?;
     let bad = host.unpressable_keys(&host.bot_config());
     if !bad.is_empty() {
         return Err(format!(

@@ -109,8 +109,12 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     alert** button. the Status fold on Control shows the running **Session**
     (uptime, visits, misses, skips, pauses); an unrecognized map sends
     you to the Map page, whose banner offers to name and save it.
-  - **Connection** (Pico serial port, *Find the Pico* auto-probe that
-    skips the open port, game window — locked while the bot runs).
+  - **Connection** (the Pico link — a HID channel for the TinyUSB
+    firmware, or a COM port for the CircuitPython one; *Find the Pico*
+    takes a single HID channel at once and otherwise probes the COM ports,
+    skipping the open one; game window — locked while the bot runs). A
+    HID entry warns when more than one device shares its IDs: unplug the
+    real keyboard.
 - **Log** — the event log with severity filters (`notify` alerts stand out); while scrolled up it
   stops following and shows an "N new" chip that jumps back down.
 

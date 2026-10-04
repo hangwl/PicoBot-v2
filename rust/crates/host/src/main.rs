@@ -116,7 +116,10 @@ fn main() -> ExitCode {
         .port
         .or_else(|| Some(config.serial_port.clone()).filter(|p| !p.is_empty()));
     if port.as_deref() == Some("auto") {
-        port = picobot_io::serial::discover_data_port(None, Duration::from_millis(1500));
+        port = match picobot_io::hid_transport::channels().as_slice() {
+            [one] if one.count == 1 => Some(one.spec.clone()),
+            _ => picobot_io::serial::discover_data_port(None, Duration::from_millis(1500)),
+        };
         match &port {
             Some(p) => println!("discovered Pico DATA port: {p}"),
             None => {

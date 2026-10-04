@@ -2,25 +2,30 @@
 import { type AppState, send } from "../protocol";
 import { Field, Reply, useReply, val } from "../ui";
 
+const isHid = (spec: string) => spec === "hid" || spec.startsWith("hid:");
+export const linkName = (spec: string) => (isHid(spec) ? "HID" : spec);
+
 export function ConnectionPage({ s }: { s: AppState }) {
   const [reply, act] = useReply(s);
   const ports = s.ports ?? [];
   const windows = s.windows ?? [];
   return (
     <div class="form">
-      <Field label="Pico serial port"
-             hint={s.serialOpen ? "Connected." : "Not connected."}>
+      <Field label="Pico link"
+             hint={s.serialOpen
+               ? `Connected${s.serial === "hid" || s.serial.startsWith("hid:") ? " over HID" : ""}.`
+               : "Not connected. A HID channel is the TinyUSB firmware; COM ports are the CircuitPython one."}>
         <select value={s.serial} onChange={(e) => {
           const v = val(e);
           if (v) send(`host|serial|${v}`);
         }}>
-          <option value="">Choose a port</option>
+          <option value="">Choose a link</option>
           {s.serial && !ports.some((p) => p.device === s.serial) && (
-            <option value={s.serial}>{s.serial} · not present</option>
+            <option value={s.serial}>{linkName(s.serial)} · not present</option>
           )}
           {ports.map((p) => (
             <option key={p.device} value={p.device}>
-              {p.device}{p.desc ? ` · ${p.desc}` : ""}
+              {isHid(p.device) ? p.desc : `${p.device}${p.desc ? ` · ${p.desc}` : ""}`}
             </option>
           ))}
         </select>
