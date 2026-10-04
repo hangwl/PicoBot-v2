@@ -149,6 +149,23 @@ fn landing_outcomes_teach_reach() {
 }
 
 #[test]
+fn a_slipped_up_flash_teaches_no_reach() {
+    // The same short flight as a real one (see the test below), which
+    // shrinks the model; slipped on purpose, it must not.
+    let mut b = no_rope(Sim::new(&[FLOOR, MID], (80.0, 100.0)));
+    b.up = 20.0;
+    b.slip = true;
+    let before = b.state.reach.get(Move::UpFlash);
+    let n = nav(b.graph());
+    for _ in 0..3 {
+        assert_ne!(n.step(&mut b, (80.0, 84.0)), StepStatus::Arrived);
+    }
+    assert!(b.log_has("Missed"), "the slip must be a real miss");
+    assert_eq!(b.state.reach.get(Move::UpFlash), before);
+    assert!(b.state.reach.ceiling_of(Move::UpFlash).is_none());
+}
+
+#[test]
 fn short_real_reach_shrinks_the_model_and_gives_up() {
     let mut b = no_rope(Sim::new(&[FLOOR, MID], (60.0, 100.0)));
     b.up = 5.0;

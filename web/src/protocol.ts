@@ -227,6 +227,10 @@ export interface AppState {
   stopRune: boolean;
   stopLie: boolean;
   autoFocus: boolean;
+  sessionMax: number;
+  breakEvery: number;
+  breakFor: number;
+  evidenceCaptures: boolean;
   runeAction: string;
   patrolMode: string;
   sweepReach: number;
@@ -240,6 +244,7 @@ export interface AppState {
   playerMinPx: number;
   others: number;
   moveAttack: number;
+  moveMiss: number;
   groundAttack: number;
   doubleChance: number;
   targetApm: number;
@@ -305,6 +310,10 @@ const initial: AppState = {
   stopRune: true,
   stopLie: true,
   autoFocus: true,
+  sessionMax: 0,
+  breakEvery: 0,
+  breakFor: 0,
+  evidenceCaptures: true,
   runeAction: "solve",
   patrolMode: "sweep",
   sweepReach: 12,
@@ -318,6 +327,7 @@ const initial: AppState = {
   playerMinPx: 6,
   others: 0,
   moveAttack: 1,
+  moveMiss: 0,
   groundAttack: 0,
   doubleChance: 0.4,
   targetApm: 0,
@@ -650,6 +660,10 @@ function onEvent(p: Record<string, any> & { event: string }) {
         stopRune: c.stop_when_rune_appears !== false,
         stopLie: c.pause_on_lie_detector !== false,
         autoFocus: c.auto_focus !== false,
+        sessionMax: (c.session_max_minutes as number) ?? 0,
+        breakEvery: (c.break_every_minutes as number) ?? 0,
+        breakFor: (c.break_minutes as number) ?? 0,
+        evidenceCaptures: c.evidence_captures !== false,
         runeAction: (c.rune_action as string) ?? "solve",
         patrolMode: (c.patrol_mode as string) ?? "sweep",
         sweepReach: (c.sweep_reach_px as number) ?? 12,
@@ -662,6 +676,7 @@ function onEvent(p: Record<string, any> & { event: string }) {
         allowedPlayers: (c.allowed_other_players as number) ?? 0,
         playerMinPx: (c.other_player_min_px as number) ?? 6,
         moveAttack: (c.move_attack_chance as number) ?? 1,
+        moveMiss: (c.move_miss_chance as number) ?? 0,
         groundAttack: (c.ground_attack_chance as number) ?? 0,
         doubleChance: (c.weave_double_chance as number) ?? 0.4,
         targetApm: (c.target_attacks_per_min as number) ?? 0,

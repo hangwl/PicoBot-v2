@@ -337,6 +337,47 @@ landings per visit.
   hardened one is a single COM7. A pinned `serial_port` needs updating
   after the switch.
 
+- **Host process surface** (2026-10-04): the `dist` profile (`debug = 0`,
+  thin LTO) was meant to strip symbols and source paths, but on MSVC the
+  symbols already live in the `.pdb`, not the exe: both builds carry only
+  a relative `picobot.pdb` name and no function names. What stays in
+  either exe is ~40 relative source file names (`lie_detector.rs`,
+  `rune_arrows.rs`, …) from panic locations, which only nightly's
+  `-Zlocation-detail=none` removes; the exe is also ~1% bigger than
+  release. So `dist` is a cheap hygiene profile, not a scrub. Listeners were wildcard `[::]`; they now bind the
+  addresses `bind` names. `auto` takes loopback plus every detected
+  Tailscale/LAN address rather than Tailscale only, so existing phone
+  URLs keep working; `tailscale` and `loopback` are the tighter choices.
+  `/health` gave its port and build state to anyone; only loopback sees
+  them now. Evidence screenshots in `debug/frames/` are forensic
+  residue on a deployed box, hence `evidence_captures`.
+
+## Human reaction and session hygiene (2026-10-04)
+
+- **A hazard stopped the bot in the same tick**: the machine went
+  hazard → PAUSE → `release_all` with nothing between, so the gap from a
+  player's dot appearing to every key coming up was only the detector's
+  latency (tens of ms). Hazards a person would see (other players, the lie
+  detector) now wait out a log-normal reaction first, with the keys still
+  down; loading, map identity and focus loss stay immediate, since nobody
+  watches those. The lie detector gets a longer, wider delay than a dot —
+  noticing a popup takes longer than a glance.
+- **No limit on a run, no rest**: nothing ended a run or paused it on its
+  own. `session_max_minutes` and scheduled breaks are drawn per run, and a
+  break reuses PAUSE (keys up, nothing else), muting the watchdog's
+  "needs attention" line, which would otherwise fire on every rest.
+- **Perfect execution is a tell**: re-press gaps are drawn inside the
+  game's flash window, so the bot never missed a flash. `move_miss_chance`
+  skips a re-press for real. The first guard test passed with the guard
+  removed — a short sideways flash never shrank the model anyway (its dx
+  is a median) — so it checks the up flash, where a short rise does. A
+  second consumer needed the guard too: `hop_px`, the average hop length,
+  would have dropped 30% on one slip.
+- **The parity fixture counts**: adding a top-level `bind` key to
+  `config.json` broke `config_round_trips_and_parses_like_python`, whose
+  fixture the Python host wrote. A new top-level key is written only when
+  it isn't the default.
+
 ## A walk that "reached" its target without arriving (2026-10-04)
 
 - A navigator walk leg aimed at `x.round()` with the tolerance truncated,

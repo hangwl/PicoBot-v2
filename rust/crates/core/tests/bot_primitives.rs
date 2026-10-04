@@ -157,6 +157,60 @@ impl Body for KeyBody {
 }
 
 #[test]
+fn a_slipped_move_skips_its_last_re_press_and_is_marked() {
+    type Case = (&'static str, fn(&mut KeyBody), usize);
+    let cases: [Case; 3] = [
+        ("flash_hop", |b| b.flash_hop(), 1),
+        ("double_flash", |b| b.double_flash(), 2),
+        ("up_side_flash", |b| b.up_side_flash(Dir::Right), 2),
+    ];
+    for (name, f, jumps) in cases {
+        let mut b = KeyBody::new();
+        b.cfg.move_miss_chance = 1.0;
+        f(&mut b);
+        let mut want = vec!["space"; jumps];
+        want.push("a");
+        assert_eq!(b.presses(), want, "{name}");
+        assert!(b.state.injected_miss, "{name}");
+    }
+    let mut b = KeyBody::new();
+    b.cfg.move_miss_chance = 1.0;
+    b.up_flash_timed(None, Some(0.2), &mut |_| {});
+    assert!(b.state.injected_miss);
+    assert_eq!(b.seq().iter().filter(|e| **e == "down:space").count(), 1);
+}
+
+#[test]
+fn nothing_slips_when_off_or_while_measuring() {
+    let mut b = KeyBody::new();
+    for _ in 0..50 {
+        b.flash_hop();
+    }
+    assert!(!b.state.injected_miss);
+    assert_eq!(b.presses().iter().filter(|k| **k == "space").count(), 100);
+
+    let mut b = KeyBody::new();
+    b.cfg.move_miss_chance = 1.0;
+    b.state.measuring = true;
+    b.flash_hop();
+    assert!(!b.state.injected_miss);
+    assert_eq!(b.presses(), ["space", "space", "a"]);
+}
+
+#[test]
+fn slips_happen_at_about_the_set_rate() {
+    let mut b = KeyBody::new();
+    b.cfg.move_miss_chance = 0.1;
+    let mut slips = 0;
+    for _ in 0..1000 {
+        b.state.injected_miss = false;
+        b.flash_hop();
+        slips += b.state.injected_miss as u32;
+    }
+    assert!((60..=140).contains(&slips), "{slips}");
+}
+
+#[test]
 fn every_flash_move_attacks_after_its_last_jump() {
     type Case = (&'static str, fn(&mut KeyBody), usize);
     let cases: [Case; 3] = [

@@ -21,6 +21,10 @@ pub struct AppConfig {
     pub serial_port: String,
     pub ws_port: i64,
     pub http_port: i64,
+    /// Where the dashboard listens: `auto` (loopback + this machine's
+    /// Tailscale and LAN addresses), `loopback`, `tailscale`, `all`
+    /// (every interface), or an IPv4 address.
+    pub bind: String,
     /// Dashboard stream rate, 1–30.
     pub view_fps: f64,
     pub ws_tls: bool,
@@ -39,6 +43,7 @@ impl Default for AppConfig {
             serial_port: String::new(),
             ws_port: 8765,
             http_port: 8000,
+            bind: "auto".into(),
             view_fps: 10.0,
             ws_tls: false,
             ws_certfile: String::new(),
@@ -62,6 +67,7 @@ impl AppConfig {
             serial_port: text("serial_port", &d.serial_port),
             ws_port: o.get("ws_port").and_then(as_i64).unwrap_or(d.ws_port),
             http_port: o.get("http_port").and_then(as_i64).unwrap_or(d.http_port),
+            bind: text("bind", &d.bind),
             view_fps: o
                 .get("view_fps")
                 .and_then(as_f64)
@@ -89,6 +95,9 @@ impl AppConfig {
         o.insert("serial_port".into(), self.serial_port.clone().into());
         o.insert("ws_port".into(), self.ws_port.into());
         o.insert("http_port".into(), self.http_port.into());
+        if self.bind != "auto" {
+            o.insert("bind".into(), self.bind.clone().into());
+        }
         o.insert("view_fps".into(), self.view_fps.into());
         o.insert("ws_tls".into(), self.ws_tls.into());
         o.insert("ws_certfile".into(), self.ws_certfile.clone().into());
@@ -302,12 +311,22 @@ pub struct BotConfig {
     pub pause_on_lie_detector: bool,
     /// Bring the game to the front when the bot starts; off waits for it.
     pub auto_focus: bool,
+    /// Save game screenshots to `debug/frames/` when the dot is lost, the
+    /// player is off every platform, a rune shows, or a lie detector shows.
+    pub evidence_captures: bool,
     // Keys
     pub attack_keys: Vec<String>,
     pub buff_keys: Vec<String>,
     pub buff_interval_seconds: f64,
     /// Telegram status message every this many minutes while running (0 = off).
     pub heartbeat_minutes: f64,
+    /// Stop the run after about this long (0 = never); the exact limit is
+    /// drawn per run, ±15%.
+    pub session_max_minutes: f64,
+    /// Rest roughly every this many minutes of farming (0 = never)...
+    pub break_every_minutes: f64,
+    /// ...for about this long.
+    pub break_minutes: f64,
     pub jump_key: String,
     pub up_jump_skill_key: Option<String>,
     pub up_jump_skill_cooldown: f64,
@@ -339,6 +358,8 @@ pub struct BotConfig {
     pub weave_double_chance: f64,
     /// Odds a move (flash hop, blink, hop) carries an attack window.
     pub move_attack_chance: f64,
+    /// Odds a flash move's mid-air re-press is skipped on purpose (0 = never).
+    pub move_miss_chance: f64,
     /// Odds a landing carries an attack window.
     pub ground_attack_chance: f64,
     /// Attacks per minute to steer toward (0 = off).
@@ -392,10 +413,14 @@ impl Default for BotConfig {
             stop_when_map_unrecognized: true,
             pause_on_lie_detector: true,
             auto_focus: true,
+            evidence_captures: true,
             attack_keys: vec!["a".into()],
             buff_keys: Vec::new(),
             buff_interval_seconds: 60.0,
             heartbeat_minutes: 30.0,
+            session_max_minutes: 0.0,
+            break_every_minutes: 0.0,
+            break_minutes: 0.0,
             jump_key: "alt".into(),
             up_jump_skill_key: None,
             up_jump_skill_cooldown: 3.0,
@@ -421,6 +446,7 @@ impl Default for BotConfig {
             combo_repress_seconds: 0.16,
             weave_double_chance: 0.4,
             move_attack_chance: 1.0,
+            move_miss_chance: 0.0,
             ground_attack_chance: 0.0,
             target_attacks_per_min: 0.0,
             weave_range_px: 24,
@@ -526,6 +552,7 @@ impl BotConfig {
             ),
             ("pause_on_lie_detector", &mut cfg.pause_on_lie_detector),
             ("auto_focus", &mut cfg.auto_focus),
+            ("evidence_captures", &mut cfg.evidence_captures),
             ("name_ocr", &mut cfg.name_ocr),
         ] {
             if let Some(v) = get(name) {
@@ -535,6 +562,9 @@ impl BotConfig {
         for (name, slot) in [
             ("buff_interval_seconds", &mut cfg.buff_interval_seconds),
             ("heartbeat_minutes", &mut cfg.heartbeat_minutes),
+            ("session_max_minutes", &mut cfg.session_max_minutes),
+            ("break_every_minutes", &mut cfg.break_every_minutes),
+            ("break_minutes", &mut cfg.break_minutes),
             ("up_jump_skill_cooldown", &mut cfg.up_jump_skill_cooldown),
             ("nav_up_flash_px", &mut cfg.nav_up_flash_px),
             ("nav_rope_lift_px", &mut cfg.nav_rope_lift_px),
@@ -545,6 +575,7 @@ impl BotConfig {
             ("vert_jump_interval", &mut cfg.vert_jump_interval),
             ("weave_double_chance", &mut cfg.weave_double_chance),
             ("move_attack_chance", &mut cfg.move_attack_chance),
+            ("move_miss_chance", &mut cfg.move_miss_chance),
             ("ground_attack_chance", &mut cfg.ground_attack_chance),
             ("target_attacks_per_min", &mut cfg.target_attacks_per_min),
             ("anchor_float_px", &mut cfg.anchor_float_px),
@@ -753,10 +784,14 @@ impl BotConfig {
             "stop_when_map_unrecognized": self.stop_when_map_unrecognized,
             "pause_on_lie_detector": self.pause_on_lie_detector,
             "auto_focus": self.auto_focus,
+            "evidence_captures": self.evidence_captures,
             "attack_keys": self.attack_keys,
             "buff_keys": self.buff_keys,
             "buff_interval_seconds": self.buff_interval_seconds,
             "heartbeat_minutes": self.heartbeat_minutes,
+            "session_max_minutes": self.session_max_minutes,
+            "break_every_minutes": self.break_every_minutes,
+            "break_minutes": self.break_minutes,
             "jump_key": self.jump_key,
             "up_jump_skill_key": self.up_jump_skill_key,
             "up_jump_skill_cooldown": self.up_jump_skill_cooldown,
@@ -782,6 +817,7 @@ impl BotConfig {
             "combo_repress_seconds": self.combo_repress_seconds,
             "weave_double_chance": self.weave_double_chance,
             "move_attack_chance": self.move_attack_chance,
+            "move_miss_chance": self.move_miss_chance,
             "ground_attack_chance": self.ground_attack_chance,
             "target_attacks_per_min": self.target_attacks_per_min,
             "weave_range_px": self.weave_range_px,

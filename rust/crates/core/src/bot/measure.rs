@@ -177,8 +177,10 @@ impl MoveMeasurer {
         self.mode = mode;
         self.only = only.map(str::to_owned);
         self.running = true;
+        body.state().measuring = true;
         self.publish(body);
         self.run_inner(body);
+        body.state().measuring = false;
         // Finished moves are kept even when the run was stopped.
         if let Err(e) = body.state().reach.save(true) {
             (self.emit)("error", &format!("saving reach failed: {e}"));

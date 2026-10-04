@@ -14,6 +14,8 @@ const TOGGLES: [key: string, on: (s: AppState) => boolean, label: string, hint: 
     "Its window shows in the game (checked every second). The bot stops and alerts you — the mini-game is yours to solve; farming resumes once it closes."],
   ["auto_focus", (s) => s.autoFocus, "Focus the game on start",
     "Bring the game window to the front when the bot starts. Off: the bot waits until you focus it yourself."],
+  ["evidence_captures", (s) => s.evidenceCaptures, "Save evidence captures",
+    "Game screenshots written to debug/frames/ when the dot is lost, the player is off every platform, a rune shows or a lie detector appears."],
 ];
 
 export function SafetyPage({ s }: { s: AppState }) {
@@ -63,6 +65,23 @@ export function SafetyPage({ s }: { s: AppState }) {
                hint="Specks smaller than this are ignored. Raise it if stray pixels are counted as players.">
           <NumberField value={s.playerMinPx} min={1} step={1}
                        onCommit={(v) => save({ other_player_min_px: Math.round(v) })} />
+        </Field>
+      </Section>
+      <Section title="Session"
+               hint="Hours of unbroken play look like a macro. Each limit is jittered a little per run, and 0 turns it off.">
+        <Field label="Stop after (minutes)"
+               hint="The run ends on its own, with an alert, after about this long (±15%).">
+          <NumberField value={s.sessionMax} min={0} step={30}
+                       onCommit={(v) => save({ session_max_minutes: v })} />
+        </Field>
+        <Field label="Rest every (minutes)"
+               hint="Farm for about this long, then idle for the break below (needs both set). Keys are released, as in any pause.">
+          <NumberField value={s.breakEvery} min={0} step={5}
+                       onCommit={(v) => save({ break_every_minutes: v })} />
+        </Field>
+        <Field label="Rest for (minutes)">
+          <NumberField value={s.breakFor} min={0} step={1}
+                       onCommit={(v) => save({ break_minutes: v })} />
         </Field>
       </Section>
       <Section title="Telegram"

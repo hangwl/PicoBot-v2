@@ -274,6 +274,14 @@ Bot-controlled movement looks like a player farming, not a macro:
   contiguous delays within 1 px of the highest peak), log-normally varied
   around its middle; without a sweep, 0.16–0.30 s around 0.22 s. Up goes
   down ~40 ms before the re-press.
+- **Slips** (`move_miss_chance`, default 0 — try 1–3%): a flash move can
+  skip its last mid-air re-press (`Body::slip`), so the hop really falls
+  short and the navigator treats it like any missed leg (logged "Slip:
+  skipping the … re-press", then "Missed …"). Slips are marked
+  (`BotState::injected_miss`) and never taught to the planner: no
+  `ReachModel` update, no `hop_px` update. The session's move counts
+  still record the miss. Rope grabs never slip, and a move measurement
+  (`BotState::measuring`) never does.
 - **Attack windows** (`Body::attack_window`): an *air* window opens once
   a flash has triggered (gap, double, up and up-then-side flashes; a
   blink or a class without air attacks gets a *ground* window after
@@ -452,6 +460,23 @@ from real captures, anywhere on screen; ~3ms). The bot pauses and
 alerts; the mini-game is the player's to solve, and farming resumes once
 the window closes. The first sighting is saved to
 `debug/frames/*_liedetector/`. A rune is handled separately (below).
+
+**Reaction time**: hazards a person at the keyboard would see — other
+players and the lie detector — are acted on after a human delay (~0.22s
+for a player's dot, ~0.7s for the lie-detector window, log-normal and
+bounded). The alert goes out at once; the bot keeps playing until the
+delay is up, then releases every key and pauses. Hazards that are the
+bot's own business (loading screens, map identity, focus loss) stop it
+immediately.
+
+**Session limits** (Setup → Safety → Session): `session_max_minutes`
+ends the run on its own (alert: "Session limit reached"), the limit drawn
+per run within ±15% of the setting. `break_every_minutes` with
+`break_minutes` schedules rests: after about that much farming (±30%)
+the bot goes to PAUSE for about the break length (±40%) — keys released,
+shown as "scheduled break", no alert and no long-pause warning — then
+resumes where it was. A rune detour takes priority and a break waits
+for it. All three are 0 (off) by default.
 
 ### Runes
 

@@ -16,3 +16,11 @@ serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 
 [profile.release]
 debug = 1          # symbols for profiling (flamegraph) without slowing it down
+
+# Deployment build: no debug info (panic messages still carry source file names).
+#   cargo build --profile dist -p picobot-host   (-> target/dist/picobot.exe)
+[profile.dist]
+inherits = "release"
+debug = 0
+strip = "symbols"
+lto = "thin"

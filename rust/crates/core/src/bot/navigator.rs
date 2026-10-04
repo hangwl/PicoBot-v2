@@ -218,6 +218,7 @@ impl Navigator {
 
     fn leg<B: Body + ?Sized>(&self, body: &mut B, leg: &Leg) -> LegStatus {
         body.state().air_slack = self.landing_slack(leg);
+        body.state().injected_miss = false;
         let status = self.leg_inner(body, leg);
         body.state().air_slack = None;
         match status {
@@ -315,8 +316,11 @@ impl Navigator {
             return LegStatus::Aborted;
         }
         // A move that never left the ground (an eaten key, a stun) says
-        // nothing about its reach.
-        if let (Some(m), Some(s), Some(p), true) = (leg.kind.reach_move(), start, pos, took_off) {
+        // nothing about its reach, nor does a re-press skipped on purpose.
+        let slipped = std::mem::take(&mut body.state().injected_miss);
+        if let (Some(m), Some(s), Some(p), true, false) =
+            (leg.kind.reach_move(), start, pos, took_off, slipped)
+        {
             // Rise between the platforms' rows, not raw feet: a pause at the
             // top of a jump can read a few px above where it comes down, and
             // a rise learned from that is more than the move can do.

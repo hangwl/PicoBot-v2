@@ -15,7 +15,7 @@ with the top bar showing *Reconnecting*.
 ## Phone can't load the dashboard?
 
 1. Open `http://<address>:8000/health` on the phone. JSON back (`"ok":
-   true`) means the host is reachable — a page that still won't load is
+   true`; only the host itself sees the extra fields) means the host is reachable — a page that still won't load is
    an app problem; no answer means the network.
 2. Every page request is logged as an `http` event (Log → All): the
    phone's address, the request and the status. No line for the phone's
@@ -24,6 +24,9 @@ with the top bar showing *Reconnecting*.
    on ports 8000 and 8765 for the network type Tailscale uses.
 3. Try the `100.x.y.z` address the host printed instead of the MagicDNS
    name.
+4. The host listens only on the addresses its `bind` setting names
+   (`auto`: loopback, Tailscale, LAN). A page that loads on one address
+   but not another points there — see configuration.md.
 
 ## The app
 

@@ -159,6 +159,9 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   `weave_double_chance` is the chance a firing window casts two;
   `target_attacks_per_min` (default 0 = off) steers those odds toward a
   rate. Setup → Tuning → Attacks edits them (`attacks|set`).
+- `move_miss_chance` (0–1; default 0) — the odds a flash move skips its
+  last mid-air re-press so it genuinely misses (try 0.01–0.03). Never
+  taught to the move-reach model. Setup → Tuning → Attacks edits it.
 - `allowed_other_players` (default 0) — other players tolerated on the
   minimap before the bot pauses (`stop_when_players_appear`);
   `other_player_min_px` (default 6) — the smallest marker that counts.
@@ -176,8 +179,30 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   the bot runs (default 30; 0 turns it off). Telegram gets hazards only.
 - `pause_on_lie_detector` (default true) — pause and alert while the
   lie detector's window shows (see bot-behavior.md, Safety).
+- `session_max_minutes` (default 0 = off) — end the run after about this
+  long; `break_every_minutes` and `break_minutes` (0 = off, both needed)
+  — rest that long every so often. Each is jittered per run; see
+  bot-behavior.md, Safety. Setup → Safety → Session edits them.
 - `auto_focus` (default true) — bring the game to the front when the
   bot starts; off waits for you to focus it (the bot pauses until then).
+- `evidence_captures` (default true) — save game screenshots to
+  `debug/frames/` (dot lost, off platform, rune, lie detector). Turn it
+  off on a deployed machine; `record_rune_solves` and the dashboard's
+  explicit snapshot are separate.
+
+Top-level (not in `"bot"`):
+
+- `bind` (default `"auto"`) — where the dashboard listens: `auto`
+  (loopback plus this machine's Tailscale and LAN addresses),
+  `loopback`, `tailscale` (loopback plus the Tailscale address), `all`
+  (every interface), or one IPv4 address (plus loopback). The addresses
+  are read at start-up; restart after the network changes.
+  `/health` returns the full status JSON to loopback callers and only
+  `{"ok": true}` to others.
+- `serial_port` — `auto` probes every COM port (open, DTR toggle,
+  handshake); once the Pico's port is known, pin it (a number in
+  `config.json`, e.g. `COM7`) so a run doesn't. Don't pass `--window`
+  from launchers: the title already lives in `default_target_window`.
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest
   `debug_capture_max_events` folders. See [development.md](development.md#debug-frame-captures).

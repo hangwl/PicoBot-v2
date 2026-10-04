@@ -427,6 +427,7 @@ impl Host {
             "record_rune_solves",
             "pause_on_lie_detector",
             "auto_focus",
+            "evidence_captures",
         ];
         let mut edits: Vec<(String, Value)> = Vec::new();
         for (k, v) in &want {
@@ -446,9 +447,13 @@ impl Host {
                 ("rune_key", Value::String(key)) if !key.trim().is_empty() => {
                     edits.push((k.clone(), Value::String(key.trim().to_lowercase())))
                 }
-                ("heartbeat_minutes", v) if v.as_f64().is_some_and(|m| m >= 0.0) => {
-                    edits.push((k.clone(), v.clone()))
-                }
+                (
+                    "heartbeat_minutes"
+                    | "session_max_minutes"
+                    | "break_every_minutes"
+                    | "break_minutes",
+                    v,
+                ) if v.as_f64().is_some_and(|m| m >= 0.0) => edits.push((k.clone(), v.clone())),
                 _ => {
                     self.bus
                         .emit("error", &format!("invalid safety setting: {k}"));
@@ -505,7 +510,10 @@ impl Host {
         for (k, v) in &want {
             let chance = matches!(
                 k.as_str(),
-                "move_attack_chance" | "ground_attack_chance" | "weave_double_chance"
+                "move_attack_chance"
+                    | "ground_attack_chance"
+                    | "weave_double_chance"
+                    | "move_miss_chance"
             );
             match v.as_f64() {
                 Some(n) if chance && (0.0..=1.0).contains(&n) => edits.push((k.clone(), n)),
