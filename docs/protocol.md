@@ -43,7 +43,7 @@ and follows the same view.
 | `host|release_all` | the Pico lets go of every key and button (dashboard fingers included); answered by a `notify` or an `error` |
 | `host|snapshot` | save the whole game window, lossless, to `debug/frames/<stamp>_snapshot/` (`window.png`, `meta.json`: window, size, map, bot state, hazard); answered by a `notify` (the folder) or an `error` |
 | `safety|set|{json}` | edit the pause toggles (`stop_when_players_appear`, `stop_when_rune_appears`, `stop_when_map_unrecognized`, `record_rune_solves`, `pause_on_lie_detector`, `auto_focus`, `evidence_captures`: bool), `rune_action` (`solve`\|`approach`\|`pause`), `rune_key` (a key name), `allowed_other_players` (≥ 0), `other_player_min_px` (≥ 1) `heartbeat_minutes`, `session_max_minutes`, `break_every_minutes` and `break_minutes` (≥ 0); saved to `config.json`, then re-sends `config` |
-| `attacks|set|{json}` | `move_attack_chance`, `ground_attack_chance`, `weave_double_chance`, `move_miss_chance` (0–1) and `target_attacks_per_min` (≥ 0); saved to `config.json`, then re-sends `config` |
+| `attacks|set|{json}` | `move_attack_chance`, `ground_attack_chance`, `weave_double_chance`, `move_miss_chance`, `chord_gap_chance` (0–1) and `target_attacks_per_min` (≥ 0); saved to `config.json`, then re-sends `config` |
 | `notify|test` | send one Telegram test alert; the host answers with a `notify` (sent) or `error` event |
 | `movekeys|set|{json}` | movement keybinds (jump/rope-lift/flash) + nav radius |
 | `layout|save\|clear\|reset[|<name>]` | layout lifecycle |

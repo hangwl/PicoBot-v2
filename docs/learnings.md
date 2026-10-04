@@ -425,6 +425,12 @@ landings per visit.
   round trip is the floor), and unacknowledged pairs reach 1.6–3 ms. The
   comb is gone. The USB identity and `boot.py`/`code.py` were untouched
   by the reflash.
+- **Chord gaps** (`chord_gap_chance`): with polling at 1 ms the sub-10 ms
+  idea became real. Through the real `HidController`, F8→F9 pairs drawn as
+  chords arrive a median 8.8 ms apart (3.4–16.1; the same ±2 ms arrival
+  jitter as every row). There is no in-game human data to size the odds
+  from — 20% is a modest guess, with a 5 ms floor because nothing beats
+  the ~4.5 ms ACK round trip.
 
 ## A walk that "reached" its target without arriving (2026-10-04)
 

@@ -521,6 +521,7 @@ fn make_body(host: &Arc<Host>, stop: Arc<Stop>) -> Result<HostBody, String> {
     let cfg = host.bot_config();
     let bus = host.bus.clone();
     let s = stop.clone();
+    let chord = cfg.chord_gap_chance;
     let hid = HidController::with(
         move |payload| {
             bus.emit_level("hid", payload, "debug");
@@ -530,7 +531,9 @@ fn make_body(host: &Arc<Host>, stop: Arc<Stop>) -> Result<HostBody, String> {
         move |secs| {
             s.wait(secs);
         },
-        Some(Box::new(picobot_core::timing::key_gap)),
+        Some(Box::new(move |same| {
+            picobot_core::timing::key_gap_for(same, chord)
+        })),
         monotonic,
     )
     .with_lease(KEY_LEASE);

@@ -514,6 +514,7 @@ impl Host {
                     | "ground_attack_chance"
                     | "weave_double_chance"
                     | "move_miss_chance"
+                    | "chord_gap_chance"
             );
             match v.as_f64() {
                 Some(n) if chance && (0.0..=1.0).contains(&n) => edits.push((k.clone(), n)),

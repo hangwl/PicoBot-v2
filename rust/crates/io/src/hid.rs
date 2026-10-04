@@ -13,13 +13,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use picobot_core::timing::{human_hold, key_gap, monotonic};
+use picobot_core::timing::{human_hold, key_gap_for, monotonic};
 
 use crate::serial::SerialLink;
 
 type SendFn = Box<dyn FnMut(&str) -> bool + Send>;
 type SleepFn = Box<dyn FnMut(f64) + Send>;
-type GapFn = Box<dyn FnMut() -> f64 + Send>;
+/// The spacing before an event; told whether the same finger as the last one.
+type GapFn = Box<dyn FnMut(bool) -> f64 + Send>;
 type ClockFn = Box<dyn Fn() -> f64 + Send>;
 
 /// Attempts at a key-up before giving up on it (a release is idempotent).
@@ -41,6 +42,7 @@ pub struct HidController {
     /// Held keys, with when each was last sent down.
     held: BTreeMap<String, f64>,
     last_event: Option<f64>,
+    last_key: Option<String>,
     lease: Option<f64>,
 }
 
@@ -50,7 +52,7 @@ impl HidController {
         HidController::with(
             send,
             |s| std::thread::sleep(Duration::from_secs_f64(s.max(0.0))),
-            Some(Box::new(key_gap)),
+            Some(Box::new(|same| key_gap_for(same, 0.0))),
             monotonic,
         )
     }
@@ -69,6 +71,7 @@ impl HidController {
             clock: Box::new(clock),
             held: BTreeMap::new(),
             last_event: None,
+            last_key: None,
             lease: None,
         }
     }
@@ -121,18 +124,20 @@ impl HidController {
     /// Fingers never land at once: consecutive key events are spaced by at
     /// least a drawn human gap. Time already spent (a deliberate sleep, the
     /// serial round trip) counts toward it, so timed sequences barely shift.
-    fn space(&mut self) {
+    fn space(&mut self, key: &str) {
         if let (Some(gap), Some(last)) = (self.gap.as_mut(), self.last_event) {
-            let wait = gap() - ((self.clock)() - last);
+            let same = self.last_key.as_deref() == Some(key);
+            let wait = gap(same) - ((self.clock)() - last);
             if wait > 0.0 {
                 (self.sleep)(wait);
             }
         }
         self.last_event = Some((self.clock)());
+        self.last_key = Some(key.to_owned());
     }
 
     pub fn key_down(&mut self, key: &str) -> bool {
-        self.space();
+        self.space(key);
         self.renew();
         self.held.insert(key.to_owned(), (self.clock)());
         let payload = self.down_payload(key);
@@ -141,7 +146,7 @@ impl HidController {
 
     /// A key stays tracked as held until its key-up is confirmed.
     pub fn key_up(&mut self, key: &str) -> bool {
-        self.space();
+        self.space(key);
         let ok = self.send_up(&format!("hid|key|up|{key}"));
         if ok {
             self.held.remove(key);
@@ -208,7 +213,7 @@ impl HidController {
         let keys: Vec<String> = std::mem::take(&mut self.held).into_keys().collect();
         let mut all_up = true;
         for key in keys {
-            self.space();
+            self.space(&key);
             all_up &= self.send_up(&format!("hid|key|up|{key}"));
         }
         if !all_up {
@@ -367,7 +372,7 @@ mod tests {
                 z.lock().unwrap().push(t);
                 *c2.lock().unwrap() += t;
             },
-            Some(Box::new(|| 0.03)),
+            Some(Box::new(|_| 0.03)),
             move || *c.lock().unwrap(),
         );
         hid.key_down("a"); // first event: no wait
@@ -377,6 +382,51 @@ mod tests {
         let s = slept.lock().unwrap();
         assert_eq!(s.len(), 2);
         assert!((s[0] - 0.03).abs() < 1e-9 && (s[1] - 0.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_gap_is_told_whether_the_same_finger_follows() {
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let t = told.clone();
+        let mut hid = HidController::with(
+            |_| true,
+            |_| {},
+            Some(Box::new(move |same| {
+                t.lock().unwrap().push(same);
+                0.0
+            })),
+            || 0.0,
+        );
+        hid.key_down("a"); // first event: nothing to space from
+        hid.key_up("a"); // same key
+        hid.key_down("b"); // another finger
+        hid.key_down("b"); // the same again
+        assert_eq!(*told.lock().unwrap(), [true, false, true]);
+    }
+
+    #[test]
+    fn a_gap_below_the_round_trip_is_waited_out_by_the_round_trip() {
+        // A chord gap shorter than the time a send already took adds nothing.
+        let clock = Arc::new(Mutex::new(0.0f64));
+        let slept = Arc::new(Mutex::new(Vec::new()));
+        let (c, z, c2, c3) = (clock.clone(), slept.clone(), clock.clone(), clock.clone());
+        let mut hid = HidController::with(
+            move |_| {
+                *c3.lock().unwrap() += 0.0045; // the ACK round trip
+                true
+            },
+            move |t| {
+                z.lock().unwrap().push(t);
+                *c2.lock().unwrap() += t;
+            },
+            Some(Box::new(|same| if same { 0.03 } else { 0.006 })),
+            move || *c.lock().unwrap(),
+        );
+        hid.key_down("a");
+        hid.key_down("b");
+        let s = slept.lock().unwrap();
+        assert_eq!(s.len(), 1);
+        assert!((s[0] - 0.0015).abs() < 1e-9, "{s:?}");
     }
 
     /// A leased controller over a recording sender and a hand-set clock.
