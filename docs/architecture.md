@@ -46,9 +46,11 @@ easily detected.
 Wire protocol (one line each way):
 
 - Host → Pico: `<seq>:hid|key|down|<name>` (also `up`, `hid|mouse|…`,
-  `hid|move|dx|dy`, `hid|scroll|dx|dy`); `hello|handshake` (answered with
+  `hid|move|dx|dy`, `hid|scroll|dx|dy`, `hid|release_all`);
+  `hello|handshake` (answered with
   `PICO_READY`); `ka` keepalive when idle (~0.4s), no reply.
-- Pico → host: `ACK <seq>` / `NACK <seq>` (unknown key or command).
+- Pico → host: `ACK <seq>` / `NACK <seq>` (unknown key or command, or
+  one that raised — every numbered command is answered).
   Replies are matched by number, so one that arrives after its sender
   timed out can't be credited to a later command.
 - Versions: current firmware announces `PICO_READY v2`; only then does
@@ -59,8 +61,15 @@ Wire protocol (one line each way):
   port disconnects, and — once the host has shown it speaks v2 (a
   numbered command or `ka`) — when nothing has arrived for 2s while
   anything is held: a crashed or hung host never leaves a key down.
+  On the Pico itself: everything is released at startup and when
+  `code.py` exits (a crash or Ctrl-C), a hardware watchdog (4s,
+  `HW_WATCHDOG`) resets a hung board, and auto-reload is off so saving a
+  file to CIRCUITPY can't restart it mid-hold (reset to load an edit).
 - `HidController` counts a key as held from the moment it tries to press
-  it, and an unconfirmed press still sends its key-up.
+  it, and an unconfirmed press (or click) still sends its release. A
+  key-up is tried up to 3 times and the key stays tracked until one is
+  confirmed; if `release_all` can't confirm every key-up it ends with
+  `hid|release_all`.
 - The reader only reads bytes already waiting: reader and writer share
   one synchronous Windows handle, and a read left blocking would hold
   every write behind it. Round trips are ~4 ms.

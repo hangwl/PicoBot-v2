@@ -4,7 +4,8 @@
 //! spacing between events are decided here (human-like, see
 //! `picobot_core::timing`). A key counts as held from the moment a press
 //! is *attempted* — a press whose ACK timed out may still land — and
-//! dropping the controller releases everything it holds.
+//! stays held until a key-up is confirmed; dropping the controller
+//! releases everything it holds.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -18,6 +19,11 @@ type SendFn = Box<dyn FnMut(&str) -> bool + Send>;
 type SleepFn = Box<dyn FnMut(f64) + Send>;
 type GapFn = Box<dyn FnMut() -> f64 + Send>;
 type ClockFn = Box<dyn Fn() -> f64 + Send>;
+
+/// Attempts at a key-up before giving up on it (a release is idempotent).
+const UP_TRIES: usize = 3;
+/// Firmware-side sweep: releases every key and button the Pico holds.
+pub const RELEASE_ALL: &str = "hid|release_all";
 
 pub struct HidController {
     send: SendFn,
@@ -80,11 +86,18 @@ impl HidController {
         (self.send)(&format!("hid|key|down|{key}"))
     }
 
+    /// A key stays tracked as held until its key-up is confirmed.
     pub fn key_up(&mut self, key: &str) -> bool {
         self.space();
-        let ok = (self.send)(&format!("hid|key|up|{key}"));
-        self.held.remove(key);
+        let ok = self.send_up(&format!("hid|key|up|{key}"));
+        if ok {
+            self.held.remove(key);
+        }
         ok
+    }
+
+    fn send_up(&mut self, payload: &str) -> bool {
+        (0..UP_TRIES).any(|_| (self.send)(payload))
     }
 
     /// Tap `key`; the hold defaults to a human-like duration. An
@@ -103,12 +116,14 @@ impl HidController {
         (self.send)(&format!("hid|move|{dx}|{dy}"))
     }
 
+    /// An unconfirmed button press still sends its release.
     pub fn click(&mut self, button: &str) -> bool {
-        if !(self.send)(&format!("hid|mouse|down|{button}")) {
-            return false;
+        let down = (self.send)(&format!("hid|mouse|down|{button}"));
+        if down {
+            (self.sleep)(human_hold(None));
         }
-        (self.sleep)(human_hold(None));
-        (self.send)(&format!("hid|mouse|up|{button}"))
+        let up = self.send_up(&format!("hid|mouse|up|{button}"));
+        down && up
     }
 
     pub fn scroll(&mut self, dy: i32) -> bool {
@@ -119,13 +134,18 @@ impl HidController {
         self.held.iter().map(String::as_str)
     }
 
-    /// Release every key this controller believes is held. Tracking is
-    /// cleared even if a send fails.
+    /// Release every key this controller believes is held; if any key-up
+    /// goes unconfirmed, the firmware is asked to release everything.
+    /// Tracking is cleared either way.
     pub fn release_all(&mut self) {
         let keys: Vec<String> = std::mem::take(&mut self.held).into_iter().collect();
+        let mut all_up = true;
         for key in keys {
             self.space();
-            (self.send)(&format!("hid|key|up|{key}"));
+            all_up &= self.send_up(&format!("hid|key|up|{key}"));
+        }
+        if !all_up {
+            (self.send)(RELEASE_ALL);
         }
     }
 }
@@ -194,10 +214,68 @@ mod tests {
         assert!(!hid.key_down("a"));
         assert_eq!(hid.held_keys().collect::<Vec<_>>(), ["a"]);
         hid.release_all();
-        assert_eq!(sent.lock().unwrap().last().unwrap(), "hid|key|up|a");
+        assert!(sent.lock().unwrap().contains(&"hid|key|up|a".to_owned()));
         assert!(!hid.press("b", None));
         assert_eq!(sent.lock().unwrap().last().unwrap(), "hid|key|up|b");
+    }
+
+    /// The first `fail` sends fail; the rest succeed.
+    fn flaky(fail: usize) -> (HidController, Log<String>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let left = Arc::new(Mutex::new(fail));
+        let s = sent.clone();
+        let hid = HidController::with(
+            move |p| {
+                s.lock().unwrap().push(p.to_owned());
+                let mut n = left.lock().unwrap();
+                let ok = *n == 0;
+                *n = n.saturating_sub(1);
+                ok
+            },
+            |_| {},
+            None,
+            || 0.0,
+        );
+        (hid, sent)
+    }
+
+    #[test]
+    fn an_unconfirmed_key_up_is_retried() {
+        let (mut hid, sent) = flaky(2);
+        hid.held.insert("a".into());
+        assert!(hid.key_up("a"));
+        assert_eq!(*sent.lock().unwrap(), ["hid|key|up|a"; 3]);
         assert_eq!(hid.held_keys().count(), 0);
+    }
+
+    #[test]
+    fn a_key_up_that_never_lands_keeps_the_key_held() {
+        let (mut hid, sent, _) = recorder(true);
+        hid.held.insert("a".into());
+        assert!(!hid.key_up("a"));
+        assert_eq!(sent.lock().unwrap().len(), UP_TRIES);
+        assert_eq!(hid.held_keys().collect::<Vec<_>>(), ["a"]);
+        hid.release_all();
+        assert_eq!(sent.lock().unwrap().last().unwrap(), RELEASE_ALL);
+        assert_eq!(hid.held_keys().count(), 0);
+    }
+
+    #[test]
+    fn a_clean_release_needs_no_firmware_sweep() {
+        let (mut hid, sent, _) = recorder(false);
+        hid.key_down("a");
+        hid.release_all();
+        assert!(!sent.lock().unwrap().contains(&RELEASE_ALL.to_owned()));
+    }
+
+    #[test]
+    fn an_unconfirmed_click_still_releases_the_button() {
+        let (mut hid, sent, slept) = recorder(true);
+        assert!(!hid.click("left"));
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent[0], "hid|mouse|down|left");
+        assert!(sent[1..].iter().all(|p| p == "hid|mouse|up|left"));
+        assert!(slept.lock().unwrap().is_empty());
     }
 
     #[test]

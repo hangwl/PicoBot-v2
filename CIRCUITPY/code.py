@@ -1,9 +1,22 @@
 import time
+import microcontroller
+import supervisor
 import usb_hid
 import usb_cdc
+from watchdog import WatchDogMode
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.mouse import Mouse
+
+# A file saved to CIRCUITPY must not restart this mid-run (keys held);
+# reset the board to load an edit.
+supervisor.runtime.autoreload = False
+
+# Hardware watchdog: a hang resets the board, and the re-enumeration
+# releases every key. In RESET mode it can't be stopped, so leaving to
+# the REPL (Ctrl-C) resets the board too; set False while debugging.
+HW_WATCHDOG = True
+HW_WATCHDOG_S = 4.0
 
 # Add a delay to give the USB host time to get ready.
 # This helps prevent a race condition on startup.
@@ -142,6 +155,9 @@ def reply(word, seq):
 
 def run(parts):
     """Execute one command; True when handled."""
+    if len(parts) == 2 and parts[0].lower() == 'hid' and parts[1].lower() == 'release_all':
+        release_everything()
+        return True
     if len(parts) >= 4 and parts[0].lower() == 'hid':
         kind = parts[1].lower()
         action = parts[2].lower()
@@ -201,7 +217,44 @@ def run(parts):
 
 
 # --- Main Loop ---
-while True:
+def handle(command_line):
+    global commands_seen, watchdog_armed
+    if command_line == 'ka':
+        watchdog_armed = True
+        return
+    if not command_line:
+        return
+    # "<seq>:<command>" — the reply echoes <seq>.
+    seq = ""
+    colon = command_line.find(':')
+    if colon > 0 and command_line[:colon].isdigit():
+        seq, command_line = command_line[:colon], command_line[colon + 1:]
+        watchdog_armed = True
+    parts = command_line.split('|')
+    # Handshake compatibility: "hello" or "hello|handshake"
+    if parts[0].lower() == 'hello' and len(parts) <= 2:
+        try:
+            usb_cdc.data.write(b"PICO_READY v2\n")
+        except Exception:
+            pass
+        commands_seen = True
+        return
+    commands_seen = True
+    try:
+        handled = run(parts)
+    except Exception as e:
+        print(f"Command failed '{command_line}': {e}")
+        handled = False
+    if not handled:
+        print(f"Warning: Unhandled command '{command_line}'")
+    # Every numbered command gets an answer, so the host never waits out
+    # its timeout on a command that failed here.
+    reply("ACK" if handled else "NACK", seq)
+
+
+def step():
+    global data_was_connected, last_ready_sent, commands_seen
+    global rx_buffer, last_rx, watchdog_armed
     now = time.monotonic()
     # Emit PICO_READY on new DATA port connection
     now_connected = usb_cdc.data.connected
@@ -251,32 +304,24 @@ while True:
             line, rx_buffer = rx_buffer.split(b"\n", 1)
             try:
                 command_line = line.decode("utf-8").strip()
-                if command_line == 'ka':
-                    watchdog_armed = True
-                    continue
-                if not command_line:
-                    continue
-                # "<seq>:<command>" — the reply echoes <seq>.
-                seq = ""
-                colon = command_line.find(':')
-                if colon > 0 and command_line[:colon].isdigit():
-                    seq, command_line = command_line[:colon], command_line[colon + 1:]
-                    watchdog_armed = True
-                parts = command_line.split('|')
-                # Handshake compatibility: "hello" or "hello|handshake"
-                if parts[0].lower() == 'hello' and len(parts) <= 2:
-                    try:
-                        usb_cdc.data.write(b"PICO_READY v2\n")
-                    except Exception:
-                        pass
-                    commands_seen = True
-                    continue
-                handled = run(parts)
-                if not handled:
-                    print(f"Warning: Unhandled command '{command_line}'")
-                commands_seen = True
-                reply("ACK" if handled else "NACK", seq)
             except Exception as e:
-                print(f"Could not parse command: {line}. Error: {e}")
-    # 1ms keeps input timing fine-grained (10ms rounded every event).
-    time.sleep(0.001)
+                print(f"Could not decode command: {line}. Error: {e}")
+                continue
+            handle(command_line)
+
+
+release_everything()
+if HW_WATCHDOG:
+    wdt = microcontroller.watchdog
+    wdt.timeout = HW_WATCHDOG_S
+    wdt.mode = WatchDogMode.RESET
+try:
+    while True:
+        if HW_WATCHDOG:
+            wdt.feed()
+        step()
+        # 1ms keeps input timing fine-grained (10ms rounded every event).
+        time.sleep(0.001)
+finally:
+    # A crash or Ctrl-C must not leave anything held.
+    release_everything()
