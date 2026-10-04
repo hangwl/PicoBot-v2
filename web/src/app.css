@@ -48,6 +48,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 0; accent-color:
 button.primary { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 button.danger { color: var(--bad); border-color: #5a2a2e; }
 button.icon { min-width: var(--tap); padding: 0; font-size: 20px; }
+button.armed { color: var(--bad); border-color: var(--bad); }
+button.icon.armed { font-size: 13px; padding: 0 10px; }
 button[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 
 .big {

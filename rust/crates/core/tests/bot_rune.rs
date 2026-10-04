@@ -99,6 +99,46 @@ fn a_rune_off_every_platform_falls_back_to_a_pause() {
 }
 
 #[test]
+fn a_rune_only_rope_lift_reaches_waits_out_its_cooldown() {
+    // 30px up: beyond an up flash (20), within rope lift.
+    let high = [60.0, 70.0, 100.0, 70.0];
+    let mut b = Sim::patrol(
+        &[FLOOR, high],
+        (80.0, 100.0),
+        &[(20.0, 100.0), (180.0, 100.0)],
+    );
+    b.cfg.rune_action = RuneAction::Approach;
+    b.rope_cd = 5.0;
+    b.rune = Some((78, 65, 83, 70));
+    let mut m = Machine::default();
+    run(&mut m, &mut b, 200, |m, _| m.state == State::Pause);
+    assert!(b.log_has("Rune reached"), "{:?}", b.logs);
+    assert!(b.moves.contains(&"rope_lift".to_owned()));
+    assert!(b.rune_events.iter().all(|e| e.0 != "failed"));
+}
+
+#[test]
+fn a_detour_that_fails_on_the_way_farms_on_and_tries_again() {
+    let mut b = farming();
+    b.cfg.rune_action = RuneAction::Approach;
+    b.rope = 0.0; // MID by up flash only
+    b.fizzle = 3; // three up flashes in a row go nowhere
+    b.rune = Some(RUNE);
+    let mut m = Machine::default();
+    run(&mut m, &mut b, 200, |m, b| {
+        m.state == State::Grind && b.log_has("trying again")
+    });
+    assert!(b.log_has("missed landings on the way — farming on, trying again"));
+    assert_eq!(b.rune_events.last().map(|e| e.0.as_str()), Some("failed"));
+    // Farming on, it doesn't go back before the retry is due.
+    run(&mut m, &mut b, 10, |m, _| m.state != State::Grind);
+    assert_eq!(m.state, State::Grind);
+    b.clock += 60.0; // the sim's farming takes no time
+    run(&mut m, &mut b, 200, |m, _| m.state == State::Pause);
+    assert!(b.log_has("Rune reached"));
+}
+
+#[test]
 fn runes_are_ignored_when_turned_off() {
     let mut b = farming();
     b.cfg.stop_when_rune_appears = false;

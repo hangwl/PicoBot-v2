@@ -613,6 +613,9 @@ fn castle_gate() -> Sim {
     ]));
     b.cfg.patrol_mode = picobot_core::config::PatrolMode::Sweep;
     b.cfg.sweep_reach_px = 12.0;
+    // Walking as slow as the class's learned ~12px/s: hopping along another
+    // tier then looks cheaper than walking a platform.
+    b.cfg.walk_cost_factor = 3.5;
     b
 }
 
@@ -636,8 +639,15 @@ fn castle_gate_sweeps_keep_off_the_edges_and_never_climb_to_come_down() {
                     plat.x1
                 );
             }
-            // No rope lift up only to come back down before the sweep.
+            // The crossing stays on its platform: one walk, entry to exit.
             let legs = s.legs.as_ref().unwrap();
+            let last = legs.last().unwrap();
+            assert_eq!(
+                (last.kind, (last.x0, last.y0), (last.x1, last.y1)),
+                (MoveKind::Walk, entry, exit),
+                "seed {seed}: {legs:?}"
+            );
+            // No rope lift up only to come back down before the sweep.
             for (i, l) in legs.iter().enumerate() {
                 if l.kind != MoveKind::RopeLift {
                     continue;
@@ -650,5 +660,32 @@ fn castle_gate_sweeps_keep_off_the_edges_and_never_climb_to_come_down() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn zigzag_sweeps_the_map_row_by_row() {
+    for seed in 0..20u64 {
+        let mut b = castle_gate();
+        b.cfg.patrol_policy = PatrolPolicy::Zigzag;
+        b.state = picobot_core::bot::BotState::new(&b.cfg, b.state.reach.clone(), Some(seed));
+        let mut p = Patrol::default();
+        p.tick(&mut b);
+        // From the floor: its row, then the middle, then the top.
+        let rows: Vec<f64> = p
+            .plan
+            .iter()
+            .map(|s| s.sweep.unwrap().0 .1.round())
+            .collect();
+        assert_eq!(rows, [69.0, 56.0, 56.0, 42.0, 42.0], "seed {seed}");
+        // Each row picks up where the last one left off, so it snakes.
+        let ends: Vec<(f64, f64)> = p
+            .plan
+            .iter()
+            .map(|s| s.sweep.map(|(a, b)| (a.0, b.0)).unwrap())
+            .collect();
+        let right = |(a, b): (f64, f64)| b > a;
+        assert_ne!(right(ends[0]), right(ends[1]), "seed {seed}: {ends:?}");
+        assert_ne!(right(ends[2]), right(ends[3]), "seed {seed}: {ends:?}");
     }
 }

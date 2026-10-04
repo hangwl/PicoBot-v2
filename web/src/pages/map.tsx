@@ -1,7 +1,7 @@
 // Setup → Map: which map this is (detection, titles, saving).
 import { useState } from "preact/hooks";
 import { type AppState, send } from "../protocol";
-import { Field, NumberField, Reply, Section, useReply, val } from "../ui";
+import { ConfirmButton, Field, NumberField, Reply, Section, useReply, val } from "../ui";
 
 export function MapPage({ s }: { s: AppState }) {
   const [creating, setCreating] = useState(false);
@@ -77,21 +77,16 @@ export function MapPage({ s }: { s: AppState }) {
                   onClick={() => act(`map|title|record|${target}`)}>
             Record title from screen
           </button>
-          <button disabled={creating || bad || !s.recordedTitle}
-                  onClick={() => {
-                    if (confirm("Clear this map's recorded title? It won't be auto-detected until one is recorded again."))
-                      act(`map|title|clear|${target}`);
-                  }}>
+          <ConfirmButton disabled={creating || bad || !s.recordedTitle}
+                         ask="Clear it? (not auto-detected until re-recorded)"
+                         onConfirm={() => act(`map|title|clear|${target}`)}>
             Clear title
-          </button>
-          <button class="danger" disabled={creating || bad}
-                  onClick={() => {
-                    const label = target || s.detected || "the detected map";
-                    if (confirm(`Forget the stored layout for ${label}?`))
-                      send(`layout|clear|${target}`);
-                  }}>
+          </ConfirmButton>
+          <ConfirmButton class="danger" disabled={creating || bad}
+                         ask={`Forget ${target || s.detected || "the detected map"}'s layout?`}
+                         onConfirm={() => send(`layout|clear|${target}`)}>
             Forget layout
-          </button>
+          </ConfirmButton>
         </div>
         <p class="hint">
           The map is detected by matching the title on screen to its

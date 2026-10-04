@@ -55,7 +55,7 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
     "rune_key": "y",
     "record_rune_solves": true,
     "stop_when_map_unrecognized": true,
-    "pause_on_lie_detector": false,
+    "pause_on_lie_detector": true,
     "minimap_colors": {
       "player": [12, 240, 239],
       "other_player": [118, 45, 253],
@@ -110,7 +110,8 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   `sweep_reach_px` (default 12) is how far ahead one attack reaches on
   the minimap — a sweep stops that short of the far end.
 - `patrol_policy` — loop ordering: `weighted` (roulette ∝ 1/cost, far
-  anchors stay in the draw) or `greedy` (cheapest next, ±20% jitter).
+  anchors stay in the draw), `greedy` (cheapest next, ±20% jitter) or
+  `zigzag` (row by row, nearest row first, greedy within it).
   `patrol_weight_temp` tunes the roulette: lower → more uniform,
   higher → more greedy.
 - `rope_penalty` — extra seconds added to every rope-climb edge; ropes
@@ -172,7 +173,8 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   Setup → Tuning → Patrol edits them.
 - `heartbeat_minutes` — a status line in the log every N minutes while
   the bot runs (default 30; 0 turns it off). Telegram gets hazards only.
-- `pause_on_lie_detector` is a stub seam — keep it off.
+- `pause_on_lie_detector` (default true) — pause and alert while the
+  lie detector's window shows (see bot-behavior.md, Safety).
 - Debug captures are enabled only by the `--debug-frames` CLI flag;
   they go to `debug_capture_dir`, keeping the newest
   `debug_capture_max_events` folders. See [development.md](development.md#debug-frame-captures).

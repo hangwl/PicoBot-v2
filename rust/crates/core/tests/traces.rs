@@ -30,6 +30,7 @@ fn opt(v: &Value) -> Option<f64> {
 fn reach_learning_matches_python_step_by_step() {
     let trace = load("trace_reach.json");
     let mut m = ReachModel::new(base_reach(&BotConfig::default()), None);
+    m.typical_carry = false;
     let ops = trace["ops"].as_array().unwrap();
     let states = trace["states"].as_array().unwrap();
     for (step, (op, want)) in ops.iter().zip(states).enumerate() {
@@ -205,6 +206,7 @@ fn navigation_graph_matches_python_on_random_maps() {
             rope_clear_px: 0.0,  // the Python host had no rope clearance
             prefer_jumps: false, // nor jumps over rope lift
             rope_lift_cost: 0.5, // and priced rope lift at 0.5s
+            fixed_carry: false,  // and linked gap moves at the near edge
             ..Default::default()
         };
         let graph = NavGraph::new(&plats, &ropes, &m, opts);

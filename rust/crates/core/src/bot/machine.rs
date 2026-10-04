@@ -24,7 +24,12 @@ use super::watchdog::Watchdog;
 use crate::config::RuneAction;
 use crate::rune::Rune;
 use crate::skills::SkillKind;
-use crate::timing::human_reaction;
+use crate::timing::{human_between, human_reaction};
+
+/// Detours to one rune that may fail on the way before holding for it.
+const MAX_RUNE_TRIES: u32 = 3;
+/// Farming between failed detours (s, mean).
+const RUNE_RETRY_S: f64 = 15.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -64,6 +69,12 @@ pub struct Machine {
     solver: RuneSolver,
     /// Paused for the rune (beside it, or where it was seen) until it's gone.
     rune_hold: bool,
+    /// Detours to the current rune that failed on the way.
+    rune_tries: u32,
+    /// Farming on after a failed detour: the next one not before this.
+    rune_retry_at: f64,
+    /// A detour failed: back to farming.
+    rune_back: bool,
 }
 
 impl Default for Machine {
@@ -77,6 +88,9 @@ impl Default for Machine {
             approach: RuneApproach::default(),
             solver: RuneSolver::default(),
             rune_hold: false,
+            rune_tries: 0,
+            rune_retry_at: f64::NEG_INFINITY,
+            rune_back: false,
         }
     }
 }
@@ -175,7 +189,7 @@ impl Machine {
                 if let Some(s) = safety(body, true) {
                     return Next::Go(s);
                 }
-                if rune_now(body).is_some() {
+                if self.rune_due(body) {
                     return self.on_rune(body);
                 }
                 let active = !body.rotation().anchors.is_empty();
@@ -188,7 +202,7 @@ impl Machine {
                 if let Some(s) = safety(body, true) {
                     return Next::Go(s);
                 }
-                if rune_now(body).is_some() {
+                if self.rune_due(body) {
                     return self.on_rune(body);
                 }
                 if self.travel_done {
@@ -210,6 +224,10 @@ impl Machine {
                         Next::Go(State::Grind)
                     }
                     Some(_) if self.rune_hold => Next::Hold(State::Grind),
+                    Some(_) if self.rune_back => {
+                        self.rune_back = false;
+                        Next::Go(State::Grind)
+                    }
                     Some(_) => Next::Stay,
                 }
             }
@@ -227,6 +245,41 @@ impl Machine {
                 Next::Resume
             }
         }
+    }
+
+    /// A rune to go for: one is up and no failed detour is cooling off.
+    fn rune_due<B: Body + ?Sized>(&mut self, body: &mut B) -> bool {
+        if rune_now(body).is_none() {
+            self.rune_tries = 0;
+            self.rune_retry_at = f64::NEG_INFINITY;
+            return false;
+        }
+        body.now() >= self.rune_retry_at
+    }
+
+    /// A detour failed on the way: farm on and try again shortly, or —
+    /// after `MAX_RUNE_TRIES` — hold for the rune.
+    fn rune_failed<B: Body + ?Sized>(&mut self, body: &mut B, r: Rune, why: &str) {
+        self.rune_tries += 1;
+        let (x, y) = r.center();
+        body.rune_event(
+            "failed",
+            json!({ "rune": r.bbox, "why": why, "try": self.rune_tries }),
+        );
+        if self.rune_tries >= MAX_RUNE_TRIES {
+            self.rune_hold = true;
+            body.notify(&format!(
+                "Rune at ({x:.0}, {y:.0}): {why} ({} tries) — pausing",
+                self.rune_tries
+            ));
+            return;
+        }
+        let wait = human_between(RUNE_RETRY_S, RUNE_RETRY_S * 0.6, RUNE_RETRY_S * 2.0, 0.3);
+        self.rune_retry_at = body.now() + wait;
+        self.rune_back = true;
+        body.log(&format!(
+            "Rune at ({x:.0}, {y:.0}): {why} — farming on, trying again in {wait:.0}s"
+        ));
     }
 
     /// A rune showed up while farming: detour to it, or hold here.
@@ -338,9 +391,16 @@ impl Machine {
             return;
         };
         if self.solver.active() {
-            if let Solve::GaveUp(why) = self.solver.tick(body, r, &mut self.approach) {
-                self.rune_hold = true;
-                body.notify(&format!("Rune: {why} — pausing"));
+            match self.solver.tick(body, r, &mut self.approach) {
+                Solve::GaveUp(why) => {
+                    self.rune_hold = true;
+                    body.notify(&format!("Rune: {why} — pausing"));
+                }
+                Solve::Lost(why) => {
+                    self.solver.reset();
+                    self.rune_failed(body, r, &why);
+                }
+                Solve::Working => {}
             }
             return;
         }
@@ -354,7 +414,8 @@ impl Machine {
                 self.rune_hold = true;
                 body.notify("Rune reached — standing beside it, pausing to solve");
             }
-            Approach::Failed(why) => {
+            Approach::Failed(why) => self.rune_failed(body, r, &why),
+            Approach::Impossible(why) => {
                 self.rune_hold = true;
                 let (x, y) = r.center();
                 body.rune_event("failed", json!({ "rune": r.bbox, "why": why }));

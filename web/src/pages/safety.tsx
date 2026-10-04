@@ -10,6 +10,8 @@ const TOGGLES: [key: string, on: (s: AppState) => boolean, label: string, hint: 
     "Another player's dot is on the minimap (more than the number allowed below)."],
   ["stop_when_map_unrecognized", (s) => s.stopMap, "Pause on an unrecognized map",
     "The title names no saved map. Off lets the bot farm an unsaved map with the global rotation."],
+  ["pause_on_lie_detector", (s) => s.stopLie, "Pause for a lie detector",
+    "Its window shows in the game (checked every second). The bot stops and alerts you — the mini-game is yours to solve; farming resumes once it closes."],
 ];
 
 export function SafetyPage({ s }: { s: AppState }) {

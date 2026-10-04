@@ -16,7 +16,10 @@
 //!   half the base;
 //! - a miss that went at least as far as planned (overshot, or came down
 //!   on another platform) says nothing about reach and is ignored;
-//! - a deliberate measurement (`calibrate`) sets the envelope outright.
+//! - a deliberate measurement (`calibrate`) sets the envelope outright;
+//! - with `typical_carry`, a sideways move's dx is the median of its recent
+//!   carries (`"carry"` in the file) instead: the planner flies them their
+//!   full distance, so an extreme one would put every takeoff too far back.
 //!
 //! The planner may explore up to `explore` x the envelope (capped by the
 //! ceiling) at a cost penalty, so estimates grow from conservative starts.
@@ -110,6 +113,10 @@ fn epoch_now() -> f64 {
 
 const SAVE_EVERY: Duration = Duration::from_secs(10);
 
+/// Recent carries kept per sideways move, and how many make a median.
+const CARRY_KEEP: usize = 9;
+const CARRY_MIN: usize = 3;
+
 /// One move in a [`ReachModel::snapshot`]: estimate dx and rise, and the
 /// ceiling if any, in 0.1px units.
 pub type SnapshotRow = (Move, i64, i64, Option<(i64, i64)>);
@@ -154,6 +161,10 @@ pub struct ReachModel {
     pub shrink: f64,
     /// Bumped on every change: graph caches key on it.
     pub version: u64,
+    /// Sideways dx is the median recent carry, not the furthest success.
+    pub typical_carry: bool,
+    /// Recent carries (px) per move, oldest first.
+    pub carries: [Vec<f64>; 7],
     fail_streak: [u32; 7],
     dirty: bool,
     saved_at: Option<Instant>,
@@ -171,6 +182,8 @@ impl ReachModel {
             explore: 1.3,
             shrink: 0.95,
             version: 0,
+            typical_carry: true,
+            carries: Default::default(),
             fail_streak: [0; 7],
             dirty: false,
             saved_at: None,
@@ -271,7 +284,9 @@ impl ReachModel {
         let before = (self.est[i], self.ceiling_of(m));
         let (pdx, prise) = planned;
         let (odx, orise) = observed;
-        if ok {
+        if self.typical_carry && fam == Family::Horizontal {
+            self.observe_carry(m, pdx, odx, orise);
+        } else if ok {
             self.fail_streak[i] = 0;
             let e = &mut self.est[i];
             if fam.learns_dx() {
@@ -318,6 +333,28 @@ impl ReachModel {
             self.dirty = true;
         }
         let _ = self.save(false);
+    }
+
+    /// A sideways flight's carry: what it covered coming down on its own
+    /// row, or an upper bound on it when it fell short to a lower one.
+    fn observe_carry(&mut self, m: Move, pdx: f64, odx: f64, orise: f64) {
+        let level = orise.abs() <= 2.0;
+        let fell_short = orise < -2.0 && odx < pdx;
+        if odx <= 0.0 || !(level || fell_short) {
+            return;
+        }
+        let i = m.index();
+        let c = &mut self.carries[i];
+        c.push(odx);
+        if c.len() > CARRY_KEEP {
+            c.remove(0);
+        }
+        if c.len() >= CARRY_MIN {
+            let mut v = c.clone();
+            v.sort_by(f64::total_cmp);
+            self.est[i].dx = v[v.len() / 2];
+        }
+        self.dirty = true;
     }
 
     /// A deliberate measurement: set the given dimensions outright (lower
@@ -447,6 +484,13 @@ impl ReachModel {
                 .filter_map(|(k, t)| Some((k.clone(), as_f64(t)?)))
                 .collect();
         }
+        if let Some(Value::Object(carry)) = v.get("carry") {
+            for (k, xs) in carry {
+                if let (Some(m), Some(xs)) = (Move::parse(k), xs.as_array()) {
+                    self.carries[m.index()] = xs.iter().filter_map(as_f64).collect();
+                }
+            }
+        }
         if let Some(Value::Object(profiles)) = v.get("profiles") {
             self.profiles = profiles
                 .iter()
@@ -485,6 +529,14 @@ impl ReachModel {
         doc.insert("est".into(), Value::Object(est));
         doc.insert("ceiling".into(), Value::Object(ceiling));
         doc.insert("measured".into(), Value::Object(measured));
+        let carry: Map<String, Value> = Move::ALL
+            .iter()
+            .filter(|m| !self.carries[m.index()].is_empty())
+            .map(|m| (m.as_str().to_owned(), json!(self.carries[m.index()])))
+            .collect();
+        if !carry.is_empty() {
+            doc.insert("carry".into(), Value::Object(carry));
+        }
         if !self.profiles.is_empty() {
             doc.insert("profiles".into(), Value::Object(self.profiles.clone()));
         }
@@ -518,6 +570,31 @@ fn write_to(path: &Path, v: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sideways_carry_is_the_median_of_recent_flights() {
+        let mut m = ReachModel::new(base_reach(&BotConfig::default()), None);
+        let base = m.get(Move::Flash).dx;
+        m.observe(Move::Flash, (30.0, 0.0), (60.0, 0.0), true);
+        m.observe(Move::Flash, (30.0, 0.0), (36.0, 0.5), true);
+        assert_eq!(m.get(Move::Flash).dx, base); // too few to say
+        m.observe(Move::Flash, (30.0, 0.0), (38.0, -1.0), true);
+        assert_eq!(m.get(Move::Flash).dx, 38.0); // one long flight doesn't count
+                                                 // Fell short to a lower row: an upper bound, counted.
+        m.observe(Move::Flash, (38.0, 0.0), (30.0, -14.0), false);
+        m.observe(Move::Flash, (38.0, 0.0), (31.0, -14.0), false);
+        assert_eq!(m.get(Move::Flash).dx, 36.0);
+        // Went past the plan down to a lower row, or up to another: nothing.
+        m.observe(Move::Flash, (36.0, 0.0), (50.0, -14.0), false);
+        m.observe(Move::Flash, (36.0, 0.0), (50.0, 12.0), true);
+        assert_eq!(m.carries[Move::Flash as usize].len(), 5);
+        let back = {
+            let mut n = ReachModel::new(base_reach(&BotConfig::default()), None);
+            n.apply_json(&m.to_json());
+            n
+        };
+        assert_eq!(back.carries, m.carries);
+    }
 
     #[test]
     fn nulls_in_a_ceiling_mean_no_cap_and_round_trip() {
@@ -562,7 +639,10 @@ mod learning_tests {
             dx: 16.0,
             rise: 11.0,
         };
-        ReachModel::new(base, None)
+        // The envelope rules (sideways carries have their own test).
+        let mut m = ReachModel::new(base, None);
+        m.typical_carry = false;
+        m
     }
 
     #[test]

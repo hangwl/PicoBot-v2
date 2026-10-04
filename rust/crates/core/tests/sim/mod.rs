@@ -21,7 +21,7 @@ use picobot_core::vision::Image;
 pub const FLOOR: [f64; 4] = [0.0, 100.0, 200.0, 100.0];
 pub const MID: [f64; 4] = [40.0, 84.0, 120.0, 84.0];
 pub const TOP: [f64; 4] = [60.0, 66.0, 100.0, 66.0];
-pub const SIDE: [f64; 4] = [135.0, 84.0, 190.0, 84.0];
+pub const SIDE: [f64; 4] = [130.0, 84.0, 190.0, 84.0];
 
 /// The Python suite's reach (explore 1.0), with overrides.
 pub fn reach_with(over: &[(Move, Reach)]) -> ReachModel {
@@ -77,6 +77,10 @@ pub struct Sim {
     /// landing (a real dot is seen in flight).
     pub apex: Option<(f64, f64)>,
     pub fail_rope: bool,
+    /// Walks stop like the real primitive: at the first whole pixel within
+    /// the threshold of the target, not on it. Each walk is counted.
+    pub edge_stop: bool,
+    pub walks: u32,
     pub opts: GraphOptions,
     // Patrol surface
     pub entry: Option<Arc<MapEntry>>,
@@ -169,6 +173,8 @@ impl Sim {
             fizzle: 0,
             apex: None,
             fail_rope: false,
+            edge_stop: false,
+            walks: 0,
             opts: GraphOptions::default(),
             entry: None,
             stats: Vec::new(),
@@ -526,14 +532,22 @@ impl Body for Sim {
         &mut self,
         tx: f64,
         _ty: f64,
-        _t: Option<f64>,
+        t: Option<f64>,
         _s: Travel,
         _flat: bool,
     ) -> bool {
+        self.walks += 1;
         let g = self.physics();
         if let Some(i) = g.locate(self.pos.0, self.pos.1) {
             let p = g.platforms[i];
-            self.pos = (tx.clamp(p.x0, p.x1), self.pos.1);
+            let t = t.unwrap_or(self.cfg.nav_threshold_px as f64);
+            let x = match (self.edge_stop, self.pos.0) {
+                (true, x) if (x - tx).abs() <= t => x,
+                (true, x) if x < tx => (tx - t).ceil(),
+                (true, _) => (tx + t).floor(),
+                (false, _) => tx,
+            };
+            self.pos = (x.clamp(p.x0, p.x1), self.pos.1);
         }
         true
     }
@@ -664,14 +678,14 @@ impl Body for Sim {
     }
 }
 
-/// A solid arrow at `c` pointing `to`, shaded green (tail) to orange (tip)
+/// A solid arrow-sized block at `c` pointing `to`, shaded green (tail) to orange (tip)
 /// like the game's rune arrows.
 pub fn paint_arrow(img: &mut Image, c: (i64, i64), to: &str) {
     for i in 0..24i64 {
         let t = i as f64 / 23.0;
         let bgr = [0u8, (255.0 - 170.0 * t) as u8, (80.0 + 175.0 * t) as u8];
-        for j in 0..12i64 {
-            let (a, b) = (i - 12, j - 6);
+        for j in 0..18i64 {
+            let (a, b) = (i - 12, j - 9);
             let (x, y) = match to {
                 "right" => (a, b),
                 "left" => (-a, b),

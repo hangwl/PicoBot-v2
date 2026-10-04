@@ -202,6 +202,8 @@ impl ClassTravel {
 pub enum PatrolPolicy {
     Weighted,
     Greedy,
+    /// Row by row: the nearest row of anchors first, cheapest next within it.
+    Zigzag,
 }
 
 impl PatrolPolicy {
@@ -209,7 +211,18 @@ impl PatrolPolicy {
         match self {
             PatrolPolicy::Weighted => "weighted",
             PatrolPolicy::Greedy => "greedy",
+            PatrolPolicy::Zigzag => "zigzag",
         }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        [
+            PatrolPolicy::Weighted,
+            PatrolPolicy::Greedy,
+            PatrolPolicy::Zigzag,
+        ]
+        .into_iter()
+        .find(|p| p.as_str() == s)
     }
 }
 
@@ -375,7 +388,7 @@ impl Default for BotConfig {
             rune_key: "y".into(),
             record_rune_solves: true,
             stop_when_map_unrecognized: true,
-            pause_on_lie_detector: false,
+            pause_on_lie_detector: true,
             attack_keys: vec!["a".into()],
             buff_keys: Vec::new(),
             buff_interval_seconds: 60.0,
@@ -574,11 +587,8 @@ impl BotConfig {
             cfg.patrol_mode = m;
         }
         if let Some(v) = get("patrol_policy") {
-            cfg.patrol_policy = if as_string(v) == "greedy" {
-                PatrolPolicy::Greedy
-            } else {
-                PatrolPolicy::Weighted
-            };
+            cfg.patrol_policy =
+                PatrolPolicy::parse(&as_string(v)).unwrap_or(PatrolPolicy::Weighted);
         }
         let string_list = |v: &Value| match v {
             Value::Array(items) => items.iter().map(as_string).collect(),

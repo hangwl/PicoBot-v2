@@ -6,6 +6,7 @@
 //! - `_offplatform` — the player stood off every drawn platform (with an
 //!   `overlay.png` of the drawn geometry and the last leg);
 //! - `_rune` — a rune was seen, reached, or given up on (with an overlay);
+//! - `_liedetector` — the game window when the lie detector first shows;
 //! - `_snapshot` — the whole game window, on request (dashboard "Save
 //!   window"): templates for UI detection, such as the lie detector.
 
@@ -39,6 +40,10 @@ impl Evidence {
 
     pub fn rune() -> Self {
         Self::at(DIR, "_rune")
+    }
+
+    pub fn lie_detector() -> Self {
+        Self::at(DIR, "_liedetector")
     }
 
     pub fn at(root: impl Into<PathBuf>, suffix: &'static str) -> Self {

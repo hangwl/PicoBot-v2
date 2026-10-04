@@ -171,6 +171,7 @@ export function Viewer({ s, tools = false, compact = false }: {
     // Overlays are drawn host-side into the JPEG; only the drag preview
     // is drawn here.
     ctx.drawImage(bitmap, 0, 0);
+    if (s.showHeat && meta.heat) drawHeat(ctx, meta.heat, meta.heat_cell ?? 4);
     if (preview) {
       ctx.strokeStyle = "#e0a93b";
       ctx.lineWidth = 2;
@@ -185,7 +186,7 @@ export function Viewer({ s, tools = false, compact = false }: {
   useEffect(() => {
     const p = start.current;
     paint(p && drawing === "plats" ? [...p, ...cur.current] : undefined);
-  }, [frame]);
+  }, [frame, s.showHeat]);
 
   const xy = (e: PointerEvent): [number, number] => {
     // The canvas is letterboxed (object-fit: contain) — map through the
@@ -250,6 +251,12 @@ export function Viewer({ s, tools = false, compact = false }: {
             </button>
           ))}
         </div>
+        {s.viewMode === "minimap" && (
+          <button aria-pressed={s.showHeat} title="Where attacks landed lately (bot running)"
+                  onClick={() => set({ showHeat: !s.showHeat })}>
+            Heat
+          </button>
+        )}
         <select aria-label="stream fps" value={String(s.fps)}
                 onChange={(e) =>
                   send(`dash|fps|${(e.target as HTMLSelectElement).value}`)}>
@@ -261,6 +268,15 @@ export function Viewer({ s, tools = false, compact = false }: {
       {tools && <DrawTools s={s} suffix={suffix} />}
     </section>
   );
+}
+
+/** Attack heat: cold blue to hot red, more opaque where it's hotter. */
+function drawHeat(ctx: CanvasRenderingContext2D, flat: number[], cell: number) {
+  for (let i = 0; i + 2 < flat.length; i += 3) {
+    const w = flat[i + 2] / 100;
+    ctx.fillStyle = `hsla(${Math.round(220 * (1 - w))}, 90%, 55%, ${0.25 + 0.45 * w})`;
+    ctx.fillRect(flat[i], flat[i + 1], cell, cell);
+  }
 }
 
 function DrawTools({ s, suffix }: { s: AppState; suffix: string }) {

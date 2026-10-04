@@ -113,9 +113,14 @@ impl Navigator {
         if body.teleport_remaining() > 0.0 {
             exclude.push(MoveKind::Teleport);
         }
-        let Some(legs) = self
-            .graph
-            .route_jittered(pos, goal, self.jitter, &mut rng, &exclude)
+        // Around what's cooling if there's a way, else through it: the walk
+        // to its takeoff goes ahead and the move waits there (`Cooldown`).
+        let mut route = |ex: &[MoveKind]| {
+            self.graph
+                .route_jittered(pos, goal, self.jitter, &mut rng, ex)
+        };
+        let Some(legs) =
+            route(&exclude).or_else(|| (!exclude.is_empty()).then(|| route(&[])).flatten())
         else {
             return StepStatus::NoRoute;
         };
@@ -178,7 +183,10 @@ impl Navigator {
                         return false;
                     }
                 }
-                StepStatus::Moved | StepStatus::Cooldown => {}
+                StepStatus::Cooldown => {
+                    body.sleep(crate::timing::human_between(0.3, 0.2, 0.5, 0.3));
+                }
+                StepStatus::Moved => {}
             }
         }
         false
@@ -254,6 +262,11 @@ impl Navigator {
         if cooling(body) {
             return LegStatus::Cooldown;
         }
+        // The walk's slide would carry into the jump: stand still first for
+        // moves that go straight up or down from where they start.
+        if matches!(leg.kind, MoveKind::UpFlash | MoveKind::DownJump) {
+            super::measure::settle(body, 0.5);
+        }
         let want = self.graph.locate(leg.x1, leg.y1);
         let start = body.pos();
         let dir = Dir::toward(leg.x1 - leg.x0);
@@ -304,10 +317,22 @@ impl Navigator {
         // A move that never left the ground (an eaten key, a stun) says
         // nothing about its reach.
         if let (Some(m), Some(s), Some(p), true) = (leg.kind.reach_move(), start, pos, took_off) {
+            // Rise between the platforms' rows, not raw feet: a pause at the
+            // top of a jump can read a few px above where it comes down, and
+            // a rise learned from that is more than the move can do.
+            let row = |q: (f64, f64)| {
+                self.graph
+                    .locate(q.0, q.1)
+                    .map(|i| self.graph.platforms[i].y_at(q.0))
+            };
+            let rise = match (row(s), row(p)) {
+                (Some(a), Some(b)) => a - b,
+                _ => s.1 - p.1,
+            };
             body.state().reach.observe(
                 m,
                 ((leg.x1 - leg.x0).abs(), leg.y0 - leg.y1),
-                ((p.0 - s.0).abs(), s.1 - p.1),
+                ((p.0 - s.0).abs(), rise),
                 ok,
             );
         }
@@ -315,6 +340,19 @@ impl Navigator {
             body.ground_window();
             LegStatus::Ok
         } else {
+            let at = |q: Option<(f64, f64)>| {
+                q.map_or("?".into(), |q| format!("({:.0}, {:.0})", q.0, q.1))
+            };
+            body.log(&format!(
+                "Missed {}: planned ({:.0}, {:.0}) → ({:.0}, {:.0}), took off at {}, came down at {}",
+                leg.kind.as_str(),
+                leg.x0,
+                leg.y0,
+                leg.x1,
+                leg.y1,
+                at(start),
+                at(pos)
+            ));
             LegStatus::Failed
         }
     }
@@ -355,17 +393,16 @@ impl Navigator {
         if (pos.0 - x).abs() <= tol {
             return true;
         }
+        // The walk aims at `x` itself, with the tolerance arrival is judged
+        // by: a rounded target or a narrower band would let a walk stop
+        // "there" yet short of the leg's end, and the next step re-walk it
+        // without moving.
         if exact && nudge && body.state_ref().reach.tap_table().is_some() {
             // Hold-and-release overshoots a tight target: close in, then tap.
-            return body.move_to_point(
-                x.round(),
-                pos.1,
-                Some(tol.max(6.0).trunc()),
-                Travel::Mixed,
-                true,
-            ) && body.nudge_to(x, tol);
+            return body.move_to_point(x, pos.1, Some(tol.max(6.0)), Travel::Mixed, true)
+                && body.nudge_to(x, tol);
         }
-        body.move_to_point(x.round(), pos.1, Some(tol.trunc()), Travel::Mixed, true)
+        body.move_to_point(x, pos.1, Some(tol), Travel::Mixed, true)
     }
 
     /// Hold `dir` until `done`. With `min_progress`, give up early when the

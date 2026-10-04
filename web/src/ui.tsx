@@ -1,6 +1,6 @@
 // Shared building blocks for the dashboard pages.
 import type { ComponentChildren } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { type AppState, type EvtItem, send } from "./protocol";
 
 export function Field({ label, hint, children }: {
@@ -62,6 +62,41 @@ export function useReply(s: AppState): [EvtItem | undefined, (cmd: string) => vo
     (it) => (it.id ?? 0) > askedAfter && (it.kind === "map" || it.kind === "error" || it.kind === "notify"),
   );
   return [reply, act];
+}
+
+/** A button that asks before acting: the first tap arms it (showing
+ *  `ask`), a second within a few seconds acts. In the page, not a
+ *  `confirm()` dialog — some browsers (embedded ones, home-screen apps)
+ *  never show those and answer "cancel". */
+export function ConfirmButton({ ask, onConfirm, class: cls, disabled, label, children }: {
+  ask: string;
+  onConfirm: () => void;
+  class?: string;
+  disabled?: boolean;
+  label?: string;
+  children: ComponentChildren;
+}) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <button class={`${cls ?? ""}${armed ? " armed" : ""}`} disabled={disabled}
+            aria-label={armed ? ask : label} title={armed ? ask : label}
+            onClick={() => {
+              if (armed) {
+                setArmed(false);
+                onConfirm();
+              } else {
+                setArmed(true);
+              }
+            }}
+            onBlur={() => setArmed(false)}>
+      {armed ? ask : children}
+    </button>
+  );
 }
 
 /** The host's answer under the buttons that asked (or ``idle`` until then). */

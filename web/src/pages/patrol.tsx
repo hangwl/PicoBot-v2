@@ -19,10 +19,11 @@ export function PatrolPage({ s }: { s: AppState }) {
                      onCommit={(v) => send(`patrol|reach|${v}`)} />
       </Field>
       <Field label="Loop order"
-             hint="Weighted picks cheaper legs more often; greedy always takes the cheapest.">
+             hint="Weighted picks cheaper legs more often; greedy always takes the cheapest; zig-zag works the map row by row (the nearest row first, cheapest within it), so sweeps snake from tier to tier.">
         <select value={s.policy} onChange={(e) => send(`patrol|policy|${val(e)}`)}>
           <option value="weighted">Weighted</option>
           <option value="greedy">Greedy</option>
+          <option value="zigzag">Zig-zag</option>
         </select>
       </Field>
       <Field label="Temperature" hint="Higher spreads the weighted choice.">

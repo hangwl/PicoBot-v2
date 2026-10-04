@@ -1,6 +1,6 @@
 // Setup → Layout: drawn platforms, how they fit, learned ropes.
 import { type AppState, type PlatformFitRow, type RopeRow } from "../protocol";
-import { Reply, Section, useReply } from "../ui";
+import { ConfirmButton, Reply, Section, useReply } from "../ui";
 
 export function LayoutPage({ s, wide }: { s: AppState; wide: boolean }) {
   const target = s.activeMap;
@@ -51,10 +51,7 @@ export function LayoutPage({ s, wide }: { s: AppState; wide: boolean }) {
         <RopeList
           rows={s.ropes}
           onRemove={(key) => act(`layout|rope|del|${key}|${target}`)}
-          onClear={() => {
-            if (confirm(`Remove all ${s.ropes.length} learned ropes?`))
-              act(`layout|rope|clear|${target}`);
-          }}
+          onClear={() => act(`layout|rope|clear|${target}`)}
           onUndo={() => act(`layout|rope|undo|${target}`)}
         />
       )}
@@ -84,7 +81,9 @@ function RopeList({ rows, onRemove, onClear, onUndo }: {
         ))}
       </ul>
       <div class="actions">
-        <button class="danger" onClick={onClear}>Remove all</button>
+        <ConfirmButton class="danger" ask={`Remove all ${rows.length}?`} onConfirm={onClear}>
+          Remove all
+        </ConfirmButton>
         <button onClick={onUndo}>Undo rope</button>
       </div>
     </Section>

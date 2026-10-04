@@ -10,7 +10,7 @@ use rand::SeedableRng;
 const FLOOR: [f64; 4] = [0.0, 100.0, 200.0, 100.0];
 const MID: [f64; 4] = [40.0, 84.0, 120.0, 84.0]; // 16 above the floor
 const TOP: [f64; 4] = [60.0, 66.0, 100.0, 66.0]; // 18 above MID
-const SIDE: [f64; 4] = [135.0, 84.0, 190.0, 84.0]; // 15px gap right of MID
+const SIDE: [f64; 4] = [130.0, 84.0, 190.0, 84.0]; // 10px gap right of MID
 
 /// The Python suite's reach: explore 1.0 unless given.
 fn reach_with(explore: f64, over: &[(Move, Reach)]) -> ReachModel {
@@ -152,7 +152,7 @@ fn a_tall_rise_needs_rope_lift() {
 #[test]
 fn up_side_flash_goes_up_and_over() {
     let g = graph(
-        &[[0.0, 100.0, 100.0, 100.0], [115.0, 86.0, 160.0, 86.0]],
+        &[[0.0, 100.0, 100.0, 100.0], [110.0, 86.0, 160.0, 86.0]],
         &reach(),
     );
     assert_eq!(
@@ -173,8 +173,10 @@ fn a_class_without_double_flash_gets_no_double_flash_edges() {
 }
 
 #[test]
-fn gap_moves_pick_the_smallest_that_fits() {
-    let wide = [150.0, 84.0, 190.0, 84.0];
+fn gap_moves_land_where_their_full_carry_takes_them() {
+    // 25px gap: a flash (25) can't make it from 8px inside MID; a double
+    // flash can.
+    let wide = [145.0, 84.0, 190.0, 84.0];
     assert_eq!(
         kinds(
             &graph(&[MID, wide], &reach())
@@ -183,20 +185,51 @@ fn gap_moves_pick_the_smallest_that_fits() {
         ),
         ["double_flash"]
     );
-    assert_eq!(
-        kinds(
-            &graph(&[MID, SIDE], &reach())
-                .route((60.0, 84.0), (170.0, 84.0), &[])
-                .unwrap()
-        ),
-        ["flash"]
-    );
+    // 10px gap: whichever move, it covers its full carry and comes down as
+    // near SIDE's middle as MID lets it take off — never at the near edge.
+    let legs = graph(&[MID, SIDE], &reach())
+        .route((60.0, 84.0), (170.0, 84.0), &[])
+        .unwrap();
+    let gap = legs.iter().find(|l| l.kind != MoveKind::Walk).unwrap();
+    let carry = match gap.kind {
+        MoveKind::Flash => 25.0,
+        MoveKind::DoubleFlash => 40.0,
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(gap.x1 - gap.x0, carry);
+    let middle = (SIDE[0] + SIDE[2]) / 2.0;
+    let from_edge = MID[2] - 8.0 + carry; // the takeoff nearest MID's edge
+    assert_eq!(gap.x1, middle.min(from_edge));
+    assert!(gap.x1 - SIDE[0] >= 6.0);
+}
+
+#[test]
+fn a_carried_move_that_would_overshoot_its_platform_is_not_linked() {
+    // From a 10px stub, a flash (25) can't take off far enough back for a
+    // 10px ledge 5px away: it flies past it. From MID it backs up and lands.
+    let onto = |g: &NavGraph, x0: f64, x1: f64| {
+        transfers(g, MoveKind::Flash)
+            .iter()
+            .any(|l| (x0..=x1).contains(&l.x1) && l.y1 == 84.0)
+    };
+    let (stub, ledge) = ([110.0, 84.0, 120.0, 84.0], [125.0, 84.0, 135.0, 84.0]);
+    assert!(!onto(&graph(&[stub, ledge], &reach()), 125.0, 135.0));
+    let far_ledge = [128.0, 84.0, 144.0, 84.0];
+    assert!(onto(&graph(&[MID, far_ledge], &reach()), 128.0, 144.0));
 }
 
 #[test]
 fn exploration_edges_cost_more_and_a_ceiling_removes_them() {
+    // Gap moves stretching their reach (the near-edge model: a carried move
+    // can't stretch, so it isn't explored).
+    let opts = GraphOptions {
+        fixed_carry: false,
+        ..GraphOptions::default()
+    };
+    let graph = |segs: &[[f64; 4]], m: &ReachModel| NavGraph::new(segs, &[], m, opts);
     let far = [140.0, 84.0, 190.0, 84.0]; // needs 27 > flash 25
     let mut m = reach_with(1.15, &[(Move::DoubleFlash, Reach { dx: 0.0, rise: 0.0 })]);
+    m.typical_carry = false;
     let legs = graph(&[MID, far], &m)
         .route((60.0, 84.0), (170.0, 84.0), &[])
         .unwrap();
@@ -272,7 +305,7 @@ fn jitter_varies_between_equal_routes() {
 
 #[test]
 fn teleport_edges_exist_only_for_teleport_kits() {
-    let plats = [FLOOR, MID, [140.0, 84.0, 190.0, 84.0]];
+    let plats = [FLOOR, MID, [135.0, 84.0, 190.0, 84.0]];
     let m = reach_with(
         1.0,
         &[(
@@ -566,4 +599,35 @@ fn a_down_jump_never_takes_off_on_a_rope_top() {
     assert!(xs.iter().all(|x| (x - 80.0).abs() > 8.0), "{xs:?}");
     // A rope that hangs off another platform doesn't move them.
     assert_eq!(jumps(&[[80.0, 40.0, 80.0, 79.0]]), [44.0, 80.0, 116.0]);
+}
+
+#[test]
+fn a_carried_move_isnt_linked_across_a_platform_that_would_catch_it() {
+    // Odium Road to the Castle's Gate 2: from the top-right ledge a flash
+    // left would come down on the lower tier — but it passes over the
+    // top-middle ledge, at the same height, and lands there first.
+    let (p1, p2, p4) = (
+        [106.0, 42.0, 134.0, 42.0],
+        [138.0, 42.0, 173.0, 42.0],
+        [75.0, 56.0, 122.0, 56.0],
+    );
+    let m = reach_with(
+        1.0,
+        &[(
+            Move::Flash,
+            Reach {
+                dx: 37.0,
+                rise: 4.0,
+            },
+        )],
+    );
+    let g = graph(&[p1, p2, p4], &m);
+    assert!(transfers(&g, MoveKind::Flash)
+        .iter()
+        .all(|l| !(l.y0 == 42.0 && l.y1 == 56.0 && l.x0 >= 138.0)));
+    // Without the ledge in the way it is linked.
+    let g = graph(&[p2, p4], &m);
+    assert!(transfers(&g, MoveKind::Flash)
+        .iter()
+        .any(|l| l.y0 == 42.0 && l.y1 == 56.0));
 }

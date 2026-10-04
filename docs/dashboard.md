@@ -135,7 +135,9 @@ The **Panel** view is the whole located minimap panel (title strip with
 green boxes = accepted text lines, orange = the OCR crop, then the
 annotated minimap); **Title** is the raw segmented band as OCR sees it;
 **Window** is the full client area with overlays moved onto the minimap.
-All three carry the bot's state and hazard.
+All three carry the bot's state and hazard. In the Panel view, **Heat**
+paints where attacks landed lately (bot running; blue rarely, red
+often) — the client draws it over the frame from the `heat` meta.
 
 ## Event log
 
@@ -156,7 +158,7 @@ follows new lines only while scrolled to the bottom.
 ```
 client → host:  map|set|<name> | map|list | class|list | class|use|<name>
                 class|add|<name>|{travel,air_attacks,teleport_key,…}
-                patrol|policy|<weighted|greedy> | patrol|temp|<v>
+                patrol|policy|<weighted|greedy|zigzag> | patrol|temp|<v>
                 layout|plat|… | layout|anchor|… [ |<name>]
                 dash|view|<minimap|window|title> | dash|fps|<n>
                 skills|set|{json} | hid|… | host|window|<title> | host|serial|…

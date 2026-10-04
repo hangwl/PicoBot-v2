@@ -11,8 +11,12 @@
   toward uniform randomness; raise it toward greedy.
 - `greedy` — always the cheapest next anchor, with ±20% cost jitter for
   variety.
+- `zigzag` — row by row: the next anchor comes from the nearest row
+  (platform rows within 6px share one) that still has anchors, cheapest
+  first within it. With sweeps the loop snakes — a row one way, the next
+  row back — instead of hopping between tiers.
 
-Both ban unreachable anchors for 30s, execute the plan strictly
+All three ban unreachable anchors for 30s, execute the plan strictly
 (splice-on-fail, 2 misses → ban), and pipeline the next loop before the
 current one ends. (`core/src/bot/patrol.rs`, `core/src/planner.rs`)
 
@@ -60,8 +64,15 @@ loop:
   its length — and goes on from each sweep's far end. Arrival skills,
   buffs and the summon happen at the end of the sweep. A missed landing
   re-routes to the sweep's entry, or straight on to its exit when already
-  on the platform. `patrol_mode: anchors` passes through anchor points as
-  before.
+  on the platform. The crossing is one walk leg along the platform, never
+  a route through other tiers; when both ends cost about the same to
+  reach, the nearer one is entered, so a row keeps its direction.
+  `patrol_mode: anchors` passes through anchor points as before.
+- **Attack heatmap**: every attack adds to a 4px cell at the player's
+  dot; cells fade with a 5-minute half-life and reset on a map change.
+  The Panel view's **Heat** toggle paints them (blue = rarely, red =
+  often) while the bot runs — drawn platforms with no colour on them are
+  the stretches the rotation neglects. (`core/src/heat.rs`)
 - **Loop policy and temperature**: every reachable anchor is visited
   exactly once per loop; `patrol_weight_temp` only orders the loop.
   Higher temperature → nearer-first sweeps → shorter loops, so *every*
@@ -107,7 +118,7 @@ below) with every move whose **reach** covers the gap:
 | Move | Input | Use |
 |---|---|---|
 | walk | flash weaves (walk near the goal) | along a platform |
-| `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps |
+| `jump` / `flash` / `double_flash` | jump; jump + re-press; + second re-press | horizontal gaps — a carried move always flies its full learned distance, so it's planned aimed at the middle of the platform it lands on (taking off as far back as needed, at least 3px inside its own platform), only where it comes down on that platform and no platform in between catches it |
 | `up_flash` | jump, then Up + jump mid-air | platform directly above |
 | `up_side_flash` | up flash, then a sideways flash mid-air | higher platform across a gap |
 | `rope_lift` | `up_jump_skill_key` | grabs the highest platform within `nav_rope_lift_px` (~90) of the takeoff column — only where no proven jump, flash or up flash reaches that platform (those come first); still used to skip a tier no single jump reaches. Costs `rope_lift_cost` (1.5s: its wind-up alone is ~1.2s), so a route doesn't lift to a higher tier just to drop back down |
@@ -168,7 +179,14 @@ the bot hops back toward drawn ground. Learned climbs carry the same
   observed; the planner may explore up to 1.3× the proven reach at a
   cost penalty; the **second consecutive** miss shrinks the envelope
   (one miss may be input timing) and an exploratory miss sets a ceiling.
-  Delete `nav_reach_file` to relearn.
+  Sideways moves (jump, flash, double flash) are the exception: their dx
+  is the **median of the last 9 carries** (`"carry"` in the file, 3 make
+  a median) — a flight that came down on its own row, or one that fell
+  short to a lower row (an upper bound). The planner flies them their
+  full distance, so a furthest-ever carry would put every takeoff too
+  far back. Rises are measured between platform rows, not dot reads (an
+  apex read isn't a landing). Up flashes and down jumps settle first
+  (0.5s) so they don't take off moving. Delete `nav_reach_file` to relearn.
 - Rope lift is **preferred over up-flash whenever it's ready** (cheapest
   rise). While it's cooling down it's left out of the plan and the bot
   up-flashes instead — it never waits on the cooldown. A lift that
@@ -426,9 +444,14 @@ below, so the lowest drawn platform is the map's bottom.
 Pauses the bot (and fires a Telegram alert if configured) on: window
 focus loss, more other players than
 `allowed_other_players` (the alert says how many), a map transfer
-(loading blackout) mid-leg, and a map no saved entry matches. A rune is
-handled separately (below). `pause_on_lie_detector` is a documented
-stub — keep it off until template images exist.
+(loading blackout) mid-leg, a map no saved entry matches, and the **lie
+detector** (`pause_on_lie_detector`, default on): once a second the
+whole game window is searched for the window's "LIE DETECTOR" title (its
+yellow-green header text, matched pixel for pixel against a template
+from real captures, anywhere on screen; ~3ms). The bot pauses and
+alerts; the mini-game is the player's to solve, and farming resumes once
+the window closes. The first sighting is saved to
+`debug/frames/*_liedetector/`. A rune is handled separately (below).
 
 ### Runes
 
@@ -438,9 +461,17 @@ interrupts farming:
 - `rune_action: solve` (default) — **RUNE** detours onto the rune (the
   player's glyph centred over it, within 1px) and solves it:
   1. **Activate**: after a short settle, press `rune_key` (default `y`).
-  2. **Read**: poll the game window (every 0.1s, up to 2.5s) until
-     `rune_arrows::read_arrows` reads four clean arrows. A puzzle that
-     never reads counts as a failed try; two of those give up.
+  2. **Read**: watch the game window (a frame every 0.05s, up to 2.5s)
+     with `rune_arrows::ArrowWatch`. Each arrow's direction is read by
+     its shading (down the hue circle from tail to tip — green to red,
+     magenta to cyan, blue to green) and by its silhouette (head, tip,
+     shaft); the two must not disagree, and either decides alone when
+     the other can't tell. Still arrows answer once two frames agree. An
+     arrow whose reads keep changing is **spinning**: it pauses on, or
+     wiggles across, its answer, so after 1.5s of watching it's answered
+     with the direction it read most. At the deadline the bot answers
+     what it has; a puzzle with no four arrows counts as a failed try
+     (its window saved as an `unread` rune event); two of those give up.
   3. **Answer** like a person: ~0.4-1.4s to take in the puzzle, then the
      four arrows with uneven ~0.17-0.7s gaps (log-normal, tempo-scaled).
      Keys stop at once if the game window loses focus.
@@ -464,9 +495,15 @@ interrupts farming:
   the rune turns it to face it. Arrival is checked on the minimap: the
   glyphs must touch (0px gap) or overlap — standing on it counts.
 - `rune_action: pause` — pauses where it stands.
-- **Fallback**: no drawn platform under the rune, no room beside it, no
-  route, 3 missed landings or 60s on the way — the bot pauses with an
-  alert naming why.
+- **On the way**: a move that's cooling (rope lift, teleport) and the
+  only way there is waited out at its takeoff, not counted as "no route";
+  a route check that finds none is retried twice (a read mid-move or off
+  the drawn lines finds none for a moment).
+- **Fallback**: a detour that fails on the way (no route, 3 missed
+  landings, 90s) goes back to farming and tries again after ~15s
+  (log-normal, 9–30s); the third failure pauses with an alert. No drawn
+  platform under the rune or no room beside it can't be fixed by trying
+  again: those pause at once.
 
 The rune is **remembered**, not re-read per frame: the player's dot is
 drawn over the rune's, so standing on it hides it. A rune that vanishes

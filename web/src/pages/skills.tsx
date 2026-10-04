@@ -1,7 +1,7 @@
 // Setup → Skills.
 import { useState } from "preact/hooks";
 import { type AppState, type SkillEffectRow, send } from "../protocol";
-import { Field, val } from "../ui";
+import { ConfirmButton, Field, val } from "../ui";
 import { effectNote } from "./measure";
 
 export function SkillsPage({ s }: { s: AppState }) {
@@ -56,10 +56,8 @@ export function SkillsPage({ s }: { s: AppState }) {
                   Measure
                 </button>
               )}
-              <button class="icon" aria-label={`Remove ${n}`}
-                      onClick={() => {
-                        if (confirm(`Remove skill ${n}?`)) send(`skills|del|${n}`);
-                      }}>×</button>
+              <ConfirmButton class="icon" label={`Remove ${n}`} ask="Remove?"
+                             onConfirm={() => send(`skills|del|${n}`)}>×</ConfirmButton>
             </li>
           );
         })}

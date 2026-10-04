@@ -15,7 +15,7 @@ use serde_json::json;
 use super::approach::{Approach, RuneApproach};
 use super::body::{Body, Dir};
 use crate::rune::{gap, platform_under, Rune};
-use crate::rune_arrows::read_arrows;
+use crate::rune_arrows::{ArrowWatch, Watch};
 use crate::timing::human_between;
 
 /// Activations before giving up.
@@ -24,7 +24,8 @@ const MAX_ATTEMPTS: u32 = 3;
 const MAX_UNREAD: u32 = 2;
 /// How long the puzzle may take to show (and read) after activating (s).
 const READ_TIMEOUT_S: f64 = 2.5;
-const POLL_S: f64 = 0.1;
+/// Frames this far apart (s): quick enough to see a spinning arrow linger.
+const POLL_S: f64 = 0.05;
 /// A failed rune can't be activated again for this long (s).
 const LOCK_S: f64 = 3.0;
 /// Stepped off, the rune shows within this long (s) if it's still there.
@@ -36,6 +37,8 @@ const STEP_TAPS: u32 = 5;
 pub enum Solve {
     Working,
     GaveUp(String),
+    /// Couldn't get back onto the rune: the detour's failure, not the puzzle's.
+    Lost(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -61,6 +64,7 @@ pub struct RuneSolver {
     phase: Phase,
     attempts: u32,
     unread: u32,
+    watch: ArrowWatch,
 }
 
 impl RuneSolver {
@@ -107,25 +111,37 @@ impl RuneSolver {
                 self.attempts += 1;
                 body.log(&format!("Rune: activating (attempt {})", self.attempts));
                 self.phase = Phase::Read(body.now());
+                self.watch = ArrowWatch::default();
                 body.sleep(human_between(0.25, 0.15, 0.4, 0.3));
             }
             Phase::Read(since) => {
-                let read = body.window_frame().map(|img| read_arrows(&img));
-                match read {
-                    Some(Ok(r)) => self.answer(body, rune, &r.keys()),
-                    other if now - since > READ_TIMEOUT_S => {
+                if let Some(img) = body.window_frame() {
+                    self.watch.add(&img, now);
+                }
+                let last = now - since > READ_TIMEOUT_S;
+                match self.watch.verdict(now, last) {
+                    Watch::Read(r, spinning) => {
+                        if let Some(i) = spinning.iter().position(|&x| x) {
+                            body.log(&format!(
+                                "Rune: arrow {} was spinning — answered where it lingered",
+                                i + 1
+                            ));
+                        }
+                        self.answer(body, rune, &r.keys());
+                    }
+                    Watch::Fail(why) => {
                         self.unread += 1;
-                        let why = match other {
-                            Some(Err(e)) => e,
-                            _ => "no window capture".into(),
-                        };
                         body.log(&format!("Rune: couldn't read the arrows ({why})"));
+                        body.rune_event(
+                            "unread",
+                            json!({ "rune": rune.bbox, "why": why, "attempt": self.attempts }),
+                        );
                         if self.unread >= MAX_UNREAD {
                             return Solve::GaveUp("couldn't read its arrows".into());
                         }
                         self.phase = Phase::StepOff(now);
                     }
-                    _ => {
+                    Watch::Wait => {
                         body.sleep(POLL_S);
                     }
                 }
@@ -162,7 +178,8 @@ impl RuneSolver {
             }
             Phase::Return => match approach.tick(body, rune) {
                 Approach::Arrived => self.begin(body.now()),
-                Approach::Failed(why) => return Solve::GaveUp(why),
+                Approach::Failed(why) => return Solve::Lost(why),
+                Approach::Impossible(why) => return Solve::GaveUp(why),
                 Approach::Moving => {}
             },
         }
