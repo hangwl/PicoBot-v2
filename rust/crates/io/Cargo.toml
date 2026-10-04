@@ -14,7 +14,9 @@ serialport = "4"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
     "Win32_System_Threading",
+    "Win32_UI_Input",
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ] }

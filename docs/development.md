@@ -53,6 +53,7 @@ branch with it.
 ```powershell
 cargo run --release -p picobot-io --example pico_ping -- COM6        # handshake only
 cargo run --release -p picobot-io --example serial_latency -- COM6   # round trips (NACKed no-ops, no HID)
+cargo run --release -p picobot-io --example key_timing -- 120 human.csv 10   # key timing per keyboard in a window (starts after 10 s); the game itself blocks capture while focused
 cargo run --release -p picobot-io --example dot_rate -- "Rien"       # dot sampling rate (captures only)
 cargo run --release -p picobot-io --example ocr_check -- ..          # OCR on recorded title bands
 rust\target\release\picobot.exe --root . --notify-test               # one Telegram alert
