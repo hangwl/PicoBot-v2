@@ -132,6 +132,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
   `GraphOptions::rope_lift_cost` (1.5s — never lift up to drop down),
   grabs the **highest** platform within `nav_rope_lift_px`, and fires
   without a precise stop. Sweeps keep 8px inside platform ends.
+- **Slips are not data**: a re-press skipped on purpose
+  (`move_miss_chance`, `Body::slip`) sets `BotState::injected_miss`; the
+  navigator's reach update and the `hop_px` average skip it. Any new
+  consumer of a landing result must too. Measurements never slip.
 - **Move reach is learned**, not hard-coded: planner edges come from
   `ReachModel` envelopes; every jump-type move reports takeoff/landing.
   Landings are scored tolerantly (platform span + row slack) — a

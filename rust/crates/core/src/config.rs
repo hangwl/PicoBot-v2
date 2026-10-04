@@ -358,6 +358,8 @@ pub struct BotConfig {
     pub weave_double_chance: f64,
     /// Odds a move (flash hop, blink, hop) carries an attack window.
     pub move_attack_chance: f64,
+    /// Odds a flash move's mid-air re-press is skipped on purpose (0 = never).
+    pub move_miss_chance: f64,
     /// Odds a landing carries an attack window.
     pub ground_attack_chance: f64,
     /// Attacks per minute to steer toward (0 = off).
@@ -444,6 +446,7 @@ impl Default for BotConfig {
             combo_repress_seconds: 0.16,
             weave_double_chance: 0.4,
             move_attack_chance: 1.0,
+            move_miss_chance: 0.0,
             ground_attack_chance: 0.0,
             target_attacks_per_min: 0.0,
             weave_range_px: 24,
@@ -572,6 +575,7 @@ impl BotConfig {
             ("vert_jump_interval", &mut cfg.vert_jump_interval),
             ("weave_double_chance", &mut cfg.weave_double_chance),
             ("move_attack_chance", &mut cfg.move_attack_chance),
+            ("move_miss_chance", &mut cfg.move_miss_chance),
             ("ground_attack_chance", &mut cfg.ground_attack_chance),
             ("target_attacks_per_min", &mut cfg.target_attacks_per_min),
             ("anchor_float_px", &mut cfg.anchor_float_px),
@@ -813,6 +817,7 @@ impl BotConfig {
             "combo_repress_seconds": self.combo_repress_seconds,
             "weave_double_chance": self.weave_double_chance,
             "move_attack_chance": self.move_attack_chance,
+            "move_miss_chance": self.move_miss_chance,
             "ground_attack_chance": self.ground_attack_chance,
             "target_attacks_per_min": self.target_attacks_per_min,
             "weave_range_px": self.weave_range_px,

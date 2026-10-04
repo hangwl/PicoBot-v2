@@ -177,6 +177,11 @@ pub struct BotState {
     /// Px a skill may shift the current move's landing (back, forward),
     /// while a flash is planned onto a platform; None = unconstrained.
     pub air_slack: Option<(f64, f64)>,
+    /// A re-press was skipped on purpose since the last check: the move's
+    /// result says nothing about reach.
+    pub injected_miss: bool,
+    /// A move measurement is running: nothing is skipped on purpose.
+    pub measuring: bool,
     /// When each attack was cast, over the last `RATE_WINDOW_S`.
     pub attack_log: std::collections::VecDeque<f64>,
     /// Where attacks were cast on this map.
@@ -217,6 +222,8 @@ impl BotState {
             hop_px: 14.0,
             travel_attack_at: f64::NEG_INFINITY,
             air_slack: None,
+            injected_miss: false,
+            measuring: false,
             attack_log: Default::default(),
             heat: Default::default(),
             anchor_idx: 0,
@@ -600,6 +607,22 @@ pub trait Body {
             .unwrap_or_else(|| cfg.jump_key.clone())
     }
 
+    /// Whether this re-press is skipped on purpose (`move_miss_chance`), so
+    /// the hop really falls short. Marks the move as a slip; never during
+    /// a measurement.
+    fn slip(&mut self, what: &str) -> bool {
+        let p = self.config().move_miss_chance;
+        if p <= 0.0 || self.state_ref().measuring {
+            return false;
+        }
+        if !self.state().rng.random_bool(p.clamp(0.0, 1.0)) {
+            return false;
+        }
+        self.state().injected_miss = true;
+        self.log(&format!("Slip: skipping the {what} re-press"));
+        true
+    }
+
     /// Log-normal gap around `mean` for a mid-air re-press.
     fn repress(&self, mean: f64) -> f64 {
         human_between(mean, mean * 0.65, mean * 1.5, 0.3)
@@ -617,7 +640,9 @@ pub trait Body {
         self.keys().press(&jk, None);
         let gap = self.repress(self.config().flash_repress_seconds);
         self.sleep(gap);
-        self.keys().press(&jk, None);
+        if !self.slip("flash") {
+            self.keys().press(&jk, None);
+        }
         self.after_flash(0.34);
     }
 
@@ -629,7 +654,9 @@ pub trait Body {
         self.keys().press(&jk, None);
         let gap = self.repress(self.config().combo_repress_seconds);
         self.sleep(gap);
-        self.keys().press(&jk, None);
+        if !self.slip("second flash") {
+            self.keys().press(&jk, None);
+        }
         self.after_flash(0.33);
     }
 
@@ -659,10 +686,14 @@ pub trait Body {
         self.keys().key_down("up");
         let wait = t0 + delay - self.now();
         self.sleep(wait.max(0.0));
-        self.keys().key_down(&jk);
-        mark("rejump");
-        self.sleep(human_hold(Some(&jk)));
-        self.keys().key_up(&jk);
+        if self.slip("up flash") {
+            self.sleep(human_hold(Some(&jk)));
+        } else {
+            self.keys().key_down(&jk);
+            mark("rejump");
+            self.sleep(human_hold(Some(&jk)));
+            self.keys().key_up(&jk);
+        }
         self.keys().key_up("up");
     }
 
@@ -696,7 +727,9 @@ pub trait Body {
         let gap = self.repress(self.config().combo_repress_seconds);
         self.sleep(gap);
         self.keys().key_up("up");
-        self.keys().press(&jk, None);
+        if !self.slip("side flash") {
+            self.keys().press(&jk, None);
+        }
         self.after_flash(0.33);
         self.keys().key_up(dir.key());
     }
@@ -1077,7 +1110,8 @@ pub trait Body {
             }
             if let Some(from) = hop_from.take() {
                 let moved = (cx - from).abs();
-                if moved > 2.0 {
+                let slipped = std::mem::take(&mut self.state().injected_miss);
+                if moved > 2.0 && !slipped {
                     let hop = &mut self.state().hop_px;
                     *hop = 0.7 * *hop + 0.3 * moved;
                 }

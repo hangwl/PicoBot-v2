@@ -274,6 +274,14 @@ Bot-controlled movement looks like a player farming, not a macro:
   contiguous delays within 1 px of the highest peak), log-normally varied
   around its middle; without a sweep, 0.16–0.30 s around 0.22 s. Up goes
   down ~40 ms before the re-press.
+- **Slips** (`move_miss_chance`, default 0 — try 1–3%): a flash move can
+  skip its last mid-air re-press (`Body::slip`), so the hop really falls
+  short and the navigator treats it like any missed leg (logged "Slip:
+  skipping the … re-press", then "Missed …"). Slips are marked
+  (`BotState::injected_miss`) and never taught to the planner: no
+  `ReachModel` update, no `hop_px` update. The session's move counts
+  still record the miss. Rope grabs never slip, and a move measurement
+  (`BotState::measuring`) never does.
 - **Attack windows** (`Body::attack_window`): an *air* window opens once
   a flash has triggered (gap, double, up and up-then-side flashes; a
   blink or a class without air attacks gets a *ground* window after

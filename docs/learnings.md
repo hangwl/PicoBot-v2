@@ -366,6 +366,13 @@ landings per visit.
   own. `session_max_minutes` and scheduled breaks are drawn per run, and a
   break reuses PAUSE (keys up, nothing else), muting the watchdog's
   "needs attention" line, which would otherwise fire on every rest.
+- **Perfect execution is a tell**: re-press gaps are drawn inside the
+  game's flash window, so the bot never missed a flash. `move_miss_chance`
+  skips a re-press for real. The first guard test passed with the guard
+  removed — a short sideways flash never shrank the model anyway (its dx
+  is a median) — so it checks the up flash, where a short rise does. A
+  second consumer needed the guard too: `hop_px`, the average hop length,
+  would have dropped 30% on one slip.
 - **The parity fixture counts**: adding a top-level `bind` key to
   `config.json` broke `config_round_trips_and_parses_like_python`, whose
   fixture the Python host wrote. A new top-level key is written only when

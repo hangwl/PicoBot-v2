@@ -510,7 +510,10 @@ impl Host {
         for (k, v) in &want {
             let chance = matches!(
                 k.as_str(),
-                "move_attack_chance" | "ground_attack_chance" | "weave_double_chance"
+                "move_attack_chance"
+                    | "ground_attack_chance"
+                    | "weave_double_chance"
+                    | "move_miss_chance"
             );
             match v.as_f64() {
                 Some(n) if chance && (0.0..=1.0).contains(&n) => edits.push((k.clone(), n)),

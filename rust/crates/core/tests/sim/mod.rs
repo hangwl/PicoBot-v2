@@ -73,6 +73,9 @@ pub struct Sim {
     pub teleport_cd: f64,
     /// The first N airborne moves go nowhere.
     pub fizzle: u32,
+    /// Flash hops and up flashes are slipped on purpose: short, and marked
+    /// as injected.
+    pub slip: bool,
     /// The mid-air point of the last airborne move, read once before the
     /// landing (a real dot is seen in flight).
     pub apex: Option<(f64, f64)>,
@@ -171,6 +174,7 @@ impl Sim {
             rope_cd: 0.0,
             teleport_cd: 0.0,
             fizzle: 0,
+            slip: false,
             apex: None,
             fail_rope: false,
             edge_stop: false,
@@ -296,7 +300,12 @@ impl Sim {
             Some(Dir::Left) => -6.0,
             None => 0.0,
         };
-        let up = self.up;
+        let up = if self.slip {
+            self.state.injected_miss = true;
+            5.0
+        } else {
+            self.up
+        };
         self.air(dx, up);
     }
 
@@ -613,7 +622,12 @@ impl Body for Sim {
     }
     fn flash_hop(&mut self) {
         self.moves.push("flash".into());
-        let dx = self.sign() * self.flash;
+        let dx = if self.slip {
+            self.state.injected_miss = true;
+            self.sign() * 3.0
+        } else {
+            self.sign() * self.flash
+        };
         self.air(dx, 4.0);
         self.airtime(0.5);
     }

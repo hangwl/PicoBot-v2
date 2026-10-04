@@ -28,6 +28,14 @@ export function AttacksPage({ s }: { s: AppState }) {
                        onCommit={(v) => save({ weave_double_chance: v / 100 })} />
         </Field>
       </Section>
+      <Section title="Slips"
+               hint="A bot that never misses is a tell. Some flash moves skip their mid-air re-press, so the hop really falls short and the bot recovers like any missed move. Slips never feed the learned move reach.">
+        <Field label="Flash moves that slip (%)"
+               hint="Try 1–3. 0 never slips; moves measured from the Moves page never do.">
+          <NumberField value={pct(s.moveMiss)} min={0} max={20} step={1}
+                       onCommit={(v) => save({ move_miss_chance: v / 100 })} />
+        </Field>
+      </Section>
       <Section title="Attack rate"
                hint="Steers the odds above so the bot casts about this many attacks a minute: under it, more windows attack; over it, fewer. 0 leaves the odds alone.">
         <Field label="Target attacks per minute">

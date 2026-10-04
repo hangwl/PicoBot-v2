@@ -159,6 +159,9 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   `weave_double_chance` is the chance a firing window casts two;
   `target_attacks_per_min` (default 0 = off) steers those odds toward a
   rate. Setup → Tuning → Attacks edits them (`attacks|set`).
+- `move_miss_chance` (0–1; default 0) — the odds a flash move skips its
+  last mid-air re-press so it genuinely misses (try 0.01–0.03). Never
+  taught to the move-reach model. Setup → Tuning → Attacks edits it.
 - `allowed_other_players` (default 0) — other players tolerated on the
   minimap before the bot pauses (`stop_when_players_appear`);
   `other_player_min_px` (default 6) — the smallest marker that counts.
