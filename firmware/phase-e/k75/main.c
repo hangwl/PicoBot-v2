@@ -227,6 +227,7 @@ static int cmp_str(const void *a, const void *b) {
 }
 
 static void held_names(char *out, int cap) {
+    out[0] = 0; // nothing held: an empty answer, not whatever the stack held
     const char *names[MAX_HELD + 3];
     char num[MAX_HELD + 3][16];
     int n = 0;
@@ -255,6 +256,7 @@ static void held_names(char *out, int cap) {
 }
 
 static void all_keys(char *out, int cap) {
+    out[0] = 0;
     const char *names[96];
     int n = KEY_MAP_LEN < 96 ? KEY_MAP_LEN : 96;
     for (int i = 0; i < n; i++) names[i] = KEY_MAP[i].name;

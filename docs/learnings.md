@@ -751,3 +751,12 @@ report descriptors). Saved in `firmware/phase-e/k75-descriptors.txt`.
   when more than one device matches, since the real K75's vendor channel
   has the same page and would receive the bot's text. Tested over an
   in-memory firmware (handshake, ACKs, a reply spanning several reports).
+- **First live run on the TinyUSB firmware**: the bot ran normally over
+  the HID link, but after it stopped the host reported that the Pico
+  "still held" every key name. `held_names` never terminated its output
+  when nothing was held, so `hid|held` answered with stale stack text —
+  the earlier `hid|keys` list (both "cmd" and "windows" in it gave it
+  away: `held_names` never prints aliases). The host's stray-release
+  then sent harmless key-ups for all of them. Both answer builders now
+  start with `out[0] = 0`. The in-memory firmware in the host's tests
+  can't see this class of bug; only a C-side test or a run could.
