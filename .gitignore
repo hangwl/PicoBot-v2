@@ -69,4 +69,4 @@ desktop.ini
 /rust/*.csv
 
 # Built CircuitPython images
-/firmware/*.uf2
+/firmware/**/*.uf2
