@@ -1,12 +1,14 @@
 //! Record key timing while the game window has the focus, to compare a
 //! person's typing with the bot's (the Pico's keys arrive like any other).
 //!
-//!     cargo run --release -p picobot-io --example key_timing -- [seconds] [out.csv] [window title]
+//!     cargo run --release -p picobot-io --example key_timing -- [seconds] [out.csv] [delay] [window title]
 //!
 //! A low-level keyboard hook sees every key, so only presses made while the
 //! game window is in front are kept (as key codes and times, in memory;
-//! the CSV is written only if a path is given). Defaults: 120 s, no CSV,
-//! the title from ../config.json.
+//! the CSV is written only if a path is given). Recording starts after
+//! `delay` seconds (default 10), so there is time to click into the game
+//! after launching it. Defaults: 120 s, no CSV, the title from
+//! ../config.json. Use `-` for the CSV to skip it.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -140,13 +142,16 @@ fn summarize(events: &[Ev]) {
 fn main() {
     let mut args = std::env::args().skip(1);
     let secs: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(120.0);
-    let out = args.next();
+    let out = args.next().filter(|p| p != "-");
+    let delay: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(10.0);
     let title = args.next().unwrap_or_else(|| {
         AppConfig::load(Path::new("../config.json"))
             .0
             .default_target_window
     });
     let window = GameWindow::find(&title).unwrap_or_else(|| panic!("no window titled {title:?}"));
+    println!("starting in {delay:.0} s: click into the game now");
+    std::thread::sleep(Duration::from_secs_f64(delay));
     REC.set(Mutex::new(Rec {
         start: Instant::now(),
         window,
