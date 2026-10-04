@@ -307,6 +307,36 @@ landings per visit.
   often an anchor was reached, not which stretches were attacked. Attacks
   now feed a decaying heat grid shown over the Panel view.
 
+## Capture cadence and the Pico's USB identity (2026-10-04)
+
+- **What the game PC can observe** of the host was already small: a cached
+  window handle (`EnumWindows` only at startup or after the game
+  restarts), GDI screen `BitBlt`s, and one `SetForegroundWindow` at bot
+  start. The only periodic signal was the `MapMonitor`'s fixed 50ms tick,
+  now drawn from 35–70ms (`timing::jittered`, independent of the session
+  pace). The blackout detector is time-based (`min_dark_s` 0.15s), so
+  70ms stays safe; a test pins that. `is_active` compares window handles
+  rather than reading other windows' titles, and `auto_focus` (default on)
+  turns off the start-up focus call. WGC/DXGI capture was judged no
+  stealthier than GDI (a different handle, not a quieter one).
+- **First `boot.py` missed an interface**: Device Manager showed the Pico
+  as six interfaces — two serial ports, mass storage, HID, and a
+  "CircuitPython Audio" one, which is the default USB MIDI. Dropping the
+  REPL and drive wasn't enough; `usb_midi.disable()` was needed too.
+- **CircuitPython can't read BOOTSEL**: the board definition exposes no
+  button pin, so a no-jumper recovery needed another route — a
+  `maintenance` command that sets an `nvm` byte and resets, which
+  `boot.py` reads once. The first firmware to hide the drive shipped
+  without it, and locking the board out meant BOOTSEL +
+  `flash_nuke.uf2`; hidden-drive firmware must always carry the command.
+- **A UF2 reflash keeps the filesystem**: dropping the CircuitPython UF2
+  onto `RPI-RP2` left the old `boot.py` in place, so the board came
+  straight back hidden — no `CIRCUITPY` drive, which looked like a failed
+  flash. Only `flash_nuke.uf2` clears it.
+- **Port numbers move**: the stock board is COM5 (REPL) / COM6 (data); the
+  hardened one is a single COM7. A pinned `serial_port` needs updating
+  after the switch.
+
 ## A walk that "reached" its target without arriving (2026-10-04)
 
 - A navigator walk leg aimed at `x.round()` with the tolerance truncated,

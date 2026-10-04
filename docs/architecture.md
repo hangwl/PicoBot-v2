@@ -43,11 +43,18 @@ verbatim, so inputs are indistinguishable from a physical keyboard. That
 is the point: the project exists because recorded macro playback is too
 easily detected.
 
+Pico boot (`boot.py`): a normal boot exposes one data port and the HID
+devices only — no REPL, no CIRCUITPY drive, no MIDI — under the USB
+identity in the gitignored `usb_ids.py` (VID/PID/strings copied from a
+keyboard the user owns). The host command `maintenance` makes `code.py`
+set `nvm[0]` and reset; `boot.py` clears the flag and boots stock once,
+so files can be edited. See [development.md](development.md#pico-firmware).
+
 Wire protocol (one line each way):
 
 - Host → Pico: `<seq>:hid|key|down|<name>` (also `up`, `hid|mouse|…`,
   `hid|move|dx|dy`, `hid|scroll|dx|dy`, `hid|release_all`);
-  `hello|handshake` (answered with
+  `maintenance` (ACK, then reboot stock — see below); `hello|handshake` (answered with
   `PICO_READY`); `ka` keepalive when idle (~0.4s), no reply.
 - Pico → host: `ACK <seq>` / `NACK <seq>` (unknown key or command, or
   one that raised — every numbered command is answered).
@@ -160,8 +167,8 @@ fragile and was deliberately abandoned.
 - `server.rs` — HTTP (the built dashboard with the live WS port filled
   in, `/health`) and the WebSocket (hello, ping/pong, routing);
   `clients.rs` — connected clients, held keys, one-frame slots.
-- `feed.rs` — the shared analyzer and the `MapMonitor` thread (20 Hz:
-  blackouts, panel moves, title bands for the `TitleOCR` worker).
+- `feed.rs` — the shared analyzer and the `MapMonitor` thread (~20 Hz,
+  jittered 35–70ms: blackouts, panel moves, title bands for the `TitleOCR` worker).
 - `streamer.rs` + `frames.rs` — the `FrameStreamer` thread: Panel /
   Window / Title view, overlays (`annotate`, `assemble_panel`), JPEG,
   `PBF1` frames.
@@ -180,7 +187,7 @@ through the host (config versions, pending skill books, the published
 ## Data flow (dashboard frame)
 
 ```
-MapMonitor (20 Hz) → note_frame() (blackout → arrival, panel moves)
+MapMonitor (~20 Hz) → note_frame() (blackout → arrival, panel moves)
                   └► name band ──► TitleOCR worker ──► MapIdentity
 FrameStreamer → capture region ──► player dot (or the bot's Viz)
 map meta + overlays ──► assemble_panel (title+map composite, ox/oy)

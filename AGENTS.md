@@ -14,6 +14,7 @@ Development happens on Windows (the game and the Pico live there):
 cd rust; cargo run --release -p picobot-host -- --root ..   # run host (WS :8765, HTTP :8000)
 cd rust; cargo test; cargo clippy --all-targets; cargo fmt   # Rust tests (~220), lints, format
 cd rust; cargo run --release -p picobot-io --example serial_latency -- COM6   # Pico round trips (no HID)
+cd rust; cargo run --release -p picobot-io --example pico_maintenance        # reboot the Pico stock (drive + REPL) to edit CIRCUITPY/
 rust\target\release\picobot.exe --root . --notify-test     # one Telegram test alert
 cd web; npm install; npm run build                         # build the dashboard (web/dist)
 ```
@@ -158,6 +159,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Profile skills**: a profile with a `skills` entry (even `{}`) owns its
   kit; without one it inherits the global book. Anything that changes the
   kit re-broadcasts `skills`/`config`; reads never seed a profile.
+- **Pico boots hidden**: `boot.py` hides the CIRCUITPY drive, REPL and
+  MIDI and applies `usb_ids.py`; edit the firmware only after
+  `pico_maintenance` (an `nvm` flag, one stock boot). Never ship a
+  `code.py` without the `maintenance` command — the board can't be
+  updated over USB without it (BOOTSEL + `flash_nuke.uf2` is the way out).
 - **HID wire safety**: with v2 firmware (`PICO_READY v2`) commands are
   numbered (`<seq>:hid|…` → `ACK <seq>`) and the firmware releases
   everything on disconnect or after 2s of host silence (the serial reader
