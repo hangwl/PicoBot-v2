@@ -3,26 +3,37 @@
 Normal boot: one data port (no REPL), no CIRCUITPY drive, no MIDI,
 keyboard (+ mouse) HID, and the USB identity from usb_ids.py when present.
 
-Maintenance boot: ground RECOVERY_PIN while plugging in (or resetting) and
-the board comes up stock - CIRCUITPY drive, REPL, default IDs - so code.py
-and usb_ids.py can be edited. See docs/development.md.
+Maintenance boot: the board comes up stock - CIRCUITPY drive, REPL, default
+IDs - so code.py and usb_ids.py can be edited. Ask for it with the host
+command `maintenance` (code.py sets a flag in nvm and resets; examples/
+pico_maintenance), or by grounding RECOVERY_PIN at power-up when one is
+wired. See docs/development.md.
 """
 import board
 import digitalio
+import microcontroller
 import storage
 import supervisor
 import usb_cdc
 import usb_hid
 import usb_midi
 
-# Jumper this pin (GP15, physical pin 20) to any GND pin for maintenance.
-RECOVERY_PIN = board.GP15
+# Optional hardware route: ground this pin (e.g. board.GP15, physical pin
+# 20) at power-up. None disables it.
+RECOVERY_PIN = None
+# Written to nvm[0] by code.py's `maintenance` command; cleared when read.
+MAINTENANCE_FLAG = 0xA5
 # The dashboard's remote pad can click and scroll; False drops the mouse
 # (code.py then runs keyboard-only).
 ENABLE_MOUSE = True
 
 
 def recovery_requested():
+    if microcontroller.nvm[0] == MAINTENANCE_FLAG:
+        microcontroller.nvm[0] = 0
+        return True
+    if RECOVERY_PIN is None:
+        return False
     pin = digitalio.DigitalInOut(RECOVERY_PIN)
     try:
         pin.switch_to_input(pull=digitalio.Pull.UP)
