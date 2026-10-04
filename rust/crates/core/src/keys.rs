@@ -1,5 +1,5 @@
 //! Key names the Pico firmware can press (`KEY_MAP` in
-//! `CIRCUITPY/code.py`; `tests/web_keys.rs` keeps the three lists equal).
+//! `firmware/phase-e/k75/keymap.c`; `tests/web_keys.rs` keeps the three lists equal).
 
 use std::collections::BTreeSet;
 

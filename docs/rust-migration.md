@@ -2,7 +2,9 @@
 
 > Done: the Rust host is the host. The Python host, the fixture
 > generator and the comparison scripts (`rust/tools/*.py`) live on the
-> `legacy/python` branch; commands below that run Python need it.
+> `legacy/python` branch; commands below that run Python need it. The
+> firmware paragraphs describe the CircuitPython firmware, since replaced
+> by the TinyUSB one (CircuitPython is on `legacy/circuitpython`).
 
 Goal: a Rust host that replaces `picobot/` (Python) with **lower CPU use
 and latency**, built alongside it on `feat/rust` until it reaches parity.

@@ -110,7 +110,7 @@ Paused / Stopped / Offline, with a coloured dot), the map and the link.
     (uptime, visits, misses, skips, pauses); an unrecognized map sends
     you to the Map page, whose banner offers to name and save it.
   - **Connection** (the Pico link — a HID channel for the TinyUSB
-    firmware, or a COM port for the CircuitPython one; *Find the Pico*
+    firmware, or a COM port for the legacy CircuitPython one; *Find the Pico*
     takes a single HID channel at once and otherwise probes the COM ports,
     skipping the open one; game window — locked while the bot runs). A
     HID entry warns when more than one device shares its IDs: unplug the

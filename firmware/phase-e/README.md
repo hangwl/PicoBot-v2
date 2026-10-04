@@ -1,4 +1,4 @@
-# Phase E: TinyUSB firmware
+# Pico firmware (TinyUSB)
 
 `k75/` is the real thing: a Pico SDK / TinyUSB firmware that enumerates
 byte-for-byte like the user's Sonix K75 — three HID interfaces, all
@@ -10,12 +10,11 @@ interrupt-IN at 1 ms, no serial number, no serial port, no MSC.
   `hid|mouse|*`, `hid|move`, `hid|scroll`
 - if2: the K75's own vendor channel (usage page 0xFF13, 64-byte
   input/output/feature reports, no OUT pipe — host writes reach EP0 as
-  SET_REPORT). This rides the whole `code.py` line protocol: newline-
-  terminated text chunked into reports, `hello|handshake` →
+  SET_REPORT). This rides the Pico line protocol (docs/architecture.md):
+  newline-terminated text chunked into reports, `hello|handshake` →
   `PICO_READY v2`, numbered `ACK`/`NACK`, `hid|key|down|x|<ms>` leases,
-  `hid|held`/`hid|keys`, `hid|release_all`. The 2 s silence watchdog and
-  the 4 s hardware watchdog match `code.py`; unmount or suspend releases
-  everything. `maintenance` ACKs and reboots into BOOTSEL — the board's
+  `hid|held`/`hid|keys`, `hid|release_all`. A 2 s silence watchdog and a
+  4 s hardware watchdog guard it; unmount or suspend releases everything. `maintenance` ACKs and reboots into BOOTSEL — the board's
   only over-USB update path now.
 - The one deliberate divergence from the captured device: EP3's packet
   size is 64, not 8, so a vendor report moves in one poll instead of
@@ -23,11 +22,13 @@ interrupt-IN at 1 ms, no serial number, no serial port, no MSC.
 
 `spike/` stays as the minimal reference (echo channel + raw keycodes).
 `k75-descriptors.txt` has the captured report descriptors.
-`k75.uf2` is the built artifact (not committed upstream — rebuild below).
+`k75.uf2` is the built image (not committed — build it below).
 
 ## Build (WSL)
 
-Arm GCC 14 and Pico SDK 2.2.0 as for the CircuitPython build:
+WSL2 Ubuntu with CMake, Ninja and the Arm GNU Toolchain 14 or newer
+(Ubuntu 22.04's apt compiler is too old), and the Pico SDK 2.2.0 with its
+TinyUSB submodule in `/root/pico-sdk`:
 
 ```bash
 wsl bash firmware/phase-e/k75/build.sh        # -> firmware/phase-e/k75.uf2
@@ -37,9 +38,11 @@ wsl bash firmware/phase-e/k75/build.sh        # -> firmware/phase-e/k75.uf2
 
 Hold BOOTSEL while plugging the Pico in, drop `k75.uf2` on `RPI-RP2`.
 With this firmware running, `maintenance` reboots to BOOTSEL for the next
-update — there is no CIRCUITPY to preserve. To go back to CircuitPython,
-flash `firmware/cp-10.3.1-pico_w-hid1ms.uf2` (or the stock UF2) the same
-way; a nuked board takes BOOTSEL + `flash_nuke.uf2`.
+update; `cargo run --release -p picobot-io --example pico_maintenance -- hid`
+sends it. There is no stock-boot mode and no drive to edit. The earlier
+CircuitPython firmware (serial port, `CIRCUITPY` drive) lives on the
+`legacy/circuitpython` branch; to go back to it, flash a CircuitPython UF2
+the same way (a board that won't boot takes BOOTSEL + `flash_nuke.uf2`).
 
 ## Host side
 

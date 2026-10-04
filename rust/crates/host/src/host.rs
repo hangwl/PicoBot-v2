@@ -514,7 +514,7 @@ impl Host {
     }
 
     /// On connect: warn when the firmware on the Pico knows other keys
-    /// than this host (a stale copy of `CIRCUITPY/code.py`).
+    /// than this host (an old firmware build).
     fn check_key_map(&self) {
         let Some(link) = self.serial_link() else {
             return;
@@ -527,7 +527,7 @@ impl Host {
             Ok(None) => {
                 self.bus.emit_level(
                     "remote",
-                    "the Pico's firmware predates key-map checks — copy CIRCUITPY/code.py to it",
+                    "the Pico's firmware predates key-map checks — flash the current firmware (firmware/phase-e/k75)",
                     "warn",
                 );
                 return;
@@ -552,7 +552,7 @@ impl Host {
         self.bus.emit_level(
             "remote",
             &format!(
-                "the Pico's key map differs from this host's (missing: {}; extra: {}) — copy CIRCUITPY/code.py to it",
+                "the Pico's key map differs from this host's (missing: {}; extra: {}) — flash the current firmware (firmware/phase-e/k75)",
                 list(missing),
                 list(extra)
             ),
@@ -601,7 +601,7 @@ impl Host {
             ),
             Ok(None) => self.bus.emit(
                 "error",
-                "This Pico firmware can't report held keys — copy the current CIRCUITPY/code.py to it.",
+                "This Pico firmware can't report held keys — flash the current firmware (firmware/phase-e/k75).",
             ),
             Err(e) => self.bus.emit("error", &format!("held-key check failed: {e}")),
         }

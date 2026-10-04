@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Same names as CIRCUITPY/code.py KEY_MAP / core/src/keys.rs PICO_KEYS.
+// The names core/src/keys.rs PICO_KEYS and web/src/keys.ts must match
+// (tests/web_keys.rs).
 // Order matters for key_name(): the first name for a keycode wins, like
 // Python's setdefault (LEFT_GUI reports "cmd", not "windows").
 typedef struct {

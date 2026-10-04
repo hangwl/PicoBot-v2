@@ -6,9 +6,9 @@ web dashboard that exposes all of it. The host is a Rust workspace; the
 original Python host lives on the `legacy/python` branch.
 
 ```
-┌────────────┐   serial   ┌──────────────────────────────────────────┐
+┌────────────┐    HID    ┌──────────────────────────────────────────┐
 │ Pico /     │ ◄────────► │  picobot host (rust/, picobot.exe)        │
-│ CircuitPy  │  HID bytes │                                          │
+│ TinyUSB    │  HID bytes │                                          │
 │ HID relay  │            │  io::serial ──► SerialLink (v2 protocol) │
 └─────┬──────┘            │  core::bot  ──► Machine, Patrol, …       │
       │ USB HID           │  io + core  ──► capture, minimap, OCR    │
@@ -31,11 +31,12 @@ Three crates under `rust/crates/`:
 - **`host`** — the `picobot` binary: the dashboard server, the threads,
   and the glue that gives the bot a real body.
 
-## HID relay (`CIRCUITPY/`, `io/src/serial.rs`, `io/src/hid.rs`)
+## HID relay (`firmware/phase-e/k75/`, `io/src/hid_transport.rs`, `io/src/serial.rs`, `io/src/hid.rs`)
 
-A Raspberry Pi Pico running CircuitPython presents itself to the game PC
-as a real USB keyboard/mouse. The host sends compact payloads over serial
-(`SerialLink`: framing, the `PICO_READY` handshake, port discovery);
+A Raspberry Pi Pico running the TinyUSB firmware presents itself to the
+game PC as a real USB keyboard/mouse. The host sends compact payloads over
+a vendor HID channel (`SerialLink`: framing, the `PICO_READY` handshake;
+`hid_transport`: the reports);
 `HidController` wraps them as press/release/move with ACKs, human key
 spacing and held-key tracking, and releases everything when dropped. Key
 timing is humanized host-side — the firmware relays raw down/up events
@@ -43,26 +44,22 @@ verbatim, so inputs are indistinguishable from a physical keyboard. That
 is the point: the project exists because recorded macro playback is too
 easily detected.
 
-Pico boot (`boot.py`): a normal boot exposes one data port and the HID
-devices only — no REPL, no CIRCUITPY drive, no MIDI — under the USB
-identity in the gitignored `usb_ids.py` (VID/PID/strings copied from a
-keyboard the user owns). The host command `maintenance` makes `code.py`
-set `nvm[0]` and reset; `boot.py` clears the flag and boots stock once,
-so files can be edited. See [development.md](development.md#pico-firmware).
-
-**TinyUSB firmware** (`firmware/phase-e/k75`, `io/src/hid_transport.rs`):
-the same protocol over a vendor-defined HID interface — lines cut into
+**The firmware** (`firmware/phase-e/k75`) enumerates as a clone of a real
+keyboard: three HID interfaces, no serial port, no serial number. The
+protocol below rides its vendor-defined HID interface — lines cut into
 64-byte reports, written as output reports (SET_REPORT over EP0; the
 device has no OUT pipe) and read as input reports. `SerialLink::open_spec`
-picks it for `hid` / `hid:<vid>:<pid>`; `SerialLink` itself is unchanged.
-The device has no COM port and no stock-boot mode: `maintenance` reboots
-into BOOTSEL.
+picks it for `hid` / `hid:<vid>:<pid>`; `SerialLink` itself is transport
+agnostic. There is no stock-boot mode: `maintenance` reboots into BOOTSEL.
+The earlier CircuitPython firmware, which used a COM port, is on the
+`legacy/circuitpython` branch; the host's COM path still speaks to it, but
+nothing on `master` is tested against it.
 
 Wire protocol (one line each way):
 
 - Host → Pico: `<seq>:hid|key|down|<name>` (also `up`, `hid|mouse|…`,
   `hid|move|dx|dy`, `hid|scroll|dx|dy`, `hid|release_all`);
-  `maintenance` (ACK, then reboot stock — see below); `hello|handshake` (answered with
+  `maintenance` (ACK, then reboot into BOOTSEL); `hello|handshake` (answered with
   `PICO_READY`); `ka` keepalive when idle (~0.4s), no reply.
 - Pico → host: `ACK <seq>` / `NACK <seq>` (unknown key or command, or
   one that raised — every numbered command is answered).
@@ -72,14 +69,12 @@ Wire protocol (one line each way):
   the host number commands and send `ka`. With older firmware (plain
   `PICO_READY`) commands go out unnumbered and bare `ACK`s are matched
   first-in-first-out.
-- Failsafe: the firmware releases every key and button when the DATA
-  port disconnects, and — once the host has shown it speaks v2 (a
+- Failsafe: the firmware releases every key and button when the link
+  drops (unmount or suspend), and — once the host has shown it speaks v2 (a
   numbered command or `ka`) — when nothing has arrived for 2s while
   anything is held: a crashed or hung host never leaves a key down.
-  On the Pico itself: everything is released at startup and when
-  `code.py` exits (a crash, or Ctrl-C in maintenance boot), a hardware watchdog (4s,
-  `HW_WATCHDOG`) resets a hung board, and auto-reload is off so saving a
-  file to CIRCUITPY can't restart it mid-hold (reset to load an edit).
+  On the Pico itself: everything is released at startup, and a hardware
+  watchdog (4s) resets a hung board.
 - `HidController` counts a key as held from the moment it tries to press
   it, and an unconfirmed press (or click) still sends its release. A
   key-up is tried up to 3 times and the key stays tracked until one is
@@ -101,14 +96,14 @@ Wire protocol (one line each way):
   and "Release all keys" (`host|release_all`).
 - Key map: `hid|keys` is answered with every name the firmware's
   `KEY_MAP` knows. On connect the host compares it with
-  `picobot_core::keys::PICO_KEYS` and warns when they differ (a stale
-  `code.py` on the Pico) or when the firmware predates the query. A bot
+  `picobot_core::keys::PICO_KEYS` and warns when they differ (an old
+  firmware build) or when the firmware predates the query. A bot
   run or measurement won't start while a configured key (arrows, move
   keys, rune key, skills) is one the Pico can't press — checked against
   the Pico's list, or the host's when the Pico can't say.
 - The reader only reads bytes already waiting: reader and writer share
   one synchronous Windows handle, and a read left blocking would hold
-  every write behind it. Round trips are ~4 ms.
+  every write behind it. Round trips are ~4 ms over serial and 1–2 ms over HID.
 - A port that fails underneath the reader is closed and reported
   (`Remote: Pico link lost`); waiting senders fail at once. A
   `SerialReconnect` thread then stops any bot run or measurement and
@@ -217,10 +212,10 @@ rust/
 │   ├── skills.rs, summons.rs, timing.rs, anchor_stats.rs
 │   └── layout.rs, platform_fit.rs, json.rs, fileio.rs
 ├── crates/core/tests/  # sim-based bot suites, parity fixtures, key map check
-├── crates/io/src/      # serial, hid, window, capture, ocr, perf
+├── crates/io/src/      # serial, hid_transport, hid, window, capture, ocr, perf
 ├── crates/io/examples/ # pico_ping, serial_latency, dot_rate, ocr_check, vision_bench
 └── crates/host/src/    # the picobot binary
-CIRCUITPY/              # Pico firmware (code.py)
+firmware/phase-e/k75/  # Pico firmware (TinyUSB, C)
 web/                    # the dashboard (Preact)
 scripts/                # cpu-sample.ps1
 ```

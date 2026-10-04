@@ -1,17 +1,15 @@
 # PicoBot
 
-PicoBot is a perception-driven game bot. A compatible microcontroller (e.g.
-Raspberry Pi Pico running CircuitPython) acts as a real HID device and relays
-keyboard/mouse inputs to a computer — inputs arrive exactly like a physical
-keyboard. On top of that transport, a smart bot watches the game's minimap,
+PicoBot is a perception-driven game bot. A Raspberry Pi Pico running the
+TinyUSB firmware in `firmware/phase-e/k75` acts as a real HID device and
+relays keyboard/mouse inputs to a computer — inputs arrive exactly like a
+physical keyboard. On top of that transport, a smart bot watches the game's minimap,
 navigates between anchor points, and fires skills off per-skill cooldowns,
 mimicking how a real player works a farming rotation.
 
-Note that while I am using a Raspberry Pi Pico device, other microcontroller
-devices that support `Circuit Python` should still work. The `Adafruit HID`
-library is required to relay physical keyboard inputs.
-
-## Disclaimer
+The first version of the firmware ran CircuitPython (a COM port and the `Adafruit HID`
+library); it is kept on the `legacy/circuitpython` branch, next to the original
+Python host on `legacy/python`.
 
 This project is purely for learning purposes. Picobot was built for my personal
 botting needs in a Maplestory private server. Botting is a punishable offense,
@@ -36,7 +34,7 @@ on the `legacy/python` branch.
 ```bash
 cd rust
 cargo run --release -p picobot-host -- --root ..
-# explicit overrides:  ... -- --root .. --port COM3 --window "Eluna (x64)"
+# explicit overrides:  ... -- --root .. --port hid --window "Eluna (x64)"
 # auto-detect the Pico: ... -- --root .. --port auto
 ```
 
@@ -44,9 +42,9 @@ cargo run --release -p picobot-host -- --root ..
 files and `web/dist` live). The built binary works the same way:
 `rust\target\release\picobot.exe --root .` from the project root.
 
-This starts the headless host: serial transport + WebSocket (default :8765) +
+This starts the headless host: Pico link + WebSocket (default :8765) +
 HTTP dashboard (default :8000). Open `http://localhost:8000` — the dashboard is
-the UI. The Pico DATA port and game window can be picked from the dashboard's
+the UI. The Pico link and game window can be picked from the dashboard's
 **Connection** panel (selects, or *Auto* to probe for the Pico); both are
 remembered in `config.json` so subsequent runs need no flags. CLI flags
 override the remembered values and are persisted the same way.
