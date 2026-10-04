@@ -125,6 +125,44 @@ impl ReportPort for HidPort {
     }
 }
 
+/// A vendor channel on this machine: what to put in `serial_port`, what the
+/// device calls itself, and how many devices share those IDs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Channel {
+    pub spec: String,
+    pub product: String,
+    pub count: usize,
+}
+
+/// The spec that names `vid:pid` (`hid` for the K75's own IDs).
+pub fn spec_for(vid: u16, pid: u16) -> String {
+    if (vid, pid) == (DEFAULT_VID, DEFAULT_PID) {
+        "hid".into()
+    } else {
+        format!("hid:{vid:04x}:{pid:04x}")
+    }
+}
+
+/// Every vendor channel present, grouped by IDs.
+pub fn channels() -> Vec<Channel> {
+    let Ok(api) = HidApi::new() else {
+        return Vec::new();
+    };
+    let mut found: Vec<Channel> = Vec::new();
+    for d in api.device_list().filter(|d| d.usage_page() == VENDOR_PAGE) {
+        let spec = spec_for(d.vendor_id(), d.product_id());
+        match found.iter_mut().find(|c| c.spec == spec) {
+            Some(c) => c.count += 1,
+            None => found.push(Channel {
+                spec,
+                product: d.product_string().unwrap_or("HID device").to_owned(),
+                count: 1,
+            }),
+        }
+    }
+    found
+}
+
 /// `hid` / `hid:<vid>:<pid>` → the IDs, or `None` for anything else.
 pub fn parse_spec(spec: &str) -> Option<(u16, u16)> {
     let spec = spec.trim().to_ascii_lowercase();
@@ -191,6 +229,14 @@ mod tests {
         assert_eq!(parse_spec("hid:0x0c45:0x8006"), Some((0x0C45, 0x8006)));
         assert_eq!(parse_spec("COM8"), None);
         assert_eq!(parse_spec("hid:zz:1"), None);
+    }
+
+    #[test]
+    fn a_spec_round_trips_through_its_ids() {
+        assert_eq!(spec_for(0x0C45, 0x8006), "hid");
+        let other = spec_for(0x258A, 0x0501);
+        assert_eq!(other, "hid:258a:0501");
+        assert_eq!(parse_spec(&other), Some((0x258A, 0x0501)));
     }
 
     #[test]

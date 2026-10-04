@@ -162,12 +162,12 @@ fn port_names() -> Vec<String> {
 fn reconnect_serial(host: &Weak<Host>, want: &str) {
     let Some(h) = host.upgrade() else { return };
     if h.is_bot_running() {
-        h.bus.emit("error", "Bot stopped: the serial port was lost");
+        h.bus.emit("error", "Bot stopped: the Pico link was lost");
         h.stop_bot();
     }
     if h.is_measuring() {
         h.bus
-            .emit("error", "Measurement stopped: the serial port was lost");
+            .emit("error", "Measurement stopped: the Pico link was lost");
         Host::stop_slot(&h.measurer);
     }
     drop(h);
@@ -178,7 +178,11 @@ fn reconnect_serial(host: &Weak<Host>, want: &str) {
         if h.serial_open() {
             return;
         }
-        let candidates = reconnect_candidates(want, &port_names(), &mut seen);
+        let candidates = if picobot_io::hid_transport::parse_spec(want).is_some() {
+            vec![want.to_owned()]
+        } else {
+            reconnect_candidates(want, &port_names(), &mut seen)
+        };
         let found = if candidates == [want] {
             Some(want.to_owned())
         } else {
@@ -198,7 +202,8 @@ fn reconnect_serial(host: &Weak<Host>, want: &str) {
                 let _ = link.send_acked(RELEASE_ALL, Duration::from_millis(1500));
             }
         }
-        h.bus.emit("host", &format!("serial reconnected on {port}"));
+        h.bus
+            .emit("host", &format!("Pico link reconnected on {port}"));
         h.send_host_state();
         return;
     }
@@ -461,7 +466,7 @@ impl Host {
                         self.log(&format!("ERR: serial write {e}"));
                     }
                 }
-                None => self.log("ERR: serial write: no serial port"),
+                None => self.log("ERR: Pico write: no link"),
             }
         }
     }
@@ -490,7 +495,7 @@ impl Host {
     }
 
     fn pico_names(&self, query: &str) -> Result<Option<BTreeSet<String>>, String> {
-        let link = self.serial_link().ok_or("no serial port")?;
+        let link = self.serial_link().ok_or("no Pico link")?;
         match link.query(query, Duration::from_millis(1500)) {
             Ok(data) => Ok(Some(parse_names(&data))),
             Err(SendError::Rejected) => Ok(None),
@@ -606,7 +611,7 @@ impl Host {
     fn release_pico(&self) {
         let sent = self
             .serial_link()
-            .ok_or_else(|| "no serial port".to_owned())
+            .ok_or_else(|| "no Pico link".to_owned())
             .and_then(|l| {
                 l.send_acked(RELEASE_ALL, Duration::from_millis(1500))
                     .map_err(|e| e.to_string())
@@ -624,8 +629,8 @@ impl Host {
         match self.try_open_serial(port) {
             Ok(()) => true,
             Err(e) => {
-                self.log(&format!("serial connect failed on {port}: {e}"));
-                self.bus.emit("status", "Remote: Serial error");
+                self.log(&format!("Pico connect failed on {port}: {e}"));
+                self.bus.emit("status", "Remote: Pico link error");
                 false
             }
         }
@@ -659,8 +664,8 @@ impl Host {
         });
         let old = self.serial.lock().unwrap().replace(Arc::new(link));
         drop(old);
-        self.log(&format!("serial connected on {port}"));
-        self.bus.emit("status", "Remote: Serial connected");
+        self.log(&format!("Pico connected on {port}"));
+        self.bus.emit("status", "Remote: Pico connected");
         let h = self.clone();
         std::thread::Builder::new()
             .name("KeyMapCheck".into())
@@ -674,9 +679,9 @@ impl Host {
     fn serial_lost(self: &Arc<Self>, port: &str, why: &str) {
         self.bus.emit(
             "remote",
-            &format!("ERR: serial port {port} lost ({why}) — reconnecting"),
+            &format!("ERR: Pico link {port} lost ({why}) — reconnecting"),
         );
-        self.bus.emit("status", "Remote: Serial lost");
+        self.bus.emit("status", "Remote: Pico link lost");
         if self.reconnecting.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -698,6 +703,14 @@ impl Host {
         if port != "auto" {
             self.finish_serial_connect(port);
             return;
+        }
+        // A TinyUSB device is found by looking, not probing.
+        if let [one] = picobot_io::hid_transport::channels().as_slice() {
+            if one.count == 1 {
+                let spec = one.spec.clone();
+                self.finish_serial_connect(&spec);
+                return;
+            }
         }
         self.bus.emit("host", "probing serial ports…");
         // COM ports are exclusive: skip the one we already hold.
@@ -727,10 +740,10 @@ impl Host {
         if self.open_serial(port) {
             self.config.lock().unwrap().serial_port = port.to_owned();
             self.save_config();
-            self.bus.emit("host", &format!("serial: {port}"));
+            self.bus.emit("host", &format!("Pico link: {port}"));
         } else {
             self.bus
-                .emit("error", &format!("serial connect failed: {port}"));
+                .emit("error", &format!("Pico connect failed: {port}"));
         }
         self.send_host_state();
     }
@@ -1034,10 +1047,22 @@ impl Host {
     }
 
     pub fn send_host_state(&self) {
-        let ports: Vec<Value> = list_ports()
+        let mut ports: Vec<Value> = picobot_io::hid_transport::channels()
             .into_iter()
-            .map(|(d, desc)| json!({"device": d, "desc": desc}))
+            .map(|c| {
+                let note = if c.count > 1 {
+                    " · more than one device: unplug the real keyboard"
+                } else {
+                    ""
+                };
+                json!({"device": c.spec, "desc": format!("{} · HID channel{note}", c.product)})
+            })
             .collect();
+        ports.extend(
+            list_ports()
+                .into_iter()
+                .map(|(d, desc)| json!({"device": d, "desc": desc})),
+        );
         let mut windows: Vec<String> = picobot_io::window::list_windows()
             .into_iter()
             .map(|(_, t)| t.trim().to_owned())
