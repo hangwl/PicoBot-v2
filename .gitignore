@@ -62,11 +62,12 @@ models/
 Thumbs.db
 desktop.ini
 
-# Local USB identity for the Pico (copy of CIRCUITPY/usb_ids.example.py)
-/CIRCUITPY/usb_ids.py
 
 # Key-timing recordings (key_timing example)
 /rust/*.csv
 
-# Built CircuitPython images
+# Built firmware images
 /firmware/**/*.uf2
+
+# Local leftovers from the legacy/circuitpython branch
+/CIRCUITPY/

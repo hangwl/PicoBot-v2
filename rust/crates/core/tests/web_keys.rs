@@ -1,7 +1,6 @@
 //! The dashboard's key list (`web/src/keys.ts` `PICO_KEYS`) and the
 //! host's (`picobot_core::keys::PICO_KEYS`) must match what the Pico
-//! firmware can press (`CIRCUITPY/code.py` `KEY_MAP`), and the TinyUSB
-//! firmware's table (`firmware/phase-e/k75/keymap.c`) must match too.
+//! firmware can press (`firmware/phase-e/k75/keymap.c` `KEY_MAP`).
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -46,27 +45,10 @@ fn literals(src: &str) -> Vec<(String, &str)> {
 }
 
 fn firmware_keys() -> BTreeSet<String> {
-    let src = std::fs::read_to_string(repo().join("CIRCUITPY/code.py")).unwrap();
-    let start = src.find("KEY_MAP = {").expect("KEY_MAP in code.py");
-    let block = &src[start..];
-    let block = &block[..block.find("\n}").expect("end of KEY_MAP")];
-    literals(block)
-        .into_iter()
-        .filter(|(_, rest)| rest.trim_start().starts_with(':'))
-        .map(|(k, _)| k)
-        .collect()
-}
-
-fn c_firmware_keys() -> BTreeSet<String> {
     let src = std::fs::read_to_string(repo().join("firmware/phase-e/k75/keymap.c")).unwrap();
     let start = src.find("KEY_MAP[] = {").expect("KEY_MAP in keymap.c");
     let block = &src[start..];
-    let block = &block[..block
-        .find(
-            "
-};",
-        )
-        .expect("end of KEY_MAP")];
+    let block = &block[..block.find("\n};").expect("end of KEY_MAP")];
     literals(block)
         .into_iter()
         .filter(|(_, rest)| rest.trim_start().starts_with(','))
@@ -116,17 +98,5 @@ fn the_host_keys_match_the_firmware_key_map() {
     assert!(
         only_fw.is_empty() && only_host.is_empty(),
         "firmware only: {only_fw:?}; host only: {only_host:?}"
-    );
-}
-
-#[test]
-fn the_tinyusb_firmware_keys_match_the_circuitpython_key_map() {
-    let (c, py) = (c_firmware_keys(), firmware_keys());
-    assert!(c.len() > 50, "parsed only {} keys from keymap.c", c.len());
-    let only_c: Vec<_> = c.difference(&py).collect();
-    let only_py: Vec<_> = py.difference(&c).collect();
-    assert!(
-        only_c.is_empty() && only_py.is_empty(),
-        "keymap.c only: {only_c:?}; code.py only: {only_py:?}"
     );
 }

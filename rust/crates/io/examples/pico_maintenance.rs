@@ -1,8 +1,7 @@
-//! Reboot the Pico into maintenance mode (CIRCUITPY drive and REPL back,
-//! stock USB identity) so its files can be edited. The next reset returns
-//! to the normal boot.
+//! Reboot the Pico into its USB bootloader (the `RPI-RP2` drive) so a new
+//! firmware image can be dropped on it.
 //!
-//!     cargo run --release -p picobot-io --example pico_maintenance -- [COM6]
+//!     cargo run --release -p picobot-io --example pico_maintenance -- [hid | COM6]
 
 use std::time::Duration;
 

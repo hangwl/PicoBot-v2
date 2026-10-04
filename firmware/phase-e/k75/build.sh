@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the k75 firmware in WSL: wsl bash firmware/phase-e/k75/build.sh
-# (Arm GCC 14 and Pico SDK 2.2.0 as for the CircuitPython build.)
+# (Arm GCC 14+ and Pico SDK 2.2.0 in WSL; see firmware/phase-e/README.md.)
 set -e
 export PATH=/root/cpbuild/arm-gnu-toolchain/bin:/usr/bin:/bin
 export PICO_SDK_PATH=${PICO_SDK_PATH:-/root/pico-sdk}

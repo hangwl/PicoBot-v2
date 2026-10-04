@@ -14,7 +14,7 @@ export function ConnectionPage({ s }: { s: AppState }) {
       <Field label="Pico link"
              hint={s.serialOpen
                ? `Connected${s.serial === "hid" || s.serial.startsWith("hid:") ? " over HID" : ""}.`
-               : "Not connected. A HID channel is the TinyUSB firmware; COM ports are the CircuitPython one."}>
+               : "Not connected. The Pico shows up as a HID channel; COM ports are for the legacy CircuitPython firmware."}>
         <select value={s.serial} onChange={(e) => {
           const v = val(e);
           if (v) send(`host|serial|${v}`);

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { getState, send, subscribe } from "./protocol";
 
-/** Key names the Pico firmware maps (KEY_MAP in CIRCUITPY/code.py). */
+/** Key names the Pico firmware maps (KEY_MAP in firmware/phase-e/k75/keymap.c). */
 export const PICO_KEYS: readonly string[] = [
   ..."abcdefghijklmnopqrstuvwxyz0123456789",
   "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",

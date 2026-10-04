@@ -3,6 +3,11 @@
 What has been tried, what happened, and what we took from it. Code
 comments stay short; history lives here.
 
+Entries about the CircuitPython firmware (`boot.py`, `code.py`, the COM
+port, the `maintenance` flag, the custom 1 ms-polling build) describe code
+that now lives on the `legacy/circuitpython` branch; the TinyUSB firmware
+replaced it (see "The real K75's descriptors" and what follows).
+
 ## Map identity
 
 - **Colour-hash fingerprints** (per-cell mean/max grayscale of the

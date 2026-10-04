@@ -1,10 +1,11 @@
 # AGENTS.md — working notes for agents
 
 Learning-oriented MapleStory private-server bot: a Raspberry Pi Pico
-(TinyUSB firmware, `firmware/phase-e/k75`; CircuitPython in `CIRCUITPY/`
-as the fallback) relays real HID input; a Rust host (`rust/`) watches
+(TinyUSB firmware, `firmware/phase-e/k75`) relays real HID input; a Rust host (`rust/`) watches
 the minimap and works a perception-driven farming rotation. The original
-Python host is kept on the `legacy/python` branch (not maintained). Docs
+Python host is kept on the `legacy/python` branch, and the CircuitPython
+firmware era (COM port, `CIRCUITPY/`) on `legacy/circuitpython` (neither
+maintained). Docs
 live in `docs/`; `README.md` is the landing page.
 
 ## Commands
@@ -14,8 +15,9 @@ Development happens on Windows (the game and the Pico live there):
 ```powershell
 cd rust; cargo run --release -p picobot-host -- --root ..   # run host (WS :8765, HTTP :8000)
 cd rust; cargo test; cargo clippy --all-targets; cargo fmt   # Rust tests (~220), lints, format
-cd rust; cargo run --release -p picobot-io --example serial_latency -- COM6   # Pico round trips (no HID)
-cd rust; cargo run --release -p picobot-io --example pico_maintenance        # reboot the Pico stock (drive + REPL) to edit CIRCUITPY/
+cd rust; cargo run --release -p picobot-io --example serial_latency -- hid   # Pico round trips (no HID)
+cd rust; cargo run --release -p picobot-io --example pico_maintenance -- hid   # reboot the Pico into BOOTSEL to flash
+wsl bash firmware/phase-e/k75/build.sh                                       # build the firmware (WSL)
 rust\target\release\picobot.exe --root . --notify-test     # one Telegram test alert
 cd web; npm install; npm run build                         # build the dashboard (web/dist)
 ```
@@ -168,16 +170,11 @@ what was tried and what was learned in `docs/learnings.md` instead.
   `build.sh`; the host reaches it with `serial_port: "hid"`): a K75
   clone, three HID interfaces, the line protocol over its vendor
   channel, no COM port and no stock-boot mode — `maintenance` reboots to
-  BOOTSEL. Keep `keymap.c` equal to `code.py`'s `KEY_MAP` (a test checks
+  BOOTSEL. Keep `keymap.c` equal to the host's key lists (a test checks
   it), and every reply buffer terminated (an empty `hid|held` once
   answered with stack residue). Keep the real K75 unplugged: its vendor
   channel has the same page, and the transport refuses to open when two
   devices match.
-- **Pico boots hidden** (CircuitPython fallback): `boot.py` hides the CIRCUITPY drive, REPL and
-  MIDI and applies `usb_ids.py`; edit the firmware only after
-  `pico_maintenance` (an `nvm` flag, one stock boot). Never ship a
-  `code.py` without the `maintenance` command — the board can't be
-  updated over USB without it (BOOTSEL + `flash_nuke.uf2` is the way out).
 - **HID wire safety**: with v2 firmware (`PICO_READY v2`) commands are
   numbered (`<seq>:hid|…` → `ACK <seq>`) and the firmware releases
   everything on disconnect or after 2s of host silence (the serial reader

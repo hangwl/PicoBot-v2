@@ -1,5 +1,5 @@
-// K75 clone firmware: the same line protocol as CIRCUITPY/code.py, over
-// the vendor HID interface (if2) instead of a CDC data port. Host->device
+// K75 clone firmware: the Pico line protocol (docs/architecture.md) over
+// the vendor HID interface (if2). Host->device
 // bytes arrive as 64B Output/Feature reports via EP0 SET_REPORT (there is
 // no OUT pipe); device->host lines ride 64B interrupt-IN reports. Lines
 // are newline-terminated; a report is zero-padded, so the host ignores
@@ -77,8 +77,7 @@ static void pump_tx(void) {
     }
 }
 
-// "ACK"/"NACK" + " <seq>" + (" <data>" when seq and data) — same shape as
-// code.py's reply().
+// "ACK"/"NACK" + " <seq>" + (" <data>" when seq and data).
 static void reply(bool ok, const char *seq, const char *data) {
     char line[600]; // longest is ACK <seq> + the ~350-byte keys list
     int n = snprintf(line, sizeof line, "%s%s%s%s%s\n", ok ? "ACK" : "NACK",
@@ -267,7 +266,7 @@ static void all_keys(char *out, int cap) {
     }
 }
 
-// ---- command execution (port of code.py run()/handle()) ----
+// ---- command execution ----
 
 static bool run_parts(char **parts, int nparts) {
     if (nparts == 2 && strcmp(parts[0], "hid") == 0 &&

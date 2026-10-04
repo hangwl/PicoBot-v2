@@ -80,40 +80,44 @@ rust\target\release\picobot.exe --root . --notify-test               # one Teleg
   thin. New bot behaviour gets a sim test.
 - Event levels: `hid`/serial chatter is `debug`; think before emitting
   chatty kinds at `info`.
-- `CIRCUITPY/` is the Pico firmware (`code.py`, `boot.py`). Changes take
-  effect only once copied onto the Pico's CIRCUITPY drive (see
-  [Pico firmware](#pico-firmware)).
+- `firmware/phase-e/k75/` is the Pico firmware (C, TinyUSB); see
+  [Pico firmware](#pico-firmware). Keep `keymap.c` equal to the host's
+  key lists (`tests/web_keys.rs` checks it).
 
 ## Pico firmware
 
-`boot.py` runs before USB starts. A normal boot leaves the board with
-one data port (no REPL), no CIRCUITPY drive, a keyboard and (unless
-`ENABLE_MOUSE = False`) a mouse, and — if `usb_ids.py` exists — a chosen
-USB identity. Copy `usb_ids.example.py` to `usb_ids.py` (gitignored) and
-fill in the VID/PID and strings of a keyboard you own (Device Manager →
-Details → Hardware Ids). This narrows what Windows sees; the CircuitPython
-composite layout and the serial interface are still there.
+The firmware is a Pico SDK / TinyUSB project (`firmware/phase-e/README.md`
+has the build: WSL2, Arm GNU Toolchain 14+, Pico SDK 2.2.0):
 
-**Editing the firmware** (the drive is hidden in a normal boot): run
-
-```powershell
-cd rust; cargo run --release -p picobot-io --example pico_maintenance
+```bash
+wsl bash firmware/phase-e/k75/build.sh        # -> firmware/phase-e/k75.uf2
 ```
 
-The Pico reboots stock — CIRCUITPY drive, REPL, default IDs. Edit, then
-reset (replug) to return to the normal boot. If a hardware route is
-wanted, set `RECOVERY_PIN` in `boot.py` (e.g. `board.GP15`) and ground
-that pin at power-up.
+**Flashing**: hold BOOTSEL while plugging the Pico in and drop the UF2 on
+`RPI-RP2`. With the firmware running, no BOOTSEL press is needed:
 
-**Last resort** (the board runs no `code.py`, so `maintenance` can't be
-sent): hold BOOTSEL while plugging in, then drop `flash_nuke.uf2` and
-afterwards the CircuitPython UF2 onto `RPI-RP2` (both from
-circuitpython.org / the Pico docs). That wipes CIRCUITPY, so the
-files are copied back.
+```powershell
+cd rust; cargo run --release -p picobot-io --example pico_maintenance -- hid
+```
 
-First flash: copy `boot.py`, `code.py` and `usb_ids.py` to the fresh
-drive and reset — the drive disappears on that boot. Nothing on the host
-changes: it finds the single port by the same `hello|handshake` probe.
+reboots it into the bootloader. The firmware has no stock-boot mode, no
+drive and no REPL, so a hung build is recovered with BOOTSEL (and, for a
+board that won't boot at all, `flash_nuke.uf2`).
+
+**The USB identity** is the one in `usb_descriptors.c`: a clone of a
+keyboard the owner has (`firmware/phase-e/k75-descriptors.txt` holds its
+captured report descriptors). Keep that keyboard unplugged while the bot
+runs — its vendor channel has the same page, and the HID transport refuses
+to open when two devices match.
+
+**Host side**: `serial_port: "hid"` (or `--port hid`). Checks:
+`serial_latency -- hid`, `hid_echo -- list | rtt | type`, and
+`chord_probe -- hid` (focus an empty Notepad) for the arrival gaps of key
+pairs at Windows.
+
+The earlier CircuitPython firmware (COM port, `CIRCUITPY` drive, hardened
+`boot.py`, a custom 1 ms-polling build) is on the `legacy/circuitpython`
+branch.
 
 ## Debug frame captures
 
