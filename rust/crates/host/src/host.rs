@@ -3,11 +3,11 @@
 //! (files, serial handshakes, joining threads) runs on the
 //! `DashboardCommands` thread, in order.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use picobot_core::anchor_stats::AnchorStats;
@@ -23,8 +23,9 @@ use picobot_core::rotation::resolve_coord;
 use picobot_core::skills::Skill;
 use picobot_core::timing::monotonic;
 use picobot_core::vision::Region;
+use picobot_io::hid::RELEASE_ALL;
 use picobot_io::ocr::{find_model, TitleReader};
-use picobot_io::serial::{discover_data_port, list_ports, SerialLink};
+use picobot_io::serial::{discover_data_port, find_data_port, list_ports, SerialLink};
 use serde_json::{json, Map, Value};
 
 use crate::botbody::{epoch, spawn_bot, spawn_measure, BotRun};
@@ -66,6 +67,8 @@ pub struct Host {
     pub(crate) window_title: Mutex<String>,
     pub(crate) serial: Mutex<Option<Arc<SerialLink>>>,
     pub(crate) serial_tx: Sender<String>,
+    /// A `SerialReconnect` thread is retrying a lost port.
+    pub(crate) reconnecting: AtomicBool,
     pub(crate) jobs: Mutex<Option<Sender<String>>>,
     pub(crate) ws_port: AtomicU16,
     pub(crate) http_port: AtomicU16,
@@ -120,6 +123,74 @@ fn load_reader(root: &std::path::Path, bus: &Bus) -> Option<TitleReader> {
             bus.emit_level("map", &format!("title OCR off: {e}"), "warn");
             None
         }
+    }
+}
+
+/// How often a lost port is retried.
+const RECONNECT_EVERY: Duration = Duration::from_secs(2);
+
+/// What to try for a lost port: `want` itself once it's back, otherwise
+/// only ports that appeared since the loss (probing toggles DTR, which
+/// resets some devices). `seen` forgets ports that went away, so one
+/// that comes back is new again.
+fn reconnect_candidates(want: &str, now: &[String], seen: &mut HashSet<String>) -> Vec<String> {
+    seen.retain(|p| now.contains(p));
+    if now.iter().any(|p| p == want) {
+        return vec![want.to_owned()];
+    }
+    let fresh: Vec<String> = now.iter().filter(|p| !seen.contains(*p)).cloned().collect();
+    seen.extend(fresh.iter().cloned());
+    fresh
+}
+
+fn port_names() -> Vec<String> {
+    list_ports().into_iter().map(|(name, _)| name).collect()
+}
+
+/// Stop any run (its keys would all fail), then retry until a link is
+/// open again: ours, or one picked in Connection meanwhile.
+fn reconnect_serial(host: &Weak<Host>, want: &str) {
+    let Some(h) = host.upgrade() else { return };
+    if h.is_bot_running() {
+        h.bus.emit("error", "Bot stopped: the serial port was lost");
+        h.stop_bot();
+    }
+    if h.is_measuring() {
+        h.bus
+            .emit("error", "Measurement stopped: the serial port was lost");
+        Host::stop_slot(&h.measurer);
+    }
+    drop(h);
+    let mut seen: HashSet<String> = port_names().into_iter().collect();
+    loop {
+        std::thread::sleep(RECONNECT_EVERY);
+        let Some(h) = host.upgrade() else { return };
+        if h.serial_open() {
+            return;
+        }
+        let candidates = reconnect_candidates(want, &port_names(), &mut seen);
+        let found = if candidates == [want] {
+            Some(want.to_owned())
+        } else {
+            find_data_port(&candidates, Duration::from_millis(1500))
+        };
+        let Some(port) = found else { continue };
+        if h.try_open_serial(&port).is_err() {
+            continue;
+        }
+        if port != want {
+            h.config.lock().unwrap().serial_port = port.clone();
+            h.save_config();
+        }
+        if let Some(link) = h.serial_link() {
+            // The firmware let go when the port dropped; this makes sure.
+            if link.wait_ready(Duration::from_secs(5)) {
+                let _ = link.send_acked(RELEASE_ALL, Duration::from_millis(1500));
+            }
+        }
+        h.bus.emit("host", &format!("serial reconnected on {port}"));
+        h.send_host_state();
+        return;
     }
 }
 
@@ -200,6 +271,7 @@ impl Host {
             window_title: Mutex::new(window_title),
             serial: Mutex::new(None),
             serial_tx,
+            reconnecting: AtomicBool::new(false),
             jobs: Mutex::new(None),
         });
         let h = host.clone();
@@ -397,10 +469,21 @@ impl Host {
     }
 
     /// Open `port`, keeping the current link until the new one is up.
-    pub fn open_serial(&self, port: &str) -> bool {
+    pub fn open_serial(self: &Arc<Self>, port: &str) -> bool {
+        match self.try_open_serial(port) {
+            Ok(()) => true,
+            Err(e) => {
+                self.log(&format!("serial connect failed on {port}: {e}"));
+                self.bus.emit("status", "Remote: Serial error");
+                false
+            }
+        }
+    }
+
+    fn try_open_serial(self: &Arc<Self>, port: &str) -> Result<(), String> {
         let port = port.trim();
         if port.is_empty() {
-            return false;
+            return Err("no port".into());
         }
         if self
             .serial
@@ -409,33 +492,49 @@ impl Host {
             .as_ref()
             .is_some_and(|l| l.port_name == port && l.is_open())
         {
-            return true;
+            return Ok(());
         }
-        let link = match SerialLink::open(port) {
-            Ok(l) => l,
-            Err(e) => {
-                self.log(&format!("serial connect failed on {port}: {e}"));
-                self.bus.emit("status", "Remote: Serial error");
-                return false;
-            }
-        };
+        let link = SerialLink::open(port).map_err(|e| e.to_string())?;
         let bus = self.bus.clone();
         link.on_line(move |line| {
             bus.emit_level("remote", &format!("RX: {line}"), "debug");
         });
-        let bus = self.bus.clone();
+        let host = Arc::downgrade(self);
+        let name = port.to_owned();
         link.on_lost(move |why| {
-            bus.emit(
-                "remote",
-                &format!("ERR: serial port lost ({why}) — reconnect it in Connection"),
-            );
-            bus.emit("status", "Remote: Serial lost");
+            if let Some(h) = host.upgrade() {
+                h.serial_lost(&name, why);
+            }
         });
         let old = self.serial.lock().unwrap().replace(Arc::new(link));
         drop(old);
         self.log(&format!("serial connected on {port}"));
         self.bus.emit("status", "Remote: Serial connected");
-        true
+        Ok(())
+    }
+
+    /// Runs on the dead link's reader thread, so the work (which drops
+    /// that link) goes to a thread of its own.
+    fn serial_lost(self: &Arc<Self>, port: &str, why: &str) {
+        self.bus.emit(
+            "remote",
+            &format!("ERR: serial port {port} lost ({why}) — reconnecting"),
+        );
+        self.bus.emit("status", "Remote: Serial lost");
+        if self.reconnecting.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let host = Arc::downgrade(self);
+        let port = port.to_owned();
+        std::thread::Builder::new()
+            .name("SerialReconnect".into())
+            .spawn(move || {
+                reconnect_serial(&host, &port);
+                if let Some(h) = host.upgrade() {
+                    h.reconnecting.store(false, Ordering::SeqCst);
+                }
+            })
+            .expect("spawn the serial reconnect");
     }
 
     pub(crate) fn connect_serial(self: &Arc<Self>, port: &str) {
@@ -468,7 +567,7 @@ impl Host {
             .expect("spawn the port probe");
     }
 
-    pub(crate) fn finish_serial_connect(&self, port: &str) {
+    pub(crate) fn finish_serial_connect(self: &Arc<Self>, port: &str) {
         if self.open_serial(port) {
             self.config.lock().unwrap().serial_port = port.to_owned();
             self.save_config();
@@ -1164,5 +1263,41 @@ mod tests {
             missing.is_empty(),
             "not routed as dashboard commands: {missing:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::*;
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_lost_port_is_tried_alone_once_it_is_back() {
+        let mut seen: HashSet<String> = names(&["COM1"]).into_iter().collect();
+        assert_eq!(
+            reconnect_candidates("COM6", &names(&["COM1"]), &mut seen),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            reconnect_candidates("COM6", &names(&["COM1", "COM6"]), &mut seen),
+            ["COM6"]
+        );
+    }
+
+    #[test]
+    fn only_new_ports_are_probed_and_each_once() {
+        let mut seen: HashSet<String> = names(&["COM1"]).into_iter().collect();
+        let now = names(&["COM1", "COM9", "COM10"]);
+        assert_eq!(
+            reconnect_candidates("COM6", &now, &mut seen),
+            ["COM9", "COM10"]
+        );
+        assert!(reconnect_candidates("COM6", &now, &mut seen).is_empty());
+        // COM9 goes away and comes back: new again.
+        reconnect_candidates("COM6", &names(&["COM1", "COM10"]), &mut seen);
+        assert_eq!(reconnect_candidates("COM6", &now, &mut seen), ["COM9"]);
     }
 }
