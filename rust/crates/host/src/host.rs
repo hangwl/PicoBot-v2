@@ -3,7 +3,7 @@
 //! (files, serial handshakes, joining threads) runs on the
 //! `DashboardCommands` thread, in order.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -23,9 +23,9 @@ use picobot_core::rotation::resolve_coord;
 use picobot_core::skills::Skill;
 use picobot_core::timing::monotonic;
 use picobot_core::vision::Region;
-use picobot_io::hid::RELEASE_ALL;
+use picobot_io::hid::{HELD, RELEASE_ALL};
 use picobot_io::ocr::{find_model, TitleReader};
-use picobot_io::serial::{discover_data_port, find_data_port, list_ports, SerialLink};
+use picobot_io::serial::{discover_data_port, find_data_port, list_ports, SendError, SerialLink};
 use serde_json::{json, Map, Value};
 
 use crate::botbody::{epoch, spawn_bot, spawn_measure, BotRun};
@@ -141,6 +141,15 @@ fn reconnect_candidates(want: &str, now: &[String], seen: &mut HashSet<String>) 
     let fresh: Vec<String> = now.iter().filter(|p| !seen.contains(*p)).cloned().collect();
     seen.extend(fresh.iter().cloned());
     fresh
+}
+
+/// `left|page up|mouse:left` → its names (a key name may hold a comma).
+fn parse_held(data: &str) -> BTreeSet<String> {
+    data.split('|')
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn port_names() -> Vec<String> {
@@ -466,6 +475,81 @@ impl Host {
 
     pub(crate) fn serial_port(&self) -> String {
         self.config.lock().unwrap().serial_port.clone()
+    }
+
+    /// What the Pico says it holds (keys by name, buttons as
+    /// `mouse:<name>`), or None when its firmware can't say.
+    pub(crate) fn pico_held(&self) -> Result<Option<BTreeSet<String>>, String> {
+        let link = self.serial_link().ok_or("no serial port")?;
+        match link.query(HELD, Duration::from_millis(1500)) {
+            Ok(data) => Ok(Some(parse_held(&data))),
+            Err(SendError::Rejected) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// After a run: let go of whatever the Pico still holds that no
+    /// dashboard finger is holding.
+    pub(crate) fn release_strays(&self) {
+        let Ok(Some(held)) = self.pico_held() else {
+            return;
+        };
+        let fingers = self.clients.held_keys();
+        let strays: Vec<String> = held.into_iter().filter(|k| !fingers.contains(k)).collect();
+        if strays.is_empty() {
+            return;
+        }
+        self.bus.emit_level(
+            "remote",
+            &format!(
+                "the Pico still held {} after the run — releasing",
+                strays.join(", ")
+            ),
+            "warn",
+        );
+        let Some(link) = self.serial_link() else {
+            return;
+        };
+        for key in strays {
+            let payload = match key.strip_prefix("mouse:") {
+                Some(button) => format!("hid|mouse|up|{button}"),
+                None => format!("hid|key|up|{key}"),
+            };
+            let _ = link.send_acked(&payload, Duration::from_millis(1500));
+        }
+    }
+
+    /// `host|held`: what the Pico holds, as the dashboard's answer.
+    fn report_held(&self) {
+        match self.pico_held() {
+            Ok(Some(held)) if held.is_empty() => self.bus.emit("notify", "The Pico holds no keys."),
+            Ok(Some(held)) => self.bus.emit(
+                "notify",
+                &format!("The Pico holds: {}", held.into_iter().collect::<Vec<_>>().join(", ")),
+            ),
+            Ok(None) => self.bus.emit(
+                "error",
+                "This Pico firmware can't report held keys — copy the current CIRCUITPY/code.py to it.",
+            ),
+            Err(e) => self.bus.emit("error", &format!("held-key check failed: {e}")),
+        }
+    }
+
+    /// `host|release_all`: the firmware lets go of every key and button.
+    fn release_pico(&self) {
+        let sent = self
+            .serial_link()
+            .ok_or_else(|| "no serial port".to_owned())
+            .and_then(|l| {
+                l.send_acked(RELEASE_ALL, Duration::from_millis(1500))
+                    .map_err(|e| e.to_string())
+            });
+        match sent {
+            Ok(()) => self
+                .bus
+                .emit("notify", "Released every key and button on the Pico."),
+            Err(e) => self.bus.emit("error", &format!("release failed: {e}")),
+        }
     }
 
     /// Open `port`, keeping the current link until the new one is up.
@@ -834,6 +918,8 @@ impl Host {
             "config|get" => self.send_config(),
             "host|state" => self.send_host_state(),
             "host|snapshot" => self.snapshot(),
+            "host|held" => self.report_held(),
+            "host|release_all" => self.release_pico(),
             _ if msg.starts_with("host|serial|") => self.connect_serial(&arg(2)),
             _ if msg.starts_with("host|window|") => self.set_window(&arg(2)),
             _ if msg.starts_with("dash|fps|") => self.set_fps(&arg(2)),
@@ -1299,5 +1385,15 @@ mod reconnect_tests {
         // COM9 goes away and comes back: new again.
         reconnect_candidates("COM6", &names(&["COM1", "COM10"]), &mut seen);
         assert_eq!(reconnect_candidates("COM6", &now, &mut seen), ["COM9"]);
+    }
+
+    #[test]
+    fn held_replies_split_on_bars_not_commas() {
+        let held = parse_held("left|,|page up|mouse:left");
+        assert_eq!(
+            held.into_iter().collect::<Vec<_>>(),
+            [",", "left", "mouse:left", "page up"]
+        );
+        assert!(parse_held("").is_empty());
     }
 }

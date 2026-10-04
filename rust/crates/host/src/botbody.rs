@@ -588,6 +588,7 @@ fn run_bot(h: &Arc<Host>, mut body: HostBody) -> Result<String, String> {
     let ran = catch_unwind(AssertUnwindSafe(|| Machine::default().run(&mut body)));
     body.log("Smart bot stopped");
     body.hid.release_all();
+    h.release_strays();
     if let Err(e) = body.state.reach.save(true) {
         h.bus.emit("error", &format!("saving reach failed: {e}"));
     }
@@ -662,6 +663,7 @@ pub fn spawn_measure(host: &Arc<Host>, mode: Mode, only: Option<String>) -> Resu
             );
             m.run(&mut body, mode, only.as_deref());
             body.hid.release_all();
+            h.release_strays();
             h.put_reach(body.state.reach.clone());
             h.set_bot_viz(None);
         })

@@ -74,12 +74,15 @@ impl std::error::Error for SendError {}
 /// that answers with a bare ACK).
 #[derive(Default)]
 struct Pending {
-    by_seq: HashMap<u32, SyncSender<bool>>,
+    by_seq: HashMap<u32, SyncSender<Reply>>,
     order: VecDeque<u32>,
 }
 
+/// ACK or NACK, and whatever the firmware put after the number.
+type Reply = (bool, String);
+
 impl Pending {
-    fn resolve(&mut self, seq: Option<u32>, ok: bool) {
+    fn resolve(&mut self, seq: Option<u32>, reply: Reply) {
         let seq = match seq {
             Some(s) => {
                 self.order.retain(|x| *x != s);
@@ -91,7 +94,7 @@ impl Pending {
             },
         };
         if let Some(tx) = self.by_seq.remove(&seq) {
-            let _ = tx.try_send(ok); // the sender may have given up
+            let _ = tx.try_send(reply); // the sender may have given up
         }
     }
 
@@ -103,7 +106,7 @@ impl Pending {
     /// Wake every waiter with a failure (the port is gone).
     fn fail_all(&mut self) {
         for (_, tx) in self.by_seq.drain() {
-            let _ = tx.try_send(false);
+            let _ = tx.try_send((false, String::new()));
         }
         self.order.clear();
     }
@@ -235,16 +238,22 @@ impl SerialLink {
 
     /// Send a payload and wait up to `timeout` for its ACK.
     pub fn send_acked(&self, payload: &str, timeout: Duration) -> Result<(), SendError> {
+        self.send_inner(payload, Some(timeout)).map(|_| ())
+    }
+
+    /// Send a payload and return the data its ACK carries (`ACK <seq>
+    /// <data>`); needs v2 firmware, older replies carry none.
+    pub fn query(&self, payload: &str, timeout: Duration) -> Result<String, SendError> {
         self.send_inner(payload, Some(timeout))
     }
 
-    fn send_inner(&self, payload: &str, wait: Option<Duration>) -> Result<(), SendError> {
+    fn send_inner(&self, payload: &str, wait: Option<Duration>) -> Result<String, SendError> {
         let body = payload.trim_end_matches('\n');
         if body.starts_with("hello") {
             // Handshakes are answered with PICO_READY, never an ACK.
-            return self.write_raw(body);
+            return self.write_raw(body).map(|()| String::new());
         }
-        let (tx, rx): (SyncSender<bool>, Receiver<bool>) = sync_channel(1);
+        let (tx, rx): (SyncSender<Reply>, Receiver<Reply>) = sync_channel(1);
         let seq = {
             let mut next = self.shared.next_seq.lock().unwrap();
             *next = *next % 999_999 + 1;
@@ -271,13 +280,15 @@ impl SerialLink {
             self.shared.pending.lock().unwrap().forget(seq);
             return Err(e);
         }
-        let Some(timeout) = wait else { return Ok(()) };
+        let Some(timeout) = wait else {
+            return Ok(String::new());
+        };
         let got = rx.recv_timeout(timeout);
         self.shared.pending.lock().unwrap().forget(seq);
         match got {
-            Ok(true) => Ok(()),
-            Ok(false) if !self.is_open() => Err(SendError::Closed),
-            Ok(false) => Err(SendError::Rejected),
+            Ok((true, data)) => Ok(data),
+            Ok((false, _)) if !self.is_open() => Err(SendError::Closed),
+            Ok((false, _)) => Err(SendError::Rejected),
             Err(_) => Err(SendError::Timeout),
         }
     }
@@ -298,15 +309,19 @@ impl Drop for SerialLink {
     }
 }
 
-/// `ACK 17` → (true, Some(17)); bare `NACK` → (false, None); else None.
-fn parse_reply(line: &str) -> Option<(bool, Option<u32>)> {
+/// `ACK 17 left|x` → (17, (true, "left|x")); bare `NACK` → (None,
+/// (false, "")); anything else → None. Data comes only after a number.
+fn parse_reply(line: &str) -> Option<(Option<u32>, Reply)> {
     let (word, rest) = line.split_once(' ').unwrap_or((line, ""));
     let ok = match word {
         "ACK" => true,
         "NACK" => false,
         _ => return None,
     };
-    Some((ok, rest.trim().parse().ok()))
+    let (num, data) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+    let seq = num.parse().ok();
+    let data = if seq.is_some() { data.trim() } else { "" };
+    Some((seq, (ok, data.to_owned())))
 }
 
 fn reader_loop(shared: Arc<Shared>, mut reader: Box<dyn LineReader>) {
@@ -323,8 +338,8 @@ fn reader_loop(shared: Arc<Shared>, mut reader: Box<dyn LineReader>) {
                 if line.is_empty() {
                     continue;
                 }
-                if let Some((ok, seq)) = parse_reply(line) {
-                    shared.pending.lock().unwrap().resolve(seq, ok);
+                if let Some((seq, reply)) = parse_reply(line) {
+                    shared.pending.lock().unwrap().resolve(seq, reply);
                 } else if line.starts_with("PICO_READY") {
                     shared
                         .numbered
@@ -502,10 +517,21 @@ mod tests {
 
     #[test]
     fn replies_parse_with_and_without_numbers() {
-        assert_eq!(parse_reply("ACK 17"), Some((true, Some(17))));
-        assert_eq!(parse_reply("NACK 3"), Some((false, Some(3))));
-        assert_eq!(parse_reply("ACK"), Some((true, None)));
+        let r = |ok: bool, d: &str| (ok, d.to_owned());
+        assert_eq!(parse_reply("ACK 17"), Some((Some(17), r(true, ""))));
+        assert_eq!(parse_reply("NACK 3"), Some((Some(3), r(false, ""))));
+        assert_eq!(parse_reply("ACK"), Some((None, r(true, ""))));
         assert_eq!(parse_reply("PICO_READY v2"), None);
+    }
+
+    #[test]
+    fn numbered_replies_carry_data() {
+        let r = |ok: bool, d: &str| (ok, d.to_owned());
+        assert_eq!(
+            parse_reply("ACK 5 left|page up|,"),
+            Some((Some(5), r(true, "left|page up|,")))
+        );
+        assert_eq!(parse_reply("ACK x y"), Some((None, r(true, ""))));
     }
 
     #[test]
@@ -517,10 +543,10 @@ mod tests {
         p.order.push_back(1);
         p.by_seq.insert(2, b);
         p.order.push_back(2);
-        p.resolve(Some(2), false);
-        assert_eq!(rb.try_recv(), Ok(false));
-        p.resolve(None, true);
-        assert_eq!(ra.try_recv(), Ok(true));
+        p.resolve(Some(2), (false, String::new()));
+        assert_eq!(rb.try_recv(), Ok((false, String::new())));
+        p.resolve(None, (true, String::new()));
+        assert_eq!(ra.try_recv(), Ok((true, String::new())));
         assert!(p.by_seq.is_empty() && p.order.is_empty());
     }
 }

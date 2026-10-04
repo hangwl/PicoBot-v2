@@ -75,6 +75,12 @@ impl Clients {
             .unwrap_or_default()
     }
 
+    /// Keys any client's finger is holding down right now.
+    pub fn held_keys(&self) -> BTreeSet<String> {
+        let map = self.map.lock().unwrap();
+        map.values().flat_map(|c| c.held.iter().cloned()).collect()
+    }
+
     pub fn peer(&self, id: u64) -> String {
         self.map
             .lock()
@@ -173,6 +179,16 @@ mod tests {
         c.track_key(r.id, "key|up|alt");
         assert_eq!(c.unregister(r.id).into_iter().collect::<Vec<_>>(), ["left"]);
         assert!(c.unregister(r.id).is_empty());
+    }
+
+    #[test]
+    fn held_keys_join_every_clients_fingers() {
+        let c = Clients::default();
+        let (a, b) = (c.register("a"), c.register("b"));
+        c.track_key(a.id, "key|down|left");
+        c.track_key(b.id, "key|down|x");
+        c.track_key(b.id, "key|down|left");
+        assert_eq!(c.held_keys().into_iter().collect::<Vec<_>>(), ["left", "x"]);
     }
 
     #[test]

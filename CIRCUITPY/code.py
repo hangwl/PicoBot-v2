@@ -96,6 +96,12 @@ MOUSE_MAP = {
     'middle': Mouse.MIDDLE_BUTTON,
 }
 
+# Names for the "hid|held" reply (aliases like cmd/windows: the first wins).
+KEY_NAMES = {}
+for _name, _kc in KEY_MAP.items():
+    KEY_NAMES.setdefault(_kc, _name)
+BUTTON_NAMES = {btn: name for name, btn in MOUSE_MAP.items()}
+
 print("Pico HID Command Executor")
 
 try:
@@ -175,11 +181,25 @@ def release_everything():
             pass
 
 
-def reply(word, seq):
+def reply(word, seq, data=""):
+    # Data rides after the number only (a bare reply can't carry it).
+    line = word + (" " + seq if seq else "") + (" " + data if seq and data else "")
     try:
-        usb_cdc.data.write((word + (" " + seq if seq else "") + "\n").encode())
+        usb_cdc.data.write((line + "\n").encode())
     except Exception:
         pass
+
+
+def held_names():
+    """What is held, '|'-joined (',' is a key name): keys by name,
+    buttons as mouse:<name>."""
+    names = []
+    for key in held:
+        if isinstance(key, tuple):
+            names.append("mouse:" + BUTTON_NAMES.get(key[1], str(key[1])))
+        else:
+            names.append(KEY_NAMES.get(key, str(key)))
+    return "|".join(sorted(names))
 
 
 def run(parts):
@@ -266,6 +286,10 @@ def handle(command_line):
         seq, command_line = command_line[:colon], command_line[colon + 1:]
         watchdog_armed = True
     parts = command_line.split('|')
+    if command_line.lower() == 'hid|held':
+        commands_seen = True
+        reply("ACK", seq, held_names())
+        return
     # Handshake compatibility: "hello" or "hello|handshake"
     if parts[0].lower() == 'hello' and len(parts) <= 2:
         try:

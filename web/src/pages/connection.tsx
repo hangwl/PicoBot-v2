@@ -1,8 +1,9 @@
 // Setup → Connection.
 import { type AppState, send } from "../protocol";
-import { Field, val } from "../ui";
+import { Field, Reply, useReply, val } from "../ui";
 
 export function ConnectionPage({ s }: { s: AppState }) {
+  const [reply, act] = useReply(s);
   const ports = s.ports ?? [];
   const windows = s.windows ?? [];
   return (
@@ -41,6 +42,15 @@ export function ConnectionPage({ s }: { s: AppState }) {
         <button onClick={() => send("host|serial|auto")}>Find the Pico</button>
         <button onClick={() => send("host|state")}>Refresh</button>
       </div>
+      <div class="actions">
+        <button disabled={!s.serialOpen} onClick={() => act("host|held")}>
+          Check held keys
+        </button>
+        <button disabled={!s.serialOpen} onClick={() => act("host|release_all")}>
+          Release all keys
+        </button>
+      </div>
+      <Reply reply={reply} />
     </div>
   );
 }
