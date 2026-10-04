@@ -95,7 +95,9 @@ impl AppConfig {
         o.insert("serial_port".into(), self.serial_port.clone().into());
         o.insert("ws_port".into(), self.ws_port.into());
         o.insert("http_port".into(), self.http_port.into());
-        o.insert("bind".into(), self.bind.clone().into());
+        if self.bind != "auto" {
+            o.insert("bind".into(), self.bind.clone().into());
+        }
         o.insert("view_fps".into(), self.view_fps.into());
         o.insert("ws_tls".into(), self.ws_tls.into());
         o.insert("ws_certfile".into(), self.ws_certfile.clone().into());
@@ -318,6 +320,13 @@ pub struct BotConfig {
     pub buff_interval_seconds: f64,
     /// Telegram status message every this many minutes while running (0 = off).
     pub heartbeat_minutes: f64,
+    /// Stop the run after about this long (0 = never); the exact limit is
+    /// drawn per run, ±15%.
+    pub session_max_minutes: f64,
+    /// Rest roughly every this many minutes of farming (0 = never)...
+    pub break_every_minutes: f64,
+    /// ...for about this long.
+    pub break_minutes: f64,
     pub jump_key: String,
     pub up_jump_skill_key: Option<String>,
     pub up_jump_skill_cooldown: f64,
@@ -407,6 +416,9 @@ impl Default for BotConfig {
             buff_keys: Vec::new(),
             buff_interval_seconds: 60.0,
             heartbeat_minutes: 30.0,
+            session_max_minutes: 0.0,
+            break_every_minutes: 0.0,
+            break_minutes: 0.0,
             jump_key: "alt".into(),
             up_jump_skill_key: None,
             up_jump_skill_cooldown: 3.0,
@@ -547,6 +559,9 @@ impl BotConfig {
         for (name, slot) in [
             ("buff_interval_seconds", &mut cfg.buff_interval_seconds),
             ("heartbeat_minutes", &mut cfg.heartbeat_minutes),
+            ("session_max_minutes", &mut cfg.session_max_minutes),
+            ("break_every_minutes", &mut cfg.break_every_minutes),
+            ("break_minutes", &mut cfg.break_minutes),
             ("up_jump_skill_cooldown", &mut cfg.up_jump_skill_cooldown),
             ("nav_up_flash_px", &mut cfg.nav_up_flash_px),
             ("nav_rope_lift_px", &mut cfg.nav_rope_lift_px),
@@ -770,6 +785,9 @@ impl BotConfig {
             "buff_keys": self.buff_keys,
             "buff_interval_seconds": self.buff_interval_seconds,
             "heartbeat_minutes": self.heartbeat_minutes,
+            "session_max_minutes": self.session_max_minutes,
+            "break_every_minutes": self.break_every_minutes,
+            "break_minutes": self.break_minutes,
             "jump_key": self.jump_key,
             "up_jump_skill_key": self.up_jump_skill_key,
             "up_jump_skill_cooldown": self.up_jump_skill_cooldown,
