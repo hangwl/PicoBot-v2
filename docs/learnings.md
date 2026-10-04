@@ -816,3 +816,20 @@ report descriptors). Saved in `firmware/phase-e/k75-descriptors.txt`.
 - Not tested live: whether a red-band arrow from a spinning animation
   still reads through `ArrowWatch`, and whether any red scenery now gets
   past the near-pure rule inside the strip.
+
+- **Edge aim, live** (same map, 10m41s against 9m39s with middle aim):
+  18% of legs missed against 35%, 79 visits against 64, double flashes
+  32 of 44 landed against 9 of 18, flashes 4 of 7 against 6 of 22 (the
+  planner now crosses the middle-tier gaps with double flashes). Most of
+  the remaining misses are the overshoot to the top tier: a double flash
+  from the middle platform to the left one (planned 99→43) comes down on
+  row 42 above it, because the planner assumes a 4px rise. Left alone on
+  purpose. `edge` is now the default.
+- **Two sweep tests changed with it**: the plan for the middle-tier
+  platform from the floor's right end now lifts to the top tier, crosses
+  it with two double flashes and drops onto the platform, instead of
+  flashing along the middle tier — landing at the far end leaves a walk to
+  the next takeoff, so the lift route is the cheaper one. "Never lift up
+  to come back down" is therefore tested as "the next move after a lift
+  never drops", and the zigzag snake as "a new row is entered at the end
+  nearer where the last sweep left off".

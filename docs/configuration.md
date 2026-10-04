@@ -159,12 +159,12 @@ fps. The `"bot"` block is `BotConfig` (`rust/crates/core/src/config.rs`):
   `weave_double_chance` is the chance a firing window casts two;
   `target_attacks_per_min` (default 0 = off) steers those odds toward a
   rate. Setup → Tuning → Attacks edits them (`attacks|set`).
-- `nav_carry_aim` (`middle` | `edge`; default `middle`) — where flashes
-  are aimed on the platform they land on: the middle, or taken off as near
-  the source platform's edge as the walk allows (backed off only to land
-  7px short of the target's far end), so the flight crosses the gap while
-  the character is still high. A missed leg logs its path (`arc:`) and a
-  landed flash its too (`Landed …`), to compare the two.
+- `nav_carry_aim` (`edge` | `middle`; default `edge`) — where flashes
+  are aimed on the platform they land on: taken off as near the source
+  platform's edge as the walk allows (backed off only to land 7px short of
+  the target's far end), so the flight crosses the gap while the character
+  is still high; or at the platform's middle (the old behaviour). A missed
+  leg logs its path (`arc:`) and a landed flash its own (`Landed …`).
 - `move_miss_chance` (0–1; default 0) — the odds a flash move skips its
   last mid-air re-press so it genuinely misses (try 0.01–0.03). Never
   taught to the move-reach model. Setup → Tuning → Attacks edits it.

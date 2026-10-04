@@ -443,7 +443,7 @@ impl Default for BotConfig {
             rope_penalty: 5.0,
             walk_cost_factor: 1.0,
             patrol_policy: PatrolPolicy::Weighted,
-            nav_carry_aim: CarryAim::Middle,
+            nav_carry_aim: CarryAim::Edge,
             patrol_weight_temp: 1.0,
             patrol_mode: PatrolMode::Sweep,
             sweep_reach_px: 12.0,
@@ -631,7 +631,7 @@ impl BotConfig {
             cfg.patrol_mode = m;
         }
         if let Some(v) = get("nav_carry_aim") {
-            cfg.nav_carry_aim = CarryAim::parse(&as_string(v)).unwrap_or(CarryAim::Middle);
+            cfg.nav_carry_aim = CarryAim::parse(&as_string(v)).unwrap_or(CarryAim::Edge);
         }
         if let Some(v) = get("patrol_policy") {
             cfg.patrol_policy =

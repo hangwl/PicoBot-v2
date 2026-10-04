@@ -65,9 +65,9 @@ pub enum CarryAim {
     /// Taken off as near the source's edge as the walk allows, backed off
     /// only as far as keeps it short of the far end: the flight crosses
     /// the gap while the character is still high.
+    #[default]
     Edge,
     /// Aimed at the landing platform's middle.
-    #[default]
     Middle,
 }
 
@@ -265,7 +265,7 @@ impl Default for GraphOptions {
             prefer_jumps: true,
             rope_lift_cost: 1.5,
             fixed_carry: true,
-            carry_aim: CarryAim::Middle,
+            carry_aim: CarryAim::Edge,
         }
     }
 }

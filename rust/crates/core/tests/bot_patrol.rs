@@ -647,15 +647,17 @@ fn castle_gate_sweeps_keep_off_the_edges_and_never_climb_to_come_down() {
                 (MoveKind::Walk, entry, exit),
                 "seed {seed}: {legs:?}"
             );
-            // No rope lift up only to come back down before the sweep.
+            // No rope lift only to come straight back down: the next move
+            // after it (walks aside) never ends lower than the lift. A lift
+            // that is followed by travel along the higher tier is a route.
             for (i, l) in legs.iter().enumerate() {
                 if l.kind != MoveKind::RopeLift {
                     continue;
                 }
-                let lower_after = legs[i + 1..].iter().any(|m| m.y1 > l.y1 + 1.0);
+                let next = legs[i + 1..].iter().find(|m| m.kind != MoveKind::Walk);
                 assert!(
-                    !lower_after,
-                    "seed {seed}: lifted to {} then dropped: {legs:?}",
+                    next.is_none_or(|m| m.y1 <= l.y1 + 1.0),
+                    "seed {seed}: lifted to {} then dropped at once: {legs:?}",
                     l.y1
                 );
             }
@@ -678,14 +680,28 @@ fn zigzag_sweeps_the_map_row_by_row() {
             .map(|s| s.sweep.unwrap().0 .1.round())
             .collect();
         assert_eq!(rows, [69.0, 56.0, 56.0, 42.0, 42.0], "seed {seed}");
-        // Each row picks up where the last one left off, so it snakes.
-        let ends: Vec<(f64, f64)> = p
+        // A new row picks up where the last one left off: it is entered at
+        // the end of its platform nearer the previous sweep's exit.
+        let g = b.graph();
+        let sweeps: Vec<((f64, f64), f64)> = p
             .plan
             .iter()
-            .map(|s| s.sweep.map(|(a, b)| (a.0, b.0)).unwrap())
+            .map(|s| s.sweep.map(|(a, e)| ((a.0, a.1), e.0)).unwrap())
             .collect();
-        let right = |(a, b): (f64, f64)| b > a;
-        assert_ne!(right(ends[0]), right(ends[1]), "seed {seed}: {ends:?}");
-        assert_ne!(right(ends[2]), right(ends[3]), "seed {seed}: {ends:?}");
+        for k in [1, 3] {
+            let (entry, _) = sweeps[k];
+            let prev_exit = sweeps[k - 1].1;
+            let plat = g.platforms[g.locate(entry.0, entry.1).unwrap()];
+            let nearer = if (plat.x0 - prev_exit).abs() < (plat.x1 - prev_exit).abs() {
+                plat.x0
+            } else {
+                plat.x1
+            };
+            assert!(
+                (entry.0 - nearer).abs() <= 12.0,
+                "seed {seed}: sweep {k} entered at {} (nearer end {nearer}) after leaving at {prev_exit}",
+                entry.0
+            );
+        }
     }
 }
