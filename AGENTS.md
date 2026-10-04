@@ -1,7 +1,8 @@
 # AGENTS.md — working notes for agents
 
-Learning-oriented MapleStory private-server bot: a Raspberry Pi Pico /
-CircuitPython device relays real HID input; a Rust host (`rust/`) watches
+Learning-oriented MapleStory private-server bot: a Raspberry Pi Pico
+(TinyUSB firmware, `firmware/phase-e/k75`; CircuitPython in `CIRCUITPY/`
+as the fallback) relays real HID input; a Rust host (`rust/`) watches
 the minimap and works a perception-driven farming rotation. The original
 Python host is kept on the `legacy/python` branch (not maintained). Docs
 live in `docs/`; `README.md` is the landing page.
@@ -163,7 +164,16 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **Profile skills**: a profile with a `skills` entry (even `{}`) owns its
   kit; without one it inherits the global book. Anything that changes the
   kit re-broadcasts `skills`/`config`; reads never seed a profile.
-- **Pico boots hidden**: `boot.py` hides the CIRCUITPY drive, REPL and
+- **TinyUSB firmware** (`firmware/phase-e/k75`, built in WSL with
+  `build.sh`; the host reaches it with `serial_port: "hid"`): a K75
+  clone, three HID interfaces, the line protocol over its vendor
+  channel, no COM port and no stock-boot mode — `maintenance` reboots to
+  BOOTSEL. Keep `keymap.c` equal to `code.py`'s `KEY_MAP` (a test checks
+  it), and every reply buffer terminated (an empty `hid|held` once
+  answered with stack residue). Keep the real K75 unplugged: its vendor
+  channel has the same page, and the transport refuses to open when two
+  devices match.
+- **Pico boots hidden** (CircuitPython fallback): `boot.py` hides the CIRCUITPY drive, REPL and
   MIDI and applies `usb_ids.py`; edit the firmware only after
   `pico_maintenance` (an `nvm` flag, one stock boot). Never ship a
   `code.py` without the `maintenance` command — the board can't be
