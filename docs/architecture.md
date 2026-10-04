@@ -70,6 +70,14 @@ Wire protocol (one line each way):
   key-up is tried up to 3 times and the key stays tracked until one is
   confirmed; if `release_all` can't confirm every key-up it ends with
   `hid|release_all`.
+- Key leases: the bot's key-downs carry a lease
+  (`hid|key|down|<name>|3000`, `KEY_LEASE`); the firmware lets go of a
+  leased key (or mouse button) not renewed or released in time. The bot
+  thread renews held keys (a repeated leased down — the OS sees nothing)
+  from its sleeps and long holds, so a hung bot thread loses its keys
+  within 3s even while the reader's keepalives flow. A down without a
+  lease (dashboard keys) holds until its up; older firmware ignores the
+  field.
 - The reader only reads bytes already waiting: reader and writer share
   one synchronous Windows handle, and a read left blocking would hold
   every write behind it. Round trips are ~4 ms.

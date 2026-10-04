@@ -16,7 +16,7 @@ use picobot_core::maps::{MapEntry, PlayerRule};
 use picobot_core::minimap::{MinimapAnalyzer, PlayerTracker, RegionSource};
 use picobot_core::timing::{monotonic, new_session};
 use picobot_core::vision::Image;
-use picobot_io::hid::HidController;
+use picobot_io::hid::{HidController, KEY_LEASE};
 
 use crate::evidence::{merged, pixel_stats, Evidence};
 use crate::feed::Eyes;
@@ -264,6 +264,20 @@ impl HostBody {
         self.map = Some((key, entry.clone()));
         entry
     }
+
+    /// A stop-aware sleep that keeps held keys' leases alive; true when
+    /// woken by the stop.
+    fn wait_renewing(&mut self, secs: f64) -> bool {
+        let every = self.hid.renew_every().unwrap_or(f64::INFINITY);
+        let slices = (secs / every).ceil().max(1.0) as usize;
+        for _ in 0..slices {
+            self.hid.renew();
+            if self.stop.wait(secs / slices as f64) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl Body for HostBody {
@@ -417,7 +431,7 @@ impl Body for HostBody {
 
     fn sleep(&mut self, secs: f64) -> bool {
         self.publish();
-        let woke = self.stop.wait(secs);
+        let woke = self.wait_renewing(secs);
         if let Some(skills) = self.host.take_pending_skills() {
             self.state.pending_skills = Some(skills);
         }
@@ -510,7 +524,8 @@ fn make_body(host: &Arc<Host>, stop: Arc<Stop>) -> Result<HostBody, String> {
         },
         Some(Box::new(picobot_core::timing::key_gap)),
         monotonic,
-    );
+    )
+    .with_lease(KEY_LEASE);
     let state = BotState::new(&cfg, host.reach_clone(), None);
     Ok(HostBody::new(
         host.clone(),

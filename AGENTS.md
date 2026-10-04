@@ -161,7 +161,10 @@ what was tried and what was learned in `docs/learnings.md` instead.
 - **HID wire safety**: with v2 firmware (`PICO_READY v2`) commands are
   numbered (`<seq>:hid|…` → `ACK <seq>`) and the firmware releases
   everything on disconnect or after 2s of host silence (the serial reader
-  sends `ka` when idle); older firmware gets plain commands. Never send HID without
+  sends `ka` when idle); older firmware gets plain commands. Bot
+  key-downs are leased (`KEY_LEASE`, 3s) and renewed from the bot
+  thread's sleeps — a long wait with keys held must go through
+  `Body::sleep` (or `HidController::hold`). Never send HID without
   going through `SerialLink`, and never drop a key-*up*. The serial reader
   only reads bytes already waiting — a blocking read holds every write.
 - **Landing = takeoff + steady on a platform** (`Navigator::land`); an
