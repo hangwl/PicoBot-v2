@@ -75,8 +75,31 @@ rust\target\release\picobot.exe --root . --notify-test               # one Teleg
   thin. New bot behaviour gets a sim test.
 - Event levels: `hid`/serial chatter is `debug`; think before emitting
   chatty kinds at `info`.
-- `CIRCUITPY/` is the Pico firmware (`code.py`). Changes take effect
-  only once copied onto the Pico's CIRCUITPY drive.
+- `CIRCUITPY/` is the Pico firmware (`code.py`, `boot.py`). Changes take
+  effect only once copied onto the Pico's CIRCUITPY drive (see
+  [Pico firmware](#pico-firmware)).
+
+## Pico firmware
+
+`boot.py` runs before USB starts. A normal boot leaves the board with
+one data port (no REPL), no CIRCUITPY drive, a keyboard and (unless
+`ENABLE_MOUSE = False`) a mouse, and — if `usb_ids.py` exists — a chosen
+USB identity. Copy `usb_ids.example.py` to `usb_ids.py` (gitignored) and
+fill in the VID/PID and strings of a keyboard you own (Device Manager →
+Details → Hardware Ids). This narrows what Windows sees; the CircuitPython
+composite layout and the serial interface are still there.
+
+**Editing the firmware** (the drive is hidden in a normal boot): jumper
+`GP15` (physical pin 20) to any GND pin, plug the Pico in or press reset,
+and it boots stock — CIRCUITPY drive, REPL, default IDs. Edit, remove the
+jumper, reset. A bad `boot.py` can't lock you out this way; if the board
+doesn't run at all, hold BOOTSEL while plugging in and reflash CircuitPython
+(the UF2 from circuitpython.org), then copy the files back.
+
+First flash of this `boot.py`: copy it (and `usb_ids.py`) to the drive as
+usual, then reset. With the jumper on, the drive stays; without it,
+the drive disappears on that reset. Nothing on the host changes: it finds
+the single port by the same `hello|handshake` probe.
 
 ## Debug frame captures
 

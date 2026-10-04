@@ -62,7 +62,7 @@ Wire protocol (one line each way):
   numbered command or `ka`) — when nothing has arrived for 2s while
   anything is held: a crashed or hung host never leaves a key down.
   On the Pico itself: everything is released at startup and when
-  `code.py` exits (a crash or Ctrl-C), a hardware watchdog (4s,
+  `code.py` exits (a crash, or Ctrl-C in maintenance boot), a hardware watchdog (4s,
   `HW_WATCHDOG`) resets a hung board, and auto-reload is off so saving a
   file to CIRCUITPY can't restart it mid-hold (reset to load an edit).
 - `HidController` counts a key as held from the moment it tries to press
