@@ -67,3 +67,6 @@ desktop.ini
 
 # Key-timing recordings (key_timing example)
 /rust/*.csv
+
+# Built CircuitPython images
+/firmware/*.uf2
