@@ -439,55 +439,61 @@ pub fn list_ports() -> Vec<(String, String)> {
 /// `exclude` — Windows ports are exclusive, so the one in use can't be
 /// probed anyway.
 pub fn discover_data_port(exclude: Option<&str>, handshake_timeout: Duration) -> Option<String> {
-    for (name, _) in list_ports() {
-        if Some(name.as_str()) == exclude {
-            continue;
+    let names: Vec<String> = list_ports()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| Some(name.as_str()) != exclude)
+        .collect();
+    find_data_port(&names, handshake_timeout)
+}
+
+/// The first of `names` that answers as the Pico's DATA port.
+pub fn find_data_port(names: &[String], handshake_timeout: Duration) -> Option<String> {
+    names
+        .iter()
+        .find(|name| is_data_port(name, handshake_timeout))
+        .cloned()
+}
+
+fn is_data_port(name: &str, handshake_timeout: Duration) -> bool {
+    let Ok(mut port) = serialport::new(name, BAUD)
+        .timeout(Duration::from_millis(200))
+        .open()
+    else {
+        return false;
+    };
+    let _ = port.write_data_terminal_ready(false);
+    std::thread::sleep(Duration::from_millis(50));
+    let _ = port.write_data_terminal_ready(true);
+    let mut reader = PortReader {
+        port,
+        buf: Vec::new(),
+    };
+    let probe = |send: bool, r: &mut PortReader| -> Option<bool> {
+        if send {
+            let _ = r.port.write_all(b"hello|handshake\n");
+            let _ = r.port.flush();
         }
-        let Ok(mut port) = serialport::new(&name, BAUD)
-            .timeout(Duration::from_millis(200))
-            .open()
-        else {
-            continue;
-        };
-        let _ = port.write_data_terminal_ready(false);
-        std::thread::sleep(Duration::from_millis(50));
-        let _ = port.write_data_terminal_ready(true);
-        let mut reader = PortReader {
-            port,
-            buf: Vec::new(),
-        };
-        let probe = |send: bool, r: &mut PortReader| -> Option<bool> {
-            if send {
-                let _ = r.port.write_all(b"hello|handshake\n");
-                let _ = r.port.flush();
+        let end = Instant::now() + handshake_timeout;
+        while Instant::now() < end {
+            let Ok(Some(line)) = r.read_line() else {
+                continue;
+            };
+            let lower = line.to_lowercase();
+            if lower.contains("circuitpython") || lower.contains("repl") || lower.starts_with(">>>")
+            {
+                return Some(false); // the console, not DATA
             }
-            let end = Instant::now() + handshake_timeout;
-            while Instant::now() < end {
-                let Ok(Some(line)) = r.read_line() else {
-                    continue;
-                };
-                let lower = line.to_lowercase();
-                if lower.contains("circuitpython")
-                    || lower.contains("repl")
-                    || lower.starts_with(">>>")
-                {
-                    return Some(false); // the console, not DATA
-                }
-                if line.starts_with("PICO_READY") {
-                    return Some(true);
-                }
+            if line.starts_with("PICO_READY") {
+                return Some(true);
             }
-            None
-        };
-        let found = match probe(false, &mut reader) {
-            Some(v) => v,
-            None => probe(true, &mut reader) == Some(true),
-        };
-        if found {
-            return Some(name);
         }
+        None
+    };
+    match probe(false, &mut reader) {
+        Some(v) => v,
+        None => probe(true, &mut reader) == Some(true),
     }
-    None
 }
 
 #[cfg(test)]

@@ -516,7 +516,8 @@ Telegram hears about hazards only: a hazard pause (other players, an
 unrecognized map, a loading screen) and runes (spotted with `rune_action:
 pause`, reached, or out of reach). Health checks only reach the log:
 every stop (with its reason and the run's summary), a failed start, a
-crash (caught; keys released), a lost serial port, the watchdog's three
+crash (caught; keys released), a lost serial port (which stops the run;
+the host reconnects on its own), the watchdog's three
 episodes — paused over 60 s, no player dot for 30 s, standing still for
 45 s while moving states run (each once per episode) — and a heartbeat
 line (map, state, uptime, visits, misses, skips, pauses) every
