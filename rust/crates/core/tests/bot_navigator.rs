@@ -166,6 +166,15 @@ fn a_slipped_up_flash_teaches_no_reach() {
 }
 
 #[test]
+fn a_missed_leg_logs_the_path_it_took() {
+    let mut b = no_rope(Sim::new(&[FLOOR, MID], (60.0, 100.0)));
+    b.up = 5.0;
+    let _ = nav(b.graph()).go(&mut b, (80.0, 84.0), 2, 40);
+    assert!(b.log_has("Missed up_flash"));
+    assert!(b.log_has("arc: 0."), "{:?}", b.logs);
+}
+
+#[test]
 fn short_real_reach_shrinks_the_model_and_gives_up() {
     let mut b = no_rope(Sim::new(&[FLOOR, MID], (60.0, 100.0)));
     b.up = 5.0;

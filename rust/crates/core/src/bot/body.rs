@@ -182,6 +182,8 @@ pub struct BotState {
     pub injected_miss: bool,
     /// A move measurement is running: nothing is skipped on purpose.
     pub measuring: bool,
+    /// The last move's polled positions: (seconds since the first poll, x, y).
+    pub last_flight: Vec<(f64, f64, f64)>,
     /// When each attack was cast, over the last `RATE_WINDOW_S`.
     pub attack_log: std::collections::VecDeque<f64>,
     /// Where attacks were cast on this map.
@@ -224,6 +226,7 @@ impl BotState {
             air_slack: None,
             injected_miss: false,
             measuring: false,
+            last_flight: Vec::new(),
             attack_log: Default::default(),
             heat: Default::default(),
             anchor_idx: 0,

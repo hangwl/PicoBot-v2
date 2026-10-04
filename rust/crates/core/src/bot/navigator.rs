@@ -59,6 +59,8 @@ fn takeoff_s(kind: MoveKind) -> f64 {
 }
 
 const POLL_S: f64 = 0.05;
+/// Polled positions kept per move for the miss log.
+const MAX_TRACE: usize = 80;
 
 pub fn legs_viz(legs: &[Leg]) -> Vec<LegViz> {
     legs.iter()
@@ -357,6 +359,8 @@ impl Navigator {
                 at(start),
                 at(pos)
             ));
+            let arc = arc_line(&body.state_ref().last_flight);
+            body.log(&format!("  arc: {arc}"));
             LegStatus::Failed
         }
     }
@@ -486,6 +490,21 @@ impl Navigator {
         takeoff: f64,
         timeout: f64,
     ) -> (Option<(f64, f64)>, bool) {
+        let mut trace = Vec::new();
+        let landed = self.land_traced(body, start, takeoff, timeout, &mut trace);
+        body.state().last_flight = trace;
+        landed
+    }
+
+    fn land_traced<B: Body + ?Sized>(
+        &self,
+        body: &mut B,
+        start: Option<(f64, f64)>,
+        takeoff: f64,
+        timeout: f64,
+        trace: &mut Vec<(f64, f64, f64)>,
+    ) -> (Option<(f64, f64)>, bool) {
+        let t0 = body.now();
         let polls = (timeout / POLL_S) as usize;
         let wait_takeoff = (takeoff / POLL_S) as usize;
         let away = |p: (f64, f64)| {
@@ -500,6 +519,9 @@ impl Navigator {
                 return (last, left);
             }
             let Some(p) = body.pos() else { continue };
+            if trace.len() < MAX_TRACE {
+                trace.push((body.now() - t0, p.0, p.1));
+            }
             left = left || away(p);
             if !moved {
                 moved = left || i >= wait_takeoff;
@@ -533,4 +555,19 @@ fn failure<B: Body + ?Sized>(body: &mut B) -> LegStatus {
     } else {
         LegStatus::Failed
     }
+}
+
+/// The polled path as `t(x,y)`, a repeated position shown once.
+fn arc_line(flight: &[(f64, f64, f64)]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut prev: Option<(i64, i64)> = None;
+    for &(t, x, y) in flight {
+        let at = (x.round() as i64, y.round() as i64);
+        if prev == Some(at) {
+            continue;
+        }
+        prev = Some(at);
+        out.push(format!("{:.2}({},{})", t, at.0, at.1));
+    }
+    out.join(" ")
 }
